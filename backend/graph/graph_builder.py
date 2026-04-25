@@ -194,7 +194,11 @@ class GraphBuilder:
                                (b:Host {hostname: $dst, investigation_id: $inv_id})
                     MERGE (a)-[:LATERAL_MOVED_TO {technique: $tech, timestamp: $ts,
                            investigation_id: $inv_id}]->(b)
-                    SET b.compromised = true, b.compromise_time = $ts""",
+                    SET b.compromised = true,
+                        b.compromise_time = CASE
+                            WHEN b.compromise_time IS NULL OR ($ts <> '' AND $ts < b.compromise_time) THEN $ts
+                            ELSE b.compromise_time
+                        END""",
                     {
                         "src": event.source_host, "dst": event.dest_host,
                         "tech": technique, "ts": event.timestamp,
@@ -376,18 +380,114 @@ class GraphBuilder:
 
     def get_graph_json(self, investigation_id: str) -> Dict:
         """Retrieve graph from Neo4j and return Sigma.js format."""
-        # Query all nodes and relationships for this investigation
+        self.investigation_id = investigation_id
+
         nodes_query = """
         MATCH (n {investigation_id: $inv_id})
-        RETURN labels(n) as labels, properties(n) as props
+        RETURN elementId(n) AS element_id, labels(n) as labels, properties(n) as props
         """
         edges_query = """
-         MATCH (a {investigation_id: $inv_id})-[r]->(b {investigation_id: $inv_id})
-        RETURN type(r) as rel_type, properties(r) as props,
+        MATCH (a {investigation_id: $inv_id})-[r {investigation_id: $inv_id}]->(b {investigation_id: $inv_id})
+        RETURN elementId(r) AS rel_id, type(r) as rel_type, properties(r) as props,
                properties(a) as src_props, labels(a) as src_labels,
                properties(b) as dst_props, labels(b) as dst_labels
         """
-        nodes = self.neo4j.run_query(nodes_query, {"inv_id": investigation_id})
-        edges = self.neo4j.run_query(edges_query, {"inv_id": investigation_id})
+        node_rows = self.neo4j.run_query(nodes_query, {"inv_id": investigation_id})
+        edge_rows = self.neo4j.run_query(edges_query, {"inv_id": investigation_id})
 
-        return {"nodes": nodes, "edges": edges, "investigation_id": investigation_id}
+        colors = {
+            "host": "#64748b",
+            "compromised": "#e11d48",
+            "dc": "#7c3aed",
+            "user": "#2563eb",
+            "technique": "#059669",
+            "default": "#6b7280",
+        }
+
+        def node_identity(labels: List[str], props: Dict[str, Any]) -> tuple[str, str, str]:
+            label_set = set(labels or [])
+            if "Host" in label_set:
+                hostname = props.get("hostname") or "unknown-host"
+                return f"host_{hostname}", hostname, "host"
+            if "User" in label_set:
+                username = props.get("username") or "unknown-user"
+                return f"user_{username}", username, "user"
+            if "Technique" in label_set:
+                tid = props.get("id") or "unknown-technique"
+                return f"tech_{tid}", f"{tid}\n{props.get('name', tid)}", "technique"
+            if "Process" in label_set:
+                pid = props.get("pid") or props.get("name") or "unknown-process"
+                return f"process_{pid}", props.get("name") or str(pid), "process"
+            if "File" in label_set:
+                path = props.get("path") or props.get("hash_sha256") or "unknown-file"
+                return f"file_{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:12]}", os.path.basename(str(path)), "file"
+            if "Network" in label_set:
+                dest = props.get("dest_ip") or props.get("dest_host") or "unknown-network"
+                return f"network_{dest}", str(dest), "network"
+            fallback = props.get("id") or props.get("name") or hashlib.sha1(str(props).encode("utf-8")).hexdigest()[:12]
+            return f"node_{fallback}", str(props.get("name") or fallback), "unknown"
+
+        graph_nodes: List[GraphNode] = []
+        seen_nodes = set()
+        for row in node_rows:
+            props = row.get("props") or {}
+            labels = row.get("labels") or []
+            node_id, label, node_type = node_identity(labels, props)
+            if node_id in seen_nodes:
+                continue
+            seen_nodes.add(node_id)
+
+            is_dc = bool(props.get("is_dc")) or ("Host" in labels and "DC" in str(label).upper())
+            compromised = bool(props.get("compromised"))
+            if node_type == "host" and is_dc:
+                color = colors["dc"]
+                size = 20
+            elif node_type == "host" and compromised:
+                color = colors["compromised"]
+                size = 15
+            elif node_type == "user":
+                color = colors["user"]
+                size = 10
+            elif node_type == "technique":
+                color = colors["technique"]
+                size = 12
+            else:
+                color = colors.get(node_type, colors["default"])
+                size = 10
+
+            metadata = dict(props)
+            metadata["labels"] = labels
+            graph_nodes.append(GraphNode(
+                id=node_id,
+                label=label,
+                node_type=node_type,
+                color=color,
+                size=size,
+                x=self._stable_position(node_id, "x"),
+                y=self._stable_position(node_id, "y"),
+                metadata=metadata,
+            ))
+
+        graph_edges: List[GraphEdge] = []
+        for idx, row in enumerate(edge_rows):
+            src_id, _, _ = node_identity(row.get("src_labels") or [], row.get("src_props") or {})
+            dst_id, _, _ = node_identity(row.get("dst_labels") or [], row.get("dst_props") or {})
+            rel_type = row.get("rel_type") or ""
+            props = row.get("props") or {}
+            edge_type = rel_type.lower()
+            graph_edges.append(GraphEdge(
+                id=f"edge_{row.get('rel_id') or idx}",
+                source=src_id,
+                target=dst_id,
+                label=props.get("technique") or props.get("label") or rel_type.lower(),
+                edge_type=edge_type,
+                color="#fb923c" if rel_type == "LATERAL_MOVED_TO" else "#a78bfa",
+                size=3 if rel_type == "LATERAL_MOVED_TO" else 1,
+                metadata=props,
+            ))
+
+        return AttackGraph(
+            investigation_id=investigation_id,
+            nodes=graph_nodes,
+            edges=graph_edges,
+        ).model_dump()
