@@ -1,5 +1,31 @@
 # RAPTOR Changelog
 
+## [1.3.0] - 2026-04-25
+
+### Added
+- Added `/api/v1/investigations` endpoint for recent case listing.
+- Added `/api/v1/health/detailed` endpoint with subsystem-level health for API, SQLite, Neo4j, Weaviate, and LLM config readiness.
+- Added upload guardrails for `/api/v1/investigate` (empty file rejection and max file size enforcement).
+- Added environment controls: `LLM_TIMEOUT_SECONDS`, `MAX_UPLOAD_BYTES`, `CORS_ALLOW_ORIGINS`, `CORS_ALLOW_CREDENTIALS`, `RAG_AUTO_INDEX`, and `RAPTOR_ALLOW_TEST_EMBEDDINGS`.
+- Added simulation confidence gating: simulation is blocked for LOW/UNKNOWN attribution confidence.
+
+### Changed
+- Hardened graph persistence to scope Host/User/Technique merges by `investigation_id`.
+- Hardened NLQ graph query execution with read-only query sanitization and investigation scoping enforcement.
+- Updated Weaviate container to `semitechnologies/weaviate:1.27.6` for compatibility with `weaviate-client>=4.4.0`.
+- Enabled `sentence-transformers` as a required backend dependency for embeddings/reranking.
+- Improved frontend operations UX with detailed subsystem status pills and recent investigation list loading.
+
+### Fixed
+- Fixed JSON parsing where `null` destination values could become string values and create fake graph hosts.
+- Fixed parser behavior to preserve producer-provided `event_type` when present.
+- Fixed stale host compromise state in graph export by refreshing host state from Neo4j before frontend graph serialization.
+- Fixed compromised-host metric rendering to show `0` when hosts exist but none are compromised.
+- Fixed attack graph instability by using deterministic backend coordinates and preserving provided layout on the frontend.
+- Fixed attack graph hover highlighting behavior by removing stale state closure from Sigma reducers.
+- Fixed long LLM stall behavior by adding explicit request timeout controls.
+- Fixed unsafe embedding fallback behavior by removing random vectors in production mode.
+
 ## [1.2.0] - 2026-04-25
 
 ### Added
