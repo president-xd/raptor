@@ -66,8 +66,11 @@ class Neo4jClient:
         """Create indexes and constraints per spec Section 4.2."""
         schema_queries = [
             "CREATE INDEX host_hostname IF NOT EXISTS FOR (h:Host) ON (h.hostname)",
+            "CREATE INDEX host_inv_scope IF NOT EXISTS FOR (h:Host) ON (h.investigation_id, h.hostname)",
             "CREATE INDEX user_username IF NOT EXISTS FOR (u:User) ON (u.username)",
+            "CREATE INDEX user_inv_scope IF NOT EXISTS FOR (u:User) ON (u.investigation_id, u.username)",
             "CREATE INDEX technique_id IF NOT EXISTS FOR (t:Technique) ON (t.id)",
+            "CREATE INDEX technique_inv_scope IF NOT EXISTS FOR (t:Technique) ON (t.investigation_id, t.id)",
             "CREATE CONSTRAINT apt_name IF NOT EXISTS FOR (a:APTGroup) REQUIRE a.name IS UNIQUE",
             "CREATE INDEX process_pid IF NOT EXISTS FOR (p:Process) ON (p.pid)",
             "CREATE INDEX file_hash IF NOT EXISTS FOR (f:File) ON (f.hash_sha256)",
