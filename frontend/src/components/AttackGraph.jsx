@@ -31,7 +31,19 @@ const LEGEND_ITEMS = [
 export default function AttackGraph({ graphData, onNodeClick }) {
   const containerRef = useRef(null);
   const sigmaRef = useRef(null);
+  const hoveredNodeRef = useRef(null);
   const [hoveredNode, setHoveredNode] = useState(null);
+
+  const fallbackCoord = (key, axis) => {
+    const seed = `${axis}:${key}`;
+    let hash = 0;
+    for (let i = 0; i < seed.length; i += 1) {
+      hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+      hash |= 0;
+    }
+    const ratio = ((hash >>> 0) % 10000) / 10000;
+    return -100 + (ratio * 200);
+  };
 
   useEffect(() => {
     if (!containerRef.current || !graphData) return;
@@ -39,6 +51,7 @@ export default function AttackGraph({ graphData, onNodeClick }) {
     const graph = new Graph();
     const nodes = graphData.nodes || [];
     const edges = graphData.edges || [];
+    const hasProvidedPositions = nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
 
     if (nodes.length === 0) return;
 
@@ -64,8 +77,8 @@ export default function AttackGraph({ graphData, onNodeClick }) {
 
         graph.addNode(node.id, {
           label: node.label,
-          x: Math.random() * 200 - 100,
-          y: Math.random() * 200 - 100,
+          x: Number.isFinite(node.x) ? node.x : fallbackCoord(node.id, 'x'),
+          y: Number.isFinite(node.y) ? node.y : fallbackCoord(node.id, 'y'),
           size,
           color,
           node_type: node.node_type,
@@ -90,22 +103,24 @@ export default function AttackGraph({ graphData, onNodeClick }) {
       } catch (e) { /* skip duplicate */ }
     });
 
-    /* ── ForceAtlas2 physics ── */
-    try {
-      const settings = forceAtlas2.inferSettings(graph);
-      forceAtlas2.assign(graph, {
-        iterations: Math.min(250, Math.max(100, nodes.length * 8)),
-        settings: {
-          ...settings,
-          gravity: 0.8,
-          scalingRatio: 6,
-          barnesHutOptimize: graph.order > 20,
-          strongGravityMode: true,
-          slowDown: 3,
-        },
-      });
-    } catch (e) {
-      console.warn('ForceAtlas2 failed, using random layout:', e);
+    /* ── ForceAtlas2 physics (only when coordinates were not precomputed) ── */
+    if (!hasProvidedPositions) {
+      try {
+        const settings = forceAtlas2.inferSettings(graph);
+        forceAtlas2.assign(graph, {
+          iterations: Math.min(250, Math.max(100, nodes.length * 8)),
+          settings: {
+            ...settings,
+            gravity: 0.8,
+            scalingRatio: 6,
+            barnesHutOptimize: graph.order > 20,
+            strongGravityMode: true,
+            slowDown: 3,
+          },
+        });
+      } catch (e) {
+        console.warn('ForceAtlas2 failed, using provided layout:', e);
+      }
     }
 
     /* ── Sigma renderer ── */
@@ -132,8 +147,9 @@ export default function AttackGraph({ graphData, onNodeClick }) {
 
       nodeReducer: (node, data) => {
         const res = { ...data };
-        if (hoveredNode && hoveredNode !== node) {
-          const isNeighbor = graph.hasEdge(hoveredNode, node) || graph.hasEdge(node, hoveredNode);
+        const activeHover = hoveredNodeRef.current;
+        if (activeHover && activeHover !== node) {
+          const isNeighbor = graph.hasEdge(activeHover, node) || graph.hasEdge(node, activeHover);
           if (!isNeighbor) {
             res.color = 'rgba(90,119,153,0.12)';
             res.label = '';
@@ -143,10 +159,11 @@ export default function AttackGraph({ graphData, onNodeClick }) {
       },
       edgeReducer: (edge, data) => {
         const res = { ...data };
-        if (hoveredNode) {
+        const activeHover = hoveredNodeRef.current;
+        if (activeHover) {
           const src = graph.source(edge);
           const tgt = graph.target(edge);
-          if (src !== hoveredNode && tgt !== hoveredNode) {
+          if (src !== activeHover && tgt !== activeHover) {
             res.color = 'rgba(90,119,153,0.05)';
           } else {
             res.size = (data.size || 1) * 2;
@@ -160,13 +177,19 @@ export default function AttackGraph({ graphData, onNodeClick }) {
       const attrs = graph.getNodeAttributes(node);
       if (onNodeClick) onNodeClick({ id: node, ...attrs });
     });
-    renderer.on('enterNode', ({ node }) => setHoveredNode(node));
-    renderer.on('leaveNode', () => setHoveredNode(null));
+    renderer.on('enterNode', ({ node }) => {
+      hoveredNodeRef.current = node;
+      setHoveredNode(node);
+    });
+    renderer.on('leaveNode', () => {
+      hoveredNodeRef.current = null;
+      setHoveredNode(null);
+    });
 
     sigmaRef.current = renderer;
 
     return () => { if (sigmaRef.current) { sigmaRef.current.kill(); sigmaRef.current = null; } };
-  }, [graphData]);
+  }, [graphData, onNodeClick]);
 
   useEffect(() => { if (sigmaRef.current) sigmaRef.current.refresh(); }, [hoveredNode]);
 
