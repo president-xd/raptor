@@ -3,9 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FileText, Download, FileDown, Loader2 } from 'lucide-react';
 
-export default function ReportView({ report }) {
+export default function ReportView({ report, mode = 'analyst', notes = '' }) {
   const reportRef = useRef(null);
   const [exporting, setExporting] = useState(null);
+  const [exportError, setExportError] = useState('');
 
   if (!report) {
     return (
@@ -16,11 +17,17 @@ export default function ReportView({ report }) {
     );
   }
 
+  const displayReport = mode === 'evidence' ? report : buildAnalystReport(report);
+  const reportWithNotes = notes?.trim()
+    ? `${displayReport}\n\n## Analyst Notes\n\n${notes.trim()}`
+    : displayReport;
+
   /* ── Markdown export ── */
   const handleExportMd = () => {
     setExporting('md');
+    setExportError('');
     try {
-      const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
+      const blob = new Blob([reportWithNotes], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -29,6 +36,9 @@ export default function ReportView({ report }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Markdown export failed:', err);
+      setExportError('Markdown export failed.');
     } finally {
       setTimeout(() => setExporting(null), 500);
     }
@@ -37,6 +47,7 @@ export default function ReportView({ report }) {
   /* ── PDF export ── */
   const handleExportPdf = async () => {
     setExporting('pdf');
+    setExportError('');
     try {
       const element = reportRef.current;
       if (!element) return;
@@ -82,6 +93,7 @@ export default function ReportView({ report }) {
       document.body.removeChild(clone);
     } catch (err) {
       console.error('PDF export failed:', err);
+      setExportError('PDF export failed. Try Markdown export or check browser download permissions.');
     } finally {
       setTimeout(() => setExporting(null), 500);
     }
@@ -94,6 +106,7 @@ export default function ReportView({ report }) {
           <FileText className="w-5 h-5 text-raptor-accent" />
           Investigation Report
         </h3>
+        <span className="report-mode-pill">{mode === 'evidence' ? 'Evidence detail' : 'Analyst summary'}</span>
         <div className="flex gap-2">
           <button onClick={handleExportPdf} disabled={exporting === 'pdf'}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium
@@ -112,9 +125,30 @@ export default function ReportView({ report }) {
         </div>
       </div>
 
+      {exportError && (
+        <div className="upload-error">
+          <span>{exportError}</span>
+        </div>
+      )}
+
       <div ref={reportRef} className="glass-card p-8 report-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportWithNotes}</ReactMarkdown>
       </div>
     </div>
   );
+}
+
+function buildAnalystReport(report) {
+  return report
+    .split('\n')
+    .map((line) => {
+      if (line.length > 260) return `${line.slice(0, 240)}...`;
+      return line
+        .replace(/Example:\s*[{[]?.*$/i, 'Example evidence summarized in evidence view.')
+        .replace(/raw['"]?\s*[:=]\s*['"].*$/i, 'raw evidence available in evidence view.')
+        .replace(/\\Users\\[^,\s)]+/g, '\\Users\\<redacted-path>')
+        .replace(/[A-Za-z]:\\[^\s,)]+/g, '<local-path-redacted>');
+    })
+    .filter((line) => !/^\s*[{[]["']?(timestamp|source_host|event_type|raw)/i.test(line))
+    .join('\n');
 }
