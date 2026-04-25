@@ -107,5 +107,6 @@ class GraphEdge(BaseModel):
 
 class AttackGraph(BaseModel):
     """Full graph structure for Sigma.js."""
+    investigation_id: Optional[str] = None
     nodes: List[GraphNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
