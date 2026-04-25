@@ -33,6 +33,19 @@ class InvestigationStatus(BaseModel):
     error: Optional[str] = None
 
 
+class InvestigationListItem(BaseModel):
+    """Summary row for investigation listing endpoint."""
+    investigation_id: str
+    status: str
+    progress: int
+    current_phase: str = ""
+    event_count: int = 0
+    technique_count: int = 0
+    created_at: str = ""
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+
+
 class InvestigationReport(BaseModel):
     """Response for GET /api/v1/investigate/{id}/report"""
     investigation_id: str
@@ -45,6 +58,12 @@ class InvestigationReport(BaseModel):
     event_count: int = 0
     technique_count: int = 0
     timestamp: str = ""
+
+
+class InvestigationListResponse(BaseModel):
+    """Response payload for investigation list endpoint."""
+    investigations: List[InvestigationListItem] = Field(default_factory=list)
+    total_count: int = 0
 
 
 # ─── Simulation ───────────────────────────────────────────────────────
