@@ -28,7 +28,7 @@ const LEGEND_ITEMS = [
   { color: NODE_COLORS.technique,   label: 'ATT&CK Technique' },
 ];
 
-export default function AttackGraph({ graphData, onNodeClick }) {
+export default function AttackGraph({ graphData, onNodeClick, showLabels = true }) {
   const containerRef = useRef(null);
   const sigmaRef = useRef(null);
   const hoveredNodeRef = useRef(null);
@@ -127,12 +127,12 @@ export default function AttackGraph({ graphData, onNodeClick }) {
     if (sigmaRef.current) sigmaRef.current.kill();
 
     const renderer = new Sigma(graph, containerRef.current, {
-      renderLabels: true,
+      renderLabels: showLabels,
       labelColor: { color: '#c5d0de' },
       labelFont: 'Inter, system-ui, sans-serif',
       labelSize: 13,
       labelWeight: '500',
-      labelDensity: 0.7,
+      labelDensity: showLabels ? 0.35 : 0,
       labelGridCellSize: 120,
       edgeLabelColor: { color: '#7a8ba7' },
       edgeLabelFont: 'Inter, system-ui, sans-serif',
@@ -189,7 +189,7 @@ export default function AttackGraph({ graphData, onNodeClick }) {
     sigmaRef.current = renderer;
 
     return () => { if (sigmaRef.current) { sigmaRef.current.kill(); sigmaRef.current = null; } };
-  }, [graphData, onNodeClick]);
+  }, [graphData, onNodeClick, showLabels]);
 
   useEffect(() => { if (sigmaRef.current) sigmaRef.current.refresh(); }, [hoveredNode]);
 
