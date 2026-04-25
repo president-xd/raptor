@@ -19,12 +19,27 @@ from rag.reranker import rerank_technique_results
 class QueryEngine:
     """Natural language query engine with multi-pipeline routing."""
 
-    WRITE_OR_UNSAFE_CYPHER = re.compile(
-        r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|LOAD\s+CSV|FOREACH|CALL\s+dbms|CALL\s+apoc)\b",
+    UNSAFE_CYPHER = re.compile(
+        r"\b("
+        r"CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|ALTER|GRANT|DENY|REVOKE|"
+        r"LOAD\s+CSV|FOREACH|CALL|UNION|USE|EXPLAIN|PROFILE|START|PERIODIC\s+COMMIT"
+        r")\b|//|/\*",
         re.IGNORECASE,
     )
+    READ_ONLY_START = re.compile(r"^\s*(MATCH|OPTIONAL\s+MATCH)\b", re.IGNORECASE)
 
-    GRAPH_LABELS = "Host|User|Process|File|Network|Technique|APTGroup"
+    GRAPH_LABELS = ("Host", "User", "Process", "File", "Network", "Technique", "APTGroup")
+    GRAPH_LABEL_PATTERN = "|".join(GRAPH_LABELS)
+    LABELED_NODE_PATTERN = re.compile(
+        rf"(?<![A-Za-z0-9_])\("
+        rf"(?P<alias>[A-Za-z_][A-Za-z0-9_]*)?\s*:\s*"
+        rf"(?P<label>[A-Za-z_][A-Za-z0-9_]*)"
+        rf"(?:\s*(?P<props>\{{[^{{}}]*\}}))?"
+        rf"\)"
+    )
+    UNLABELED_NODE_PATTERN = re.compile(
+        r"(?<![A-Za-z0-9_])\(\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*(?:\{[^{}]*\})?\s*\)"
+    )
 
     def __init__(self, neo4j_client=None):
         self.neo4j = neo4j_client
@@ -148,40 +163,63 @@ class QueryEngine:
 
     def _sanitize_and_scope_query(self, raw_query: str) -> Optional[str]:
         """Sanitize generated Cypher and enforce per-investigation node scoping."""
-        if not raw_query:
+        query = self._extract_cypher(raw_query)
+        if not query:
             return None
-
-        query = raw_query.strip().strip("`").strip()
-        if query.lower().startswith("cypher"):
-            query = query[6:].strip()
 
         if query.count(";") > 0:
             logger.warning("Rejected Cypher with semicolon")
             return None
 
-        if self.WRITE_OR_UNSAFE_CYPHER.search(query):
+        if self.UNSAFE_CYPHER.search(query):
             logger.warning(f"Rejected unsafe Cypher: {query}")
             return None
 
-        if "return" not in query.lower():
+        if not self.READ_ONLY_START.search(query):
+            logger.warning(f"Rejected Cypher that does not start with read-only MATCH: {query}")
+            return None
+
+        if not re.search(r"\bRETURN\b", query, re.IGNORECASE):
             logger.warning("Rejected Cypher without RETURN clause")
             return None
 
         query = self._scope_investigation_nodes(query)
+        if not self._all_node_patterns_are_scoped(query):
+            logger.warning(f"Rejected Cypher with unscoped or unsupported node patterns: {query}")
+            return None
+
         if "$investigation_id" not in query and "$inv_id" not in query:
             logger.warning("Rejected Cypher that could not be scoped")
             return None
 
         return query
 
+    def _extract_cypher(self, raw_query: str) -> Optional[str]:
+        """Extract a single Cypher statement from plain text or a fenced code block."""
+        if not raw_query:
+            return None
+
+        query = raw_query.strip()
+        fenced = re.search(r"```(?:cypher)?\s*(.*?)```", query, re.IGNORECASE | re.DOTALL)
+        if fenced:
+            query = fenced.group(1).strip()
+
+        query = query.strip().strip("`").strip()
+        if query.lower().startswith("cypher"):
+            query = query[6:].strip()
+
+        return query or None
+
     def _scope_investigation_nodes(self, query: str) -> str:
         """Inject investigation_id property on labeled nodes that support tenant scoping."""
         node_pattern = re.compile(
-            rf"\((?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<label>{self.GRAPH_LABELS})(?:\s*(?P<props>\{{[^{{}}]*\}}))?\)"
+            rf"\((?P<alias>[A-Za-z_][A-Za-z0-9_]*)?\s*:\s*"
+            rf"(?P<label>{self.GRAPH_LABEL_PATTERN})"
+            rf"(?:\s*(?P<props>\{{[^{{}}]*\}}))?\)"
         )
 
         def add_scope(match: re.Match) -> str:
-            alias = match.group("alias")
+            alias = match.group("alias") or ""
             label = match.group("label")
             props = match.group("props")
 
@@ -194,9 +232,30 @@ class QueryEngine:
             else:
                 scoped = "{investigation_id: $investigation_id}"
 
-            return f"({alias}:{label} {scoped})"
+            alias_prefix = f"{alias}:" if alias else ":"
+            return f"({alias_prefix}{label} {scoped})"
 
         return node_pattern.sub(add_scope, query)
+
+    def _all_node_patterns_are_scoped(self, query: str) -> bool:
+        """Require every graph node pattern to use known labels and investigation scoping."""
+        if self.UNLABELED_NODE_PATTERN.search(query):
+            return False
+
+        matches = list(self.LABELED_NODE_PATTERN.finditer(query))
+        if not matches:
+            return False
+
+        allowed = set(self.GRAPH_LABELS)
+        for match in matches:
+            label = match.group("label")
+            props = match.group("props") or ""
+            if label not in allowed:
+                return False
+            if "investigation_id" not in props:
+                return False
+
+        return True
 
     def _handle_rag_query(self, question: str, investigation_id: str) -> Dict[str, Any]:
         """Answer using RAG retrieval from ATT&CK knowledge base."""
