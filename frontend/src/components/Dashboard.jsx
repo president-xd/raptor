@@ -11,6 +11,7 @@ import {
   CircleDot,
   Clock,
   Database,
+  Download,
   FileText,
   Gauge,
   Home,
@@ -26,6 +27,7 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   UploadCloud,
+  X,
   Zap,
 } from 'lucide-react';
 import { aptAPI, healthAPI, investigateAPI, simulateAPI } from '../api';
@@ -298,6 +300,7 @@ export default function Dashboard() {
           graphData={graphData}
           topAttribution={topAttribution}
           highRiskFindings={highRiskFindings}
+          healthSubsystems={healthSubsystems}
           onUpload={handleInvestigationStart}
           onOpenInvestigation={() => setActivePage('investigations')}
         />
@@ -353,7 +356,7 @@ export default function Dashboard() {
     }
 
     if (activePage === 'threat-feeds') {
-      return <ThreatFeedsPage />;
+      return <ThreatFeedsPage healthSubsystems={healthSubsystems} />;
     }
 
     if (activePage === 'simulation') {
@@ -370,15 +373,11 @@ export default function Dashboard() {
     }
 
     if (activePage === 'mitre-navigator') {
-      return <MitreNavigatorPage findings={report?.findings || []} />;
+      return <MitreNavigatorPage investigationId={investigationId} findings={report?.findings || []} />;
     }
 
     if (activePage === 'reports') {
-      return (
-        <ConsolePanel title="Reports" icon={FileText}>
-          <ReportView report={report?.narrative_report} />
-        </ConsolePanel>
-      );
+      return <ReportsPage report={report} investigations={investigations} onSelectInvestigation={handleSelectInvestigation} />;
     }
 
     return <SettingsPage apiHealth={apiHealth} healthSubsystems={healthSubsystems} />;
@@ -501,7 +500,7 @@ function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInv
   );
 }
 
-function DashboardHome({ metrics, status, report, graphData, topAttribution, highRiskFindings, onUpload, onOpenInvestigation }) {
+function DashboardHome({ metrics, status, report, graphData, topAttribution, highRiskFindings, healthSubsystems, onUpload, onOpenInvestigation }) {
   return (
     <div className="dashboard-grid">
       <section className="hero-strip">
@@ -534,7 +533,7 @@ function DashboardHome({ metrics, status, report, graphData, topAttribution, hig
         </ConsolePanel>
 
         <ConsolePanel title="Threat Feed" icon={Database}>
-          <ThreatFeedMini />
+          <ThreatFeedMini healthSubsystems={healthSubsystems} />
         </ConsolePanel>
       </div>
 
@@ -693,44 +692,107 @@ function GraphPage({ graphData, selectedNode, setSelectedNode, embedded = false 
 }
 
 function APTLibraryPage({ profiles, loading }) {
-  const visible = profiles.slice(0, 12);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filtered = normalizedSearch
+    ? profiles.filter((profile) => {
+        const haystack = [
+          profile.name,
+          profile.nation_state,
+          ...(profile.aliases || []),
+          ...(profile.techniques || []),
+        ].join(' ').toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+    : profiles;
+
   return (
     <ConsolePanel title="APT Library" icon={BookOpen}>
       <div className="library-toolbar">
-        <div className="search-box">
+        <label className="search-box">
           <Search className="w-4 h-4" />
-          <span>MITRE intrusion-set profiles loaded from STIX</span>
-        </div>
-        <div className="count-pill">{profiles.length || '--'} groups</div>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search group, alias, country, or technique"
+          />
+        </label>
+        <div className="count-pill">{filtered.length || '--'} / {profiles.length || '--'} groups</div>
       </div>
       {loading ? (
         <LoadingRows />
       ) : (
         <div className="apt-grid">
-          {visible.map((profile) => (
+          {filtered.map((profile) => (
             <article key={profile.name} className="apt-card">
               <div className="apt-card-header">
                 <h3>{profile.name}</h3>
                 <span>{profile.technique_count} TTPs</span>
               </div>
+              {profile.nation_state && <p>{profile.nation_state}</p>}
               <p>{profile.aliases?.slice(0, 3).join(', ') || 'No aliases listed'}</p>
               <div className="ttp-strip">
                 {(profile.techniques || []).slice(0, 5).map((ttp) => <code key={ttp}>{ttp}</code>)}
               </div>
+              <button type="button" className="secondary-button card-action" onClick={() => setSelectedProfile(profile)}>
+                View Profile
+              </button>
             </article>
           ))}
+        </div>
+      )}
+
+      {selectedProfile && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setSelectedProfile(null)}>
+          <div className="detail-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-modal-header">
+              <div>
+                <div className="section-eyebrow">Intrusion Set</div>
+                <h2>{selectedProfile.name}</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setSelectedProfile(null)} title="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="summary-grid">
+              <div><span>Aliases</span><strong>{selectedProfile.aliases?.length || 0}</strong></div>
+              <div><span>Techniques</span><strong>{selectedProfile.technique_count}</strong></div>
+              <div><span>Nation</span><strong>{selectedProfile.nation_state || 'Unknown'}</strong></div>
+            </div>
+            <div className="modal-section">
+              <span>Aliases</span>
+              <p>{selectedProfile.aliases?.join(', ') || 'No aliases listed.'}</p>
+            </div>
+            <div className="modal-section">
+              <span>Technique Coverage</span>
+              <div className="ttp-strip dense">
+                {(selectedProfile.techniques || []).map((ttp) => <code key={ttp}>{ttp}</code>)}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </ConsolePanel>
   );
 }
 
-function ThreatFeedsPage() {
+function ThreatFeedsPage({ healthSubsystems = {} }) {
+  const statusFor = (name, fallback = 'available') => {
+    const status = healthSubsystems?.[name]?.status;
+    if (status === 'healthy') return 'active';
+    if (status === 'degraded') return 'planned';
+    return fallback;
+  };
+
   const feeds = [
     ['MITRE ATT&CK STIX', 'active', 'Technique and intrusion-set corpus'],
     ['Sigma Signatures', 'active', 'Local keyword and regex TTP mapping'],
+    ['Weaviate RAG', statusFor('weaviate'), healthSubsystems?.weaviate?.detail || 'Vector retrieval service'],
+    ['Elasticsearch Events', statusFor('elasticsearch'), healthSubsystems?.elasticsearch?.detail || 'Runtime event storage'],
+    ['Redis Queue/Cache', statusFor('redis'), healthSubsystems?.redis?.detail || 'Runtime cache service'],
     ['MISP/OpenCTI', 'planned', 'Infrastructure and malware enrichment'],
-    ['Elasticsearch Events', 'available', 'Timeline storage service'],
   ];
 
   return (
@@ -789,6 +851,50 @@ function SimulationPage({ simulation, report, canRunSimulation, simError, simLoa
   );
 }
 
+function ReportsPage({ report, investigations, onSelectInvestigation }) {
+  return (
+    <div className="reports-layout">
+      <ConsolePanel title="Report Archive" icon={Archive}>
+        {investigations && investigations.length ? (
+          <div className="feed-table">
+            {investigations.map((item) => (
+              <button
+                key={item.investigation_id}
+                type="button"
+                className="feed-row"
+                onClick={() => onSelectInvestigation(item.investigation_id)}
+                style={{ textAlign: 'left', width: '100%', cursor: 'pointer' }}
+              >
+                <div>
+                  <strong>{item.investigation_id.slice(0, 8)}</strong>
+                  <span>{item.event_count || 0} events, {item.technique_count || 0} techniques</span>
+                  <span>{item.completed_at || item.created_at}</span>
+                </div>
+                <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
+                  {item.status}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={Archive} title="No saved reports" text="Completed investigations will appear in the report archive." />
+        )}
+      </ConsolePanel>
+      <ConsolePanel title="Selected Report" icon={FileText}>
+        {report && (
+          <div className="report-meta">
+            <div><span>Investigation</span><strong>{report.investigation_id?.slice(0, 8)}</strong></div>
+            <div><span>Status</span><strong>{report.status}</strong></div>
+            <div><span>Techniques</span><strong>{report.technique_count}</strong></div>
+            <div><span>Created</span><strong>{report.timestamp || '--'}</strong></div>
+          </div>
+        )}
+        <ReportView report={report?.narrative_report} />
+      </ConsolePanel>
+    </div>
+  );
+}
+
 function InvestigationList({ investigations, onSelectInvestigation }) {
   if (!investigations || investigations.length === 0) return null;
 
@@ -818,7 +924,7 @@ function InvestigationList({ investigations, onSelectInvestigation }) {
   );
 }
 
-function MitreNavigatorPage({ findings }) {
+function MitreNavigatorPage({ investigationId, findings }) {
   const byPhase = new Map();
   findings.forEach((finding) => {
     const phase = finding.kill_chain_phase || 'unknown';
@@ -826,8 +932,47 @@ function MitreNavigatorPage({ findings }) {
     byPhase.get(phase).push(finding);
   });
 
+  const exportLayer = () => {
+    const techniques = findings.map((finding) => ({
+      techniqueID: finding.technique_id,
+      score: finding.confidence === 'high' ? 100 : finding.confidence === 'medium' ? 70 : 40,
+      comment: finding.evidence_summary || '',
+      enabled: true,
+      metadata: [
+        { name: 'phase', value: finding.kill_chain_phase || 'unknown' },
+        { name: 'confidence', value: finding.confidence || 'low' },
+      ],
+    }));
+    const layer = {
+      name: `RAPTOR ${investigationId || 'investigation'} coverage`,
+      versions: { attack: 'enterprise', navigator: '4.9.0', layer: '4.5' },
+      domain: 'enterprise-attack',
+      description: 'Observed techniques exported from RAPTOR findings.',
+      techniques,
+    };
+    const blob = new Blob([JSON.stringify(layer, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `raptor-navigator-${investigationId || 'layer'}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <ConsolePanel title="MITRE ATT&CK" icon={Layers3}>
+      <div className="navigator-toolbar">
+        <div>
+          <div className="section-eyebrow">Navigator Layer</div>
+          <p>{findings.length} observed techniques mapped by tactic phase.</p>
+        </div>
+        <button type="button" className="secondary-button" onClick={exportLayer} disabled={!findings.length}>
+          <Download className="w-4 h-4" />
+          Export Layer
+        </button>
+      </div>
       <div className="mitre-grid">
         {PHASES.map((phase) => {
           const phaseFindings = byPhase.get(phase) || [];
@@ -846,6 +991,19 @@ function MitreNavigatorPage({ findings }) {
 }
 
 function SettingsPage({ apiHealth, healthSubsystems }) {
+  const [settings, setSettings] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('raptor:settings') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const updateSetting = (key, value) => {
+    const next = { ...settings, [key]: value };
+    setSettings(next);
+    localStorage.setItem('raptor:settings', JSON.stringify(next));
+  };
+
   const rows = [
     ['API health', apiHealth],
     ['Frontend mode', import.meta.env.MODE],
@@ -861,6 +1019,42 @@ function SettingsPage({ apiHealth, healthSubsystems }) {
 
   return (
     <ConsolePanel title="Settings" icon={SlidersHorizontal}>
+      <div className="settings-controls">
+        <label>
+          <span>LLM mode</span>
+          <select value={settings.llmMode || 'auto'} onChange={(event) => updateSetting('llmMode', event.target.value)}>
+            <option value="auto">Auto</option>
+            <option value="local">Local fallback</option>
+          </select>
+        </label>
+        <label>
+          <span>RAG auto-index</span>
+          <input
+            type="checkbox"
+            checked={settings.ragAutoIndex !== false}
+            onChange={(event) => updateSetting('ragAutoIndex', event.target.checked)}
+          />
+        </label>
+        <label>
+          <span>Attribution threshold</span>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="5"
+            value={settings.attributionThreshold || 50}
+            onChange={(event) => updateSetting('attributionThreshold', Number(event.target.value))}
+          />
+        </label>
+        <label>
+          <span>Show degraded warnings</span>
+          <input
+            type="checkbox"
+            checked={settings.showDegradedWarnings !== false}
+            onChange={(event) => updateSetting('showDegradedWarnings', event.target.checked)}
+          />
+        </label>
+      </div>
       <div className="settings-list">
         {[...rows, ...subsystemRows].map(([label, value]) => (
           <div key={label} className="setting-row">
@@ -943,11 +1137,15 @@ function ProcessingView({ status, investigationId }) {
   );
 }
 
-function ThreatFeedMini() {
+function ThreatFeedMini({ healthSubsystems = {} }) {
+  const weaviate = healthSubsystems?.weaviate?.status || 'unknown';
+  const elastic = healthSubsystems?.elasticsearch?.status || 'unknown';
+  const redis = healthSubsystems?.redis?.status || 'unknown';
   return (
     <div className="feed-mini">
-      <FeedMiniRow tone="danger" title="C2 infrastructure" value="185.29.10.44" />
-      <FeedMiniRow tone="warning" title="APT overlap" value="APT29, APT28, Kimsuky" />
+      <FeedMiniRow tone={weaviate === 'healthy' ? 'success' : 'warning'} title="RAG retrieval" value={weaviate} />
+      <FeedMiniRow tone={elastic === 'healthy' ? 'success' : 'warning'} title="Elasticsearch" value={elastic} />
+      <FeedMiniRow tone={redis === 'healthy' ? 'success' : 'warning'} title="Redis cache" value={redis} />
       <FeedMiniRow tone="success" title="STIX validation" value="Canonical ATT&CK IDs" />
     </div>
   );
