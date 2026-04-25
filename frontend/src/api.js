@@ -18,6 +18,7 @@ export const investigateAPI = {
   getStatus: (id) => api.get(`/investigate/${id}/status`),
   getReport: (id) => api.get(`/investigate/${id}/report`),
   getGraph: (id) => api.get(`/investigate/${id}/graph`),
+  list: (limit = 25) => api.get(`/investigations?limit=${limit}`),
 };
 
 export const simulateAPI = {
@@ -36,6 +37,7 @@ export const aptAPI = {
 
 export const healthAPI = {
   check: () => api.get('/health'),
+  checkDetailed: () => api.get('/health/detailed'),
 };
 
 export default api;
