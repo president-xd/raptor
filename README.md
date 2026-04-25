@@ -16,14 +16,18 @@ Implemented:
 - STIX validation against the cached MITRE Enterprise ATT&CK bundle.
 - APT attribution using Jaccard similarity plus confidence penalties and bonuses.
 - Neo4j graph writing when Neo4j is available, with in-memory graph export fallback.
+- Investigation-scoped graph persistence and investigation-safe graph query execution.
+- Detailed subsystem health telemetry (`/api/v1/health/detailed`) for API/UI degraded-mode visibility.
+- Simulation confidence gate (simulation blocked for LOW/UNKNOWN attribution confidence).
+- Upload guardrails (empty-file rejection and maximum upload size enforcement).
 - React analyst console styled as a dense SOC workspace.
 - Docker Compose for Neo4j, Weaviate, Elasticsearch, Redis, backend, and frontend.
 
 Partially implemented / future work:
 
 - Elasticsearch and Redis are provisioned but not yet central to the runtime pipeline.
-- Weaviate indexing exists, but production-quality embeddings and reranking require installing optional `sentence-transformers` dependencies.
 - MISP/OpenCTI enrichment is represented in the UI/docs as planned work, not active ingestion.
+- Full case management workflows (compare/reopen/delete/rerun) are still evolving.
 
 ## Ports
 
@@ -88,13 +92,15 @@ Base URL: `http://localhost:8000/api/v1`
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `POST` | `/investigate` | Upload a log file and start analysis. |
+| `GET` | `/investigations` | List recent investigations and statuses. |
 | `GET` | `/investigate/{id}/status` | Poll job status and progress. |
 | `GET` | `/investigate/{id}/report` | Fetch findings, attribution, sequence, and report markdown. |
 | `GET` | `/investigate/{id}/graph` | Fetch Sigma.js-compatible graph JSON. |
-| `POST` | `/simulate` | Predict likely next steps for the top attributed actor. |
-| `POST` | `/query` | Ask natural language questions for an investigation. |
+| `POST` | `/simulate` | Predict likely next steps for the top attributed actor (requires MEDIUM/HIGH confidence). |
+| `POST` | `/query` | Ask natural language questions for a completed investigation (read-only scoped Cypher). |
 | `GET` | `/apt/profiles` | List APT profiles loaded from the cached STIX bundle. |
 | `GET` | `/health` | Health check. |
+| `GET` | `/health/detailed` | Detailed subsystem health (API, SQLite, Neo4j, Weaviate, LLM config). |
 
 Example:
 
@@ -150,10 +156,15 @@ Important variables:
 | `OPENROUTER_API_KEY` | empty | Required for LLM calls. Fallback analysis works without it. |
 | `LLM_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Primary OpenRouter model. |
 | `LLM_FALLBACK_MODEL` | `qwen/qwen3-coder:free` | Fallback OpenRouter model. |
+| `LLM_TIMEOUT_SECONDS` | `30` | Hard timeout for OpenRouter requests. |
 | `NEO4J_URI` | `bolt://localhost:7687` | Use `bolt://neo4j:7687` inside Docker. |
 | `WEAVIATE_URL` | `http://localhost:8080` | Use `http://weaviate:8080` inside Docker. |
+| `RAG_AUTO_INDEX` | `true` | Runs one-time Weaviate bootstrap indexing when required collections are missing. |
+| `RAPTOR_ALLOW_TEST_EMBEDDINGS` | `false` | Enables deterministic test embeddings when `sentence-transformers` is unavailable (non-production only). |
 | `API_PORT` | `8000` | Backend API port. |
 | `FRONTEND_PORT` | `3100` | Frontend console port. |
+| `MAX_UPLOAD_BYTES` | `10485760` | Upload size limit enforced by `/investigate`. |
+| `CORS_ALLOW_ORIGINS` | `http://localhost:3100,http://127.0.0.1:3100` | Allowed browser origins. |
 
 ## Data
 
@@ -189,6 +200,7 @@ docker compose config --quiet
 ## Security Notes
 
 - Do not commit `.env`; it may contain API keys.
-- Backend CORS is permissive for local development. Restrict it before production deployment.
+- Restrict `CORS_ALLOW_ORIGINS` and credentials policy appropriately before production deployment.
 - Neo4j and Weaviate use development-friendly defaults in `docker-compose.yml`.
 - Uploaded logs can contain sensitive data. Treat `backend/raptor.db` and generated logs as sensitive artifacts.
+- The graph NLQ path enforces read-only query patterns and investigation scoping, but should still be monitored in production.
