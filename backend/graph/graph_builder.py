@@ -5,8 +5,7 @@ Creates nodes (Host, User, Process, File, Network, Technique) and
 edges (EXECUTED, CREATED, CONNECTED_TO, LOGGED_INTO, LATERAL_MOVED_TO, OBSERVED_IN).
 """
 import re
-import uuid
-import random
+import hashlib
 from typing import List, Dict, Any
 from loguru import logger
 
@@ -40,6 +39,9 @@ class GraphBuilder:
         self._write_techniques(techniques)
         self._write_events_to_graph(events, analysis)
 
+        # Refresh host state from Neo4j so exported graph reflects updates from edge writes.
+        hosts = self._refresh_host_state_from_neo4j(hosts)
+
         # Build Sigma.js compatible graph
         graph = self._build_sigma_graph(hosts, users, techniques, events, analysis)
         logger.info(f"Graph built: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
@@ -49,21 +51,50 @@ class GraphBuilder:
         """Extract unique hosts from events."""
         hosts = {}
         for event in events:
-            if event.source_host and event.source_host not in hosts:
-                hosts[event.source_host] = {
-                    "hostname": event.source_host,
-                    "ip": event.source_ip,
-                    "compromised": len(event.sigma_matches) > 0,
-                    "compromise_time": event.timestamp if event.sigma_matches else None,
-                }
-            if event.dest_host and event.dest_host not in hosts:
-                hosts[event.dest_host] = {
-                    "hostname": event.dest_host,
-                    "ip": event.dest_ip or "",
-                    "compromised": False,
-                    "compromise_time": None,
-                }
+            if event.source_host:
+                host = hosts.setdefault(
+                    event.source_host,
+                    {
+                        "hostname": event.source_host,
+                        "ip": event.source_ip or "",
+                        "compromised": False,
+                        "compromise_time": None,
+                    },
+                )
+                if not host.get("ip") and event.source_ip:
+                    host["ip"] = event.source_ip
+
+                if event.sigma_matches:
+                    self._mark_compromised(host, event.timestamp)
+
+            if event.dest_host:
+                host = hosts.setdefault(
+                    event.dest_host,
+                    {
+                        "hostname": event.dest_host,
+                        "ip": event.dest_ip or "",
+                        "compromised": False,
+                        "compromise_time": None,
+                    },
+                )
+                if not host.get("ip") and event.dest_ip:
+                    host["ip"] = event.dest_ip
+
+                if event.event_type == "lateral":
+                    self._mark_compromised(host, event.timestamp)
+
         return hosts
+
+    @staticmethod
+    def _mark_compromised(host: Dict[str, Any], timestamp: str):
+        """Mark host as compromised, preserving the earliest known compromise time."""
+        host["compromised"] = True
+        current = host.get("compromise_time")
+        if not current:
+            host["compromise_time"] = timestamp
+            return
+        if timestamp and timestamp < current:
+            host["compromise_time"] = timestamp
 
     def _extract_users(self, events: List[RaptorEvent]) -> Dict[str, Dict]:
         """Extract user references from event raw logs."""
@@ -106,11 +137,10 @@ class GraphBuilder:
         for hostname, data in hosts.items():
             is_dc = "DC" in hostname.upper() or "DOMAIN" in hostname.upper()
             self.neo4j.run_write(
-                """MERGE (h:Host {hostname: $hostname})
+                """MERGE (h:Host {hostname: $hostname, investigation_id: $inv_id})
                 SET h.ip = $ip, h.compromised = $compromised,
                     h.compromise_time = $compromise_time,
-                    h.is_dc = $is_dc,
-                    h.investigation_id = $inv_id""",
+                    h.is_dc = $is_dc""",
                 {
                     "hostname": hostname, "ip": data["ip"],
                     "compromised": data["compromised"],
@@ -124,10 +154,9 @@ class GraphBuilder:
         """Write User nodes to Neo4j."""
         for username, data in users.items():
             self.neo4j.run_write(
-                """MERGE (u:User {username: $username})
+                """MERGE (u:User {username: $username, investigation_id: $inv_id})
                 SET u.domain = $domain, u.privilege_level = $priv,
-                    u.compromised = $compromised,
-                    u.investigation_id = $inv_id""",
+                    u.compromised = $compromised""",
                 {
                     "username": username, "domain": data["domain"],
                     "priv": data["privilege_level"],
@@ -140,10 +169,9 @@ class GraphBuilder:
         """Write Technique nodes to Neo4j."""
         for tech in techniques:
             self.neo4j.run_write(
-                """MERGE (t:Technique {id: $id})
+                """MERGE (t:Technique {id: $id, investigation_id: $inv_id})
                 SET t.name = $name, t.tactic = $tactic,
-                    t.kill_chain_phase = $phase,
-                    t.investigation_id = $inv_id""",
+                    t.kill_chain_phase = $phase""",
                 {
                     "id": tech["id"], "name": tech["name"],
                     "tactic": tech.get("tactic", ""),
@@ -162,7 +190,8 @@ class GraphBuilder:
                     technique = m
                     break
                 self.neo4j.run_write(
-                    """MATCH (a:Host {hostname: $src}), (b:Host {hostname: $dst})
+                    """MATCH (a:Host {hostname: $src, investigation_id: $inv_id}),
+                               (b:Host {hostname: $dst, investigation_id: $inv_id})
                     MERGE (a)-[:LATERAL_MOVED_TO {technique: $tech, timestamp: $ts,
                            investigation_id: $inv_id}]->(b)
                     SET b.compromised = true, b.compromise_time = $ts""",
@@ -182,18 +211,67 @@ class GraphBuilder:
                     if key not in technique_hosts and event.source_host:
                         technique_hosts[key] = True
                         self.neo4j.run_write(
-                            """MATCH (t:Technique {id: $tid}), (h:Host {hostname: $host})
+                            """MATCH (t:Technique {id: $tid, investigation_id: $inv_id}),
+                                       (h:Host {hostname: $host, investigation_id: $inv_id})
                             MERGE (t)-[:OBSERVED_IN {investigation_id: $inv_id}]->(h)""",
                             {"tid": finding.technique_id, "host": event.source_host,
                              "inv_id": self.investigation_id}
                         )
+
+    def _refresh_host_state_from_neo4j(self, hosts: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Merge Neo4j host truth into in-memory host map for frontend export."""
+        if not self.neo4j or not self.neo4j.is_connected():
+            return hosts
+
+        rows = self.neo4j.run_query(
+            """
+            MATCH (h:Host {investigation_id: $inv_id})
+            RETURN h.hostname AS hostname,
+                   h.ip AS ip,
+                   coalesce(h.compromised, false) AS compromised,
+                   h.compromise_time AS compromise_time,
+                   coalesce(h.is_dc, false) AS is_dc
+            """,
+            {"inv_id": self.investigation_id},
+        )
+
+        for row in rows:
+            hostname = row.get("hostname")
+            if not hostname:
+                continue
+
+            host = hosts.setdefault(
+                hostname,
+                {
+                    "hostname": hostname,
+                    "ip": row.get("ip") or "",
+                    "compromised": False,
+                    "compromise_time": None,
+                    "is_dc": bool(row.get("is_dc", False)),
+                },
+            )
+
+            if row.get("ip") and not host.get("ip"):
+                host["ip"] = row.get("ip")
+            if row.get("compromised"):
+                self._mark_compromised(host, row.get("compromise_time"))
+            if row.get("is_dc"):
+                host["is_dc"] = True
+
+        return hosts
+
+    def _stable_position(self, key: str, axis: str) -> float:
+        """Return deterministic coordinates so graph exports remain stable."""
+        digest = hashlib.sha256(f"{self.investigation_id}:{axis}:{key}".encode("utf-8")).digest()
+        value = int.from_bytes(digest[:8], byteorder="big", signed=False)
+        ratio = value / float(2**64 - 1)
+        return -100.0 + (ratio * 200.0)
 
     def _build_sigma_graph(self, hosts, users, techniques, events, analysis) -> AttackGraph:
         """Build Sigma.js compatible graph for frontend rendering."""
         nodes = []
         edges = []
         node_map = {}
-        idx = 0
 
         # Professional color palette — curated for dark backgrounds
         colors = {
@@ -208,7 +286,7 @@ class GraphBuilder:
 
         # Host nodes
         for hostname, data in hosts.items():
-            is_dc = "DC" in hostname.upper()
+            is_dc = bool(data.get("is_dc")) or "DC" in hostname.upper()
             if is_dc:
                 color = colors["dc"]
             elif data["compromised"]:
@@ -220,12 +298,11 @@ class GraphBuilder:
             nodes.append(GraphNode(
                 id=node_id, label=hostname, node_type="host",
                 color=color, size=is_dc and 20 or 15,
-                x=random.uniform(-100, 100), y=random.uniform(-100, 100),
+                x=self._stable_position(node_id, "x"), y=self._stable_position(node_id, "y"),
                 metadata={"ip": data["ip"], "compromised": data["compromised"],
                           "is_dc": is_dc, "compromise_time": data.get("compromise_time")},
             ))
             node_map[hostname] = node_id
-            idx += 1
 
         # User nodes
         for username, data in users.items():
@@ -233,12 +310,11 @@ class GraphBuilder:
             nodes.append(GraphNode(
                 id=node_id, label=username, node_type="user",
                 color=colors["user"], size=10,
-                x=random.uniform(-100, 100), y=random.uniform(-100, 100),
+                x=self._stable_position(node_id, "x"), y=self._stable_position(node_id, "y"),
                 metadata={"domain": data["domain"], "privilege": data["privilege_level"],
                           "compromised": data["compromised"]},
             ))
             node_map[username] = node_id
-            idx += 1
 
         # Technique nodes
         for tech in techniques:
@@ -246,11 +322,10 @@ class GraphBuilder:
             nodes.append(GraphNode(
                 id=node_id, label=f"{tech['id']}\n{tech['name']}", node_type="technique",
                 color=colors["technique"], size=12,
-                x=random.uniform(-100, 100), y=random.uniform(-100, 100),
+                x=self._stable_position(node_id, "x"), y=self._stable_position(node_id, "y"),
                 metadata={"tactic": tech.get("tactic", ""), "phase": tech.get("kill_chain_phase", "")},
             ))
             node_map[tech['id']] = node_id
-            idx += 1
 
         # Edges
         edge_idx = 0
@@ -297,7 +372,7 @@ class GraphBuilder:
                     ))
                     edge_idx += 1
 
-        return AttackGraph(nodes=nodes, edges=edges)
+        return AttackGraph(investigation_id=self.investigation_id, nodes=nodes, edges=edges)
 
     def get_graph_json(self, investigation_id: str) -> Dict:
         """Retrieve graph from Neo4j and return Sigma.js format."""
@@ -307,7 +382,7 @@ class GraphBuilder:
         RETURN labels(n) as labels, properties(n) as props
         """
         edges_query = """
-        MATCH (a {investigation_id: $inv_id})-[r]->(b)
+         MATCH (a {investigation_id: $inv_id})-[r]->(b {investigation_id: $inv_id})
         RETURN type(r) as rel_type, properties(r) as props,
                properties(a) as src_props, labels(a) as src_labels,
                properties(b) as dst_props, labels(b) as dst_labels
