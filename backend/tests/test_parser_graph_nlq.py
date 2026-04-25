@@ -28,6 +28,32 @@ class RecordingNeo4j:
         return []
 
 
+class ExportNeo4j(RecordingNeo4j):
+    def run_query(self, query, params=None):
+        if "MATCH (n {investigation_id: $inv_id})" in query:
+            return [
+                {
+                    "element_id": "1",
+                    "labels": ["Host"],
+                    "props": {
+                        "hostname": "DC-01",
+                        "ip": "10.0.1.10",
+                        "investigation_id": params["inv_id"],
+                        "compromised": True,
+                        "is_dc": True,
+                    },
+                }
+            ]
+        if "MATCH (a {investigation_id: $inv_id})-[r" in query:
+            return []
+        return []
+
+
+class EmptyRetriever:
+    def search_all(self, query):
+        return {"techniques": [], "reports": []}
+
+
 class LogParserRegressionTests(unittest.TestCase):
     def test_json_parser_preserves_provided_event_type_and_null_destinations(self):
         content = json.dumps(
@@ -48,6 +74,7 @@ class LogParserRegressionTests(unittest.TestCase):
         self.assertEqual(event["event_type"], "auth")
         self.assertIsNone(event["dest_host"])
         self.assertIsNone(event["dest_ip"])
+        self.assertNotEqual(event["dest_host"], "None")
 
 
 class GraphBuilderRegressionTests(unittest.TestCase):
@@ -81,10 +108,22 @@ class GraphBuilderRegressionTests(unittest.TestCase):
         graph = builder.build_graph("case-a", events, analysis)
 
         self.assertEqual(graph.investigation_id, "case-a")
+        dc_node = next(node for node in graph.nodes if node.id == "host_DC-01")
+        self.assertTrue(dc_node.metadata["compromised"])
+        self.assertEqual(dc_node.metadata["compromise_time"], "2026-04-25T10:00:00Z")
         self.assertTrue(neo4j.writes)
         for query, params in neo4j.writes:
             self.assertIn("investigation_id", query)
             self.assertEqual(params.get("inv_id"), "case-a")
+
+    def test_neo4j_graph_export_is_sigma_shape(self):
+        builder = GraphBuilder(ExportNeo4j())
+        graph = builder.get_graph_json("case-a")
+
+        self.assertEqual(graph["investigation_id"], "case-a")
+        self.assertEqual(graph["nodes"][0]["id"], "host_DC-01")
+        self.assertEqual(graph["nodes"][0]["node_type"], "host")
+        self.assertTrue(graph["nodes"][0]["metadata"]["compromised"])
 
 
 class QueryEngineGuardTests(unittest.TestCase):
@@ -127,6 +166,14 @@ class QueryEngineGuardTests(unittest.TestCase):
         )
 
         self.assertIsNone(query)
+
+    def test_empty_rag_context_is_reported_as_low_confidence(self):
+        self.engine.retriever = EmptyRetriever()
+
+        result = self.engine._handle_rag_query("What should I block?", "case-a")
+
+        self.assertEqual(result["confidence"], "low")
+        self.assertEqual(result["sources"][0]["status"], "empty")
 
 
 if __name__ == "__main__":
