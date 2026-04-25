@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL,
     LLM_FALLBACK_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS,
+    LLM_TIMEOUT_SECONDS,
     LOG_ANALYSIS_SYSTEM_PROMPT, RAG_RERANK_K,
 )
 from schema import RaptorEvent, Finding, AnalysisResult
@@ -26,10 +27,15 @@ _llm_client = None
 
 def get_llm_client() -> OpenAI:
     global _llm_client
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+
     if _llm_client is None:
         _llm_client = OpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=OPENROUTER_API_KEY,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=0,
         )
     return _llm_client
 
@@ -236,6 +242,7 @@ def call_llm(system_prompt: str, user_prompt: str, model: str = None, _retries: 
             ],
             temperature=LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
+            timeout=LLM_TIMEOUT_SECONDS,
         )
 
         # Guard against None/empty choices (upstream provider can return null)
