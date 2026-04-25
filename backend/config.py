@@ -17,6 +17,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "qwen/qwen3-coder:free")
 LLM_MAX_TOKENS = 4096  # Increased — new models support much larger context windows
 LLM_TEMPERATURE = 0.1  # Low temp for deterministic security analysis
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
 
 # Context window capabilities for model-aware batching
 MODEL_CONTEXT_WINDOWS = {
@@ -46,6 +47,16 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # ─── API ──────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
+CORS_ALLOW_ORIGINS = [
+  origin.strip()
+  for origin in os.getenv(
+    "CORS_ALLOW_ORIGINS",
+    "http://localhost:3100,http://127.0.0.1:3100"
+  ).split(",")
+  if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 # ─── RAG Configuration ───────────────────────────────────────────────
 EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -153,6 +164,10 @@ Relationship types:
   (APTGroup)-[:USES]->(Technique)
 
 User question: {question}
+
+Critical requirement:
+- Scope every relevant node pattern by investigation_id using `$investigation_id`.
+- Return read-only Cypher only.
 
 Return ONLY the Cypher query, no explanation."""
 
