@@ -10,18 +10,45 @@ from loguru import logger
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import WEAVIATE_URL, ATTACK_STIX_URL, STIX_DIR, RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP
+from config import (
+    WEAVIATE_URL,
+    WEAVIATE_GRPC_URL,
+    ATTACK_STIX_URL,
+    STIX_DIR,
+    RAG_CHUNK_SIZE,
+    RAG_CHUNK_OVERLAP,
+)
 from rag.embeddings import embed_document, get_embedding_dimension
+
+
+def _split_host_port(endpoint: str, default_port: int) -> tuple[str, int]:
+    cleaned = endpoint.replace("http://", "").replace("https://", "").split("/")[0]
+    if ":" in cleaned:
+        host, port = cleaned.rsplit(":", 1)
+        try:
+            return host, int(port)
+        except ValueError:
+            return host, default_port
+    return cleaned, default_port
 
 
 def get_weaviate_client():
     """Get Weaviate client."""
     import weaviate
-    client = weaviate.connect_to_local(
-        host=WEAVIATE_URL.replace("http://", "").split(":")[0],
-        port=int(WEAVIATE_URL.split(":")[-1]),
-    )
-    return client
+    http_host, http_port = _split_host_port(WEAVIATE_URL, 8080)
+    grpc_host, grpc_port = _split_host_port(WEAVIATE_GRPC_URL, 50051)
+
+    try:
+        return weaviate.connect_to_custom(
+            http_host=http_host,
+            http_port=http_port,
+            http_secure=False,
+            grpc_host=grpc_host,
+            grpc_port=grpc_port,
+            grpc_secure=False,
+        )
+    except Exception:
+        return weaviate.connect_to_local(host=http_host, port=http_port)
 
 
 def setup_weaviate_schema(client) -> None:
