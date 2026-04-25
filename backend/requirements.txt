@@ -14,8 +14,8 @@ langchain-community>=0.2.0
 # Vector Store
 weaviate-client>=4.4.0
 
-# Embeddings & Reranking (optional — installs PyTorch)
-# sentence-transformers>=2.6.1
+# Embeddings & Reranking
+sentence-transformers>=2.6.1
 
 # Graph Database
 neo4j>=5.18.0
