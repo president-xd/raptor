@@ -4,6 +4,7 @@ Per spec Section 7.3: the killer differentiator.
 Routes questions to graph (Cypher), RAG, or simulation sub-pipelines.
 """
 import json
+import re
 from typing import Dict, Any, Optional
 from loguru import logger
 
@@ -17,6 +18,13 @@ from rag.reranker import rerank_technique_results
 
 class QueryEngine:
     """Natural language query engine with multi-pipeline routing."""
+
+    WRITE_OR_UNSAFE_CYPHER = re.compile(
+        r"\b(CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|LOAD\s+CSV|FOREACH|CALL\s+dbms|CALL\s+apoc)\b",
+        re.IGNORECASE,
+    )
+
+    GRAPH_LABELS = "Host|User|Process|File|Network|Technique|APTGroup"
 
     def __init__(self, neo4j_client=None):
         self.neo4j = neo4j_client
@@ -61,33 +69,38 @@ class QueryEngine:
 
     def _handle_graph_query(self, question: str, investigation_id: str) -> Dict[str, Any]:
         """Translate NL to Cypher and execute against Neo4j."""
-        # Generate Cypher via LLM (grounded by schema in prompt)
-        prompt = NLQ_CYPHER_PROMPT.format(question=question)
-        try:
-            cypher = call_llm("You are a Neo4j Cypher expert. Return ONLY the query.", prompt)
-        except Exception as e:
-            logger.error(f"Cypher generation failed: {e}")
-            return {
-                "answer": "Graph query generation is unavailable. Review the Attack Graph tab for host movement and observed techniques.",
-                "sources": [{"type": "neo4j", "error": str(e)}],
-                "confidence": "low",
-                "query_type": "graph",
-            }
+        cypher = None
+        deterministic = self._deterministic_graph_query(question)
+        if deterministic:
+            cypher = deterministic
+            logger.info(f"Using deterministic graph query: {cypher}")
+        else:
+            # Generate Cypher via LLM (grounded by schema in prompt)
+            prompt = NLQ_CYPHER_PROMPT.format(question=question)
+            try:
+                generated = call_llm("You are a Neo4j Cypher expert. Return ONLY the query.", prompt)
+                cypher = self._sanitize_and_scope_query(generated)
+            except Exception as e:
+                logger.error(f"Cypher generation failed: {e}")
 
-        # Clean the cypher
-        cypher = cypher.strip().strip('`').strip()
-        if cypher.startswith("cypher"):
-            cypher = cypher[6:].strip()
+        if not cypher:
+            cypher = (
+                "MATCH (h:Host {investigation_id: $investigation_id, compromised: true}) "
+                "RETURN h.hostname AS hostname, h.ip AS ip, h.compromise_time AS compromise_time "
+                "ORDER BY h.compromise_time"
+            )
+            logger.warning("Falling back to safe default graph query")
 
-        logger.info(f"Generated Cypher: {cypher}")
+        logger.info(f"Executing scoped Cypher: {cypher}")
 
         # Execute if Neo4j is available
         results = []
         if self.neo4j and self.neo4j.is_connected():
             try:
-                # Inject investigation_id parameter
-                results = self.neo4j.run_query(cypher, {"inv_id": investigation_id,
-                                                         "investigation_id": investigation_id})
+                results = self.neo4j.run_query(
+                    cypher,
+                    {"investigation_id": investigation_id, "inv_id": investigation_id},
+                )
             except Exception as e:
                 logger.error(f"Cypher execution failed: {e}")
                 results = [{"error": str(e)}]
@@ -101,6 +114,89 @@ class QueryEngine:
             "confidence": "high" if results else "low",
             "query_type": "graph",
         }
+
+    def _deterministic_graph_query(self, question: str) -> Optional[str]:
+        """Return parameterized read-only queries for common graph intents."""
+        q = question.lower()
+
+        if "how many" in q and "compromised" in q and "host" in q:
+            return (
+                "MATCH (h:Host {investigation_id: $investigation_id, compromised: true}) "
+                "RETURN count(h) AS compromised_hosts"
+            )
+
+        if "lateral" in q and any(token in q for token in ["path", "movement", "move"]):
+            return (
+                "MATCH (a:Host {investigation_id: $investigation_id})"
+                "-[r:LATERAL_MOVED_TO]->"
+                "(b:Host {investigation_id: $investigation_id}) "
+                "RETURN a.hostname AS source, b.hostname AS target, "
+                "r.technique AS technique, r.timestamp AS timestamp "
+                "ORDER BY r.timestamp"
+            )
+
+        if "domain controller" in q and any(token in q for token in ["hop", "shortest", "path"]):
+            return (
+                "MATCH p=shortestPath((src:Host {investigation_id: $investigation_id, compromised: true})"
+                "-[:LATERAL_MOVED_TO*..6]->"
+                "(dc:Host {investigation_id: $investigation_id, is_dc: true})) "
+                "RETURN src.hostname AS source_host, dc.hostname AS domain_controller, "
+                "length(p) AS hops LIMIT 5"
+            )
+
+        return None
+
+    def _sanitize_and_scope_query(self, raw_query: str) -> Optional[str]:
+        """Sanitize generated Cypher and enforce per-investigation node scoping."""
+        if not raw_query:
+            return None
+
+        query = raw_query.strip().strip("`").strip()
+        if query.lower().startswith("cypher"):
+            query = query[6:].strip()
+
+        if query.count(";") > 0:
+            logger.warning("Rejected Cypher with semicolon")
+            return None
+
+        if self.WRITE_OR_UNSAFE_CYPHER.search(query):
+            logger.warning(f"Rejected unsafe Cypher: {query}")
+            return None
+
+        if "return" not in query.lower():
+            logger.warning("Rejected Cypher without RETURN clause")
+            return None
+
+        query = self._scope_investigation_nodes(query)
+        if "$investigation_id" not in query and "$inv_id" not in query:
+            logger.warning("Rejected Cypher that could not be scoped")
+            return None
+
+        return query
+
+    def _scope_investigation_nodes(self, query: str) -> str:
+        """Inject investigation_id property on labeled nodes that support tenant scoping."""
+        node_pattern = re.compile(
+            rf"\((?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<label>{self.GRAPH_LABELS})(?:\s*(?P<props>\{{[^{{}}]*\}}))?\)"
+        )
+
+        def add_scope(match: re.Match) -> str:
+            alias = match.group("alias")
+            label = match.group("label")
+            props = match.group("props")
+
+            if props and "investigation_id" in props:
+                return match.group(0)
+
+            if props:
+                inner = props[1:-1].strip()
+                scoped = f"{{investigation_id: $investigation_id, {inner}}}" if inner else "{investigation_id: $investigation_id}"
+            else:
+                scoped = "{investigation_id: $investigation_id}"
+
+            return f"({alias}:{label} {scoped})"
+
+        return node_pattern.sub(add_scope, query)
 
     def _handle_rag_query(self, question: str, investigation_id: str) -> Dict[str, Any]:
         """Answer using RAG retrieval from ATT&CK knowledge base."""
@@ -212,3 +308,8 @@ Provide a clear, concise answer."""
     def close(self):
         if self.retriever:
             self.retriever.close()
+        if self.neo4j:
+            try:
+                self.neo4j.close()
+            except Exception:
+                pass
