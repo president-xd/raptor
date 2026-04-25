@@ -10,9 +10,11 @@ import uuid
 import asyncio
 import sqlite3
 import traceback
+import socket
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +31,9 @@ from config import (
     MAX_UPLOAD_BYTES,
     CORS_ALLOW_ORIGINS,
     CORS_ALLOW_CREDENTIALS,
+    ELASTICSEARCH_URL,
+    ELASTIC_INDEX_PREFIX,
+    REDIS_URL,
 )
 from schema import (
     RaptorEvent, Finding, AnalysisResult, AttributionResult,
@@ -36,7 +41,7 @@ from schema import (
 )
 from models import (
     InvestigateResponse, InvestigationStatus, InvestigationReport, InvestigationListResponse,
-    InvestigationListItem,
+    InvestigationListItem, InvestigateTextRequest,
     SimulateRequest, SimulationResponse,
     QueryRequest, QueryResponse,
     APTProfileSummary, APTProfileListResponse,
@@ -115,6 +120,82 @@ def db_create(inv_id: str):
     conn.close()
 
 
+def start_investigation_from_content(
+    background_tasks: BackgroundTasks,
+    log_content: str,
+    metadata: Optional[dict] = None,
+) -> InvestigateResponse:
+    """Validate log text, persist a queued job, and launch the pipeline."""
+    if not log_content or not log_content.strip():
+        raise HTTPException(status_code=400, detail="Investigation input is empty")
+
+    byte_count = len(log_content.encode("utf-8", errors="replace"))
+    if byte_count > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Input too large ({byte_count} bytes). Max allowed is {MAX_UPLOAD_BYTES} bytes.",
+        )
+
+    investigation_id = str(uuid.uuid4())
+    db_create(investigation_id)
+    background_tasks.add_task(run_investigation, investigation_id, log_content, metadata or {})
+
+    logger.info(f"Investigation {investigation_id} started ({byte_count} bytes)")
+    return InvestigateResponse(
+        investigation_id=investigation_id,
+        status="queued",
+        message=f"Investigation started. {byte_count} bytes of logs received.",
+    )
+
+
+def fetch_elasticsearch_logs(
+    query: str,
+    time_range_start: Optional[str] = None,
+    time_range_end: Optional[str] = None,
+    limit: int = 500,
+) -> str:
+    """Fetch matching Elasticsearch documents and serialize them as JSON lines."""
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Elasticsearch query is required")
+
+    try:
+        from elasticsearch import Elasticsearch
+
+        client = Elasticsearch(ELASTICSEARCH_URL, request_timeout=10)
+        filters = []
+        time_range = {}
+        if time_range_start:
+            time_range["gte"] = time_range_start
+        if time_range_end:
+            time_range["lte"] = time_range_end
+        if time_range:
+            filters.append({"range": {"@timestamp": time_range}})
+
+        response = client.search(
+            index=f"{ELASTIC_INDEX_PREFIX}*",
+            body={
+                "query": {
+                    "bool": {
+                        "must": [{"query_string": {"query": query}}],
+                        "filter": filters,
+                    }
+                },
+                "size": max(1, min(limit, 1000)),
+                "sort": [{"@timestamp": {"order": "asc", "unmapped_type": "date"}}],
+            },
+            ignore_unavailable=True,
+        )
+        hits = response.get("hits", {}).get("hits", [])
+        if not hits:
+            raise HTTPException(status_code=404, detail="No Elasticsearch events matched that query")
+        return "\n".join(json.dumps(hit.get("_source", {}), default=str) for hit in hits)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Elasticsearch investigation query failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Elasticsearch unavailable: {e}")
+
+
 def db_list(limit: int = 25) -> list[dict]:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -134,13 +215,14 @@ def db_list(limit: int = 25) -> list[dict]:
 
 # ─── Background Investigation Pipeline ──────────────────────────────
 
-def run_investigation(investigation_id: str, log_content: str):
+def run_investigation(investigation_id: str, log_content: str, metadata: Optional[dict] = None):
     """Full investigation pipeline running in background thread (sync, NOT async).
     
     IMPORTANT: This MUST be a sync function (not async) so that FastAPI's
     BackgroundTasks runs it in a thread pool. If this were async, it would
     block the event loop and make ALL endpoints unresponsive during analysis.
     """
+    metadata = metadata or {}
     try:
         db_update(investigation_id, status="processing", progress=5,
                   current_phase="Parsing logs")
@@ -210,6 +292,27 @@ def run_investigation(investigation_id: str, log_content: str):
             observed_ttps.add(tid)
 
         apt_profiles = load_apt_profiles()
+        apt_filters = [
+            str(item).strip().lower()
+            for item in metadata.get("apt_filters", [])
+            if str(item).strip()
+        ]
+        if apt_filters:
+            filtered_profiles = {}
+            for apt_name, profile in apt_profiles.items():
+                aliases = [str(alias).lower() for alias in profile.get("aliases", [])]
+                haystack = [apt_name.lower(), *aliases]
+                if any(filter_value in value for filter_value in apt_filters for value in haystack):
+                    filtered_profiles[apt_name] = profile
+            if filtered_profiles:
+                apt_profiles = filtered_profiles
+                analysis.anomalies.append(
+                    f"APT focus filter applied: {', '.join(metadata.get('apt_filters', []))}"
+                )
+            else:
+                analysis.anomalies.append(
+                    f"APT focus filter matched no profiles; scored full library instead."
+                )
 
         # Calculate campaign duration from events
         campaign_hours = 0
@@ -282,7 +385,6 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
     Upload a log file and start an investigation.
     POST /api/v1/investigate
     """
-    investigation_id = str(uuid.uuid4())
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -294,15 +396,34 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
         )
 
     log_content = content.decode('utf-8', errors='replace')
+    return start_investigation_from_content(background_tasks, log_content, {"source": "file"})
 
-    db_create(investigation_id)
-    background_tasks.add_task(run_investigation, investigation_id, log_content)
 
-    logger.info(f"Investigation {investigation_id} started ({len(log_content)} bytes)")
-    return InvestigateResponse(
-        investigation_id=investigation_id,
-        status="queued",
-        message=f"Investigation started. {len(log_content)} bytes of logs received.",
+@app.post("/api/v1/investigate/text", response_model=InvestigateResponse)
+async def investigate_text(background_tasks: BackgroundTasks, request: InvestigateTextRequest):
+    """
+    Start an investigation from pasted logs or an Elasticsearch query.
+    POST /api/v1/investigate/text
+    """
+    log_content = request.log_content or ""
+    if not log_content.strip() and request.elastic_query:
+        log_content = fetch_elasticsearch_logs(
+            request.elastic_query,
+            request.time_range_start,
+            request.time_range_end,
+        )
+
+    return start_investigation_from_content(
+        background_tasks,
+        log_content,
+        {
+            "source": request.source,
+            "elastic_query": request.elastic_query,
+            "time_range_start": request.time_range_start,
+            "time_range_end": request.time_range_end,
+            "sensitivity": request.sensitivity,
+            "apt_filters": request.apt_filters,
+        },
     )
 
 
@@ -548,6 +669,8 @@ async def health_check_detailed():
         "sqlite": {"status": "healthy", "detail": ""},
         "neo4j": {"status": "degraded", "detail": "unreachable"},
         "weaviate": {"status": "degraded", "detail": "unreachable"},
+        "elasticsearch": {"status": "degraded", "detail": "unreachable"},
+        "redis": {"status": "degraded", "detail": "unreachable"},
         "llm": {"status": "degraded", "detail": "OPENROUTER_API_KEY missing"},
     }
 
@@ -585,6 +708,34 @@ async def health_check_detailed():
             client.close()
     except Exception as e:
         checks["weaviate"] = {"status": "degraded", "detail": str(e)}
+
+    # Elasticsearch
+    try:
+        from elasticsearch import Elasticsearch
+        es = Elasticsearch(ELASTICSEARCH_URL, request_timeout=3)
+        ready = bool(es.ping())
+        checks["elasticsearch"] = {
+            "status": "healthy" if ready else "degraded",
+            "detail": "connected" if ready else "not connected",
+        }
+    except Exception as e:
+        checks["elasticsearch"] = {"status": "degraded", "detail": str(e)}
+
+    # Redis, checked without requiring an extra Python package.
+    try:
+        parsed = urlparse(REDIS_URL)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        with socket.create_connection((host, port), timeout=3) as conn:
+            conn.sendall(b"*1\r\n$4\r\nPING\r\n")
+            response = conn.recv(32)
+        ready = response.startswith(b"+PONG")
+        checks["redis"] = {
+            "status": "healthy" if ready else "degraded",
+            "detail": "connected" if ready else "unexpected ping response",
+        }
+    except Exception as e:
+        checks["redis"] = {"status": "degraded", "detail": str(e)}
 
     # LLM config readiness
     from config import OPENROUTER_API_KEY
