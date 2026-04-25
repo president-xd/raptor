@@ -22,13 +22,21 @@ from loguru import logger
 # Ensure backend dir is on path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from config import API_HOST, API_PORT, DB_PATH
+from config import (
+    API_HOST,
+    API_PORT,
+    DB_PATH,
+    MAX_UPLOAD_BYTES,
+    CORS_ALLOW_ORIGINS,
+    CORS_ALLOW_CREDENTIALS,
+)
 from schema import (
     RaptorEvent, Finding, AnalysisResult, AttributionResult,
     SimulationPrediction, AttackGraph
 )
 from models import (
-    InvestigateResponse, InvestigationStatus, InvestigationReport,
+    InvestigateResponse, InvestigationStatus, InvestigationReport, InvestigationListResponse,
+    InvestigationListItem,
     SimulateRequest, SimulationResponse,
     QueryRequest, QueryResponse,
     APTProfileSummary, APTProfileListResponse,
@@ -44,8 +52,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -107,6 +115,23 @@ def db_create(inv_id: str):
     conn.close()
 
 
+def db_list(limit: int = 25) -> list[dict]:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT id, status, progress, current_phase, error,
+               event_count, technique_count, created_at, completed_at
+        FROM investigations
+        ORDER BY datetime(created_at) DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
 # ─── Background Investigation Pipeline ──────────────────────────────
 
 def run_investigation(investigation_id: str, log_content: str):
@@ -142,7 +167,8 @@ def run_investigation(investigation_id: str, log_content: str):
 
         # Phase 4: Build Attack Graph
         db_update(investigation_id, progress=55, current_phase="Building attack graph")
-        graph_json = "{}"
+        attack_graph = AttackGraph(investigation_id=investigation_id, nodes=[], edges=[])
+        graph_json = attack_graph.model_dump_json()
         try:
             from graph.neo4j_client import Neo4jClient
             from graph.graph_builder import GraphBuilder
@@ -208,7 +234,10 @@ def run_investigation(investigation_id: str, log_content: str):
         from report.generator import generate_report
 
         graph_summary = {
-            "hosts_compromised": sum(1 for e in events if e.event_type == "lateral"),
+            "hosts_compromised": sum(
+                1 for n in (attack_graph.nodes or [])
+                if n.node_type == "host" and bool(n.metadata.get("compromised"))
+            ) if attack_graph else sum(1 for e in events if e.event_type == "lateral"),
             "total_events": len(events),
             "unique_hosts": len(set(e.source_host for e in events if e.source_host)),
             "campaign_duration_hours": campaign_hours,
@@ -252,6 +281,15 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
     """
     investigation_id = str(uuid.uuid4())
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(content)} bytes). Max allowed is {MAX_UPLOAD_BYTES} bytes.",
+        )
+
     log_content = content.decode('utf-8', errors='replace')
 
     db_create(investigation_id)
@@ -263,6 +301,28 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
         status="queued",
         message=f"Investigation started. {len(log_content)} bytes of logs received.",
     )
+
+
+@app.get("/api/v1/investigations", response_model=InvestigationListResponse)
+async def list_investigations(limit: int = 25):
+    """List recent investigations for case management UX."""
+    safe_limit = max(1, min(limit, 100))
+    rows = db_list(safe_limit)
+    items = [
+        InvestigationListItem(
+            investigation_id=row.get("id", ""),
+            status=row.get("status", "queued"),
+            progress=row.get("progress", 0) or 0,
+            current_phase=row.get("current_phase") or "",
+            event_count=row.get("event_count") or 0,
+            technique_count=row.get("technique_count") or 0,
+            created_at=row.get("created_at") or "",
+            completed_at=row.get("completed_at"),
+            error=row.get("error"),
+        )
+        for row in rows
+    ]
+    return InvestigationListResponse(investigations=items, total_count=len(items))
 
 
 @app.get("/api/v1/investigate/{investigation_id}/status", response_model=InvestigationStatus)
@@ -369,6 +429,15 @@ async def simulate(request: SimulateRequest):
     if not attribution:
         attribution = AttributionResult(**attribution_data[0])
 
+    if attribution.confidence_label in {"UNKNOWN", "LOW"}:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Simulation blocked due to low-confidence attribution ({attribution.confidence_label}, "
+                f"{attribution.confidence_score:.0%}). Refine evidence before prediction."
+            ),
+        )
+
     # Get findings for observed TTPs
     findings_data = json.loads(record.get("findings_json") or "[]")
     observed_ttps = [f.get("technique_id", "") for f in findings_data if f.get("technique_id")]
@@ -428,7 +497,11 @@ async def query(request: QueryRequest):
     if not record:
         raise HTTPException(status_code=404, detail="Investigation not found")
 
+    if record["status"] != "complete":
+        raise HTTPException(status_code=400, detail="Investigation not complete yet")
+
     from nlq.query_engine import QueryEngine
+    neo4j = None
     try:
         from graph.neo4j_client import Neo4jClient
         neo4j = Neo4jClient()
@@ -452,11 +525,77 @@ async def query(request: QueryRequest):
 @app.get("/api/v1/health")
 async def health_check():
     """Health check endpoint."""
+    detail = await health_check_detailed()
     return {
-        "status": "healthy",
+        "status": detail.get("status", "degraded"),
         "service": "RAPTOR API",
         "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat(),
+        "subsystems": detail.get("subsystems", {}),
+    }
+
+
+@app.get("/api/v1/health/detailed")
+async def health_check_detailed():
+    """Detailed subsystem health for API/UI degraded-mode visibility."""
+    checks = {
+        "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
+        "sqlite": {"status": "healthy", "detail": ""},
+        "neo4j": {"status": "degraded", "detail": "unreachable"},
+        "weaviate": {"status": "degraded", "detail": "unreachable"},
+        "llm": {"status": "degraded", "detail": "OPENROUTER_API_KEY missing"},
+    }
+
+    # SQLite
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["sqlite"] = {"status": "healthy", "detail": "query ok"}
+    except Exception as e:
+        checks["sqlite"] = {"status": "degraded", "detail": str(e)}
+
+    # Neo4j
+    try:
+        from graph.neo4j_client import Neo4jClient
+        neo = Neo4jClient()
+        checks["neo4j"] = {
+            "status": "healthy" if neo.is_connected() else "degraded",
+            "detail": "connected" if neo.is_connected() else "not connected",
+        }
+        neo.close()
+    except Exception as e:
+        checks["neo4j"] = {"status": "degraded", "detail": str(e)}
+
+    # Weaviate
+    try:
+        from rag.retriever import get_weaviate_client
+        client = get_weaviate_client()
+        ready = bool(client)
+        checks["weaviate"] = {
+            "status": "healthy" if ready else "degraded",
+            "detail": "connected" if ready else "not connected",
+        }
+        if client:
+            client.close()
+    except Exception as e:
+        checks["weaviate"] = {"status": "degraded", "detail": str(e)}
+
+    # LLM config readiness
+    from config import OPENROUTER_API_KEY
+    if OPENROUTER_API_KEY:
+        checks["llm"] = {"status": "healthy", "detail": "api key configured"}
+
+    overall = "healthy"
+    if any(v["status"] != "healthy" for v in checks.values()):
+        overall = "degraded"
+
+    return {
+        "status": overall,
+        "service": "RAPTOR API",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "subsystems": checks,
     }
 
 
