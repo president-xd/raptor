@@ -15,6 +15,7 @@ export const investigateAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  submitText: (payload) => api.post('/investigate/text', payload),
   getStatus: (id) => api.get(`/investigate/${id}/status`),
   getReport: (id) => api.get(`/investigate/${id}/report`),
   getGraph: (id) => api.get(`/investigate/${id}/graph`),
