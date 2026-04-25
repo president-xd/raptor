@@ -26,11 +26,15 @@ export default function Attribution({ attributionResults }) {
       </h3>
 
       {attributionResults.map((result, i) => {
-        const conf = CONFIDENCE_CONFIG[result.confidence_label] || CONFIDENCE_CONFIG.UNKNOWN;
+        const score = Number(result.confidence_score || 0);
+        const rawLabel = (result.confidence_label || 'UNKNOWN').toUpperCase();
+        const displayLabel = score < 0.3 ? 'UNKNOWN' : rawLabel;
+        const conf = CONFIDENCE_CONFIG[displayLabel] || CONFIDENCE_CONFIG.UNKNOWN;
         const Icon = conf.icon;
         const isTop = i === 0;
-        const isReliableTop = isTop && ['HIGH', 'MEDIUM'].includes((result.confidence_label || '').toUpperCase());
+        const isReliableTop = isTop && ['HIGH', 'MEDIUM'].includes(displayLabel) && score >= 0.5;
         const isUnreliableTop = isTop && !isReliableTop;
+        const weakLabel = displayLabel === 'LOW' ? 'LOW CONFIDENCE' : 'UNKNOWN / LOW CONFIDENCE';
 
         return (
           <div key={i} className={`glass-card p-5 transition-all ${isReliableTop ? 'border-raptor-accent/40 animate-glow' : ''}`}>
@@ -38,7 +42,7 @@ export default function Attribution({ attributionResults }) {
               <div>
                 <div className="flex items-center gap-2">
                   {isReliableTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-accent/20 text-raptor-accent font-semibold">TOP MATCH</span>}
-                  {isUnreliableTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-warning/15 text-raptor-warning font-semibold">TENTATIVE</span>}
+                  {isUnreliableTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-warning/15 text-raptor-warning font-semibold">{weakLabel}</span>}
                   <h4 className="text-lg font-bold text-raptor-text">{result.apt_name}</h4>
                 </div>
                 {result.aliases && result.aliases.length > 0 && (
@@ -48,23 +52,23 @@ export default function Attribution({ attributionResults }) {
                 )}
                 {isUnreliableTop && (
                   <p className="text-xs text-raptor-warning mt-1">
-                    Confidence too low for trusted attribution. Treat as unconfirmed.
+                    Confidence too low for trusted attribution. Do not use this as a confirmed actor assessment.
                   </p>
                 )}
               </div>
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${conf.bg} border ${conf.border}`}>
                 <Icon className={`w-4 h-4 ${conf.color}`} />
                 <span className={`text-sm font-bold ${conf.color}`}>
-                  {(result.confidence_score * 100).toFixed(0)}%
+                  {(score * 100).toFixed(0)}%
                 </span>
-                <span className={`text-xs ${conf.color}`}>{result.confidence_label}</span>
+                <span className={`text-xs ${conf.color}`}>{displayLabel}</span>
               </div>
             </div>
 
             {/* Confidence Bar */}
             <div className="mb-3">
               <div className="progress-bar">
-                <div className="progress-bar-fill" style={{ width: `${result.confidence_score * 100}%` }} />
+                <div className={`progress-bar-fill ${isReliableTop ? '' : 'uncertain'}`} style={{ width: `${score * 100}%` }} />
               </div>
             </div>
 
