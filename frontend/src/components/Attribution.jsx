@@ -29,18 +29,26 @@ export default function Attribution({ attributionResults }) {
         const conf = CONFIDENCE_CONFIG[result.confidence_label] || CONFIDENCE_CONFIG.UNKNOWN;
         const Icon = conf.icon;
         const isTop = i === 0;
+        const isReliableTop = isTop && ['HIGH', 'MEDIUM'].includes((result.confidence_label || '').toUpperCase());
+        const isUnreliableTop = isTop && !isReliableTop;
 
         return (
-          <div key={i} className={`glass-card p-5 transition-all ${isTop ? 'border-raptor-accent/40 animate-glow' : ''}`}>
+          <div key={i} className={`glass-card p-5 transition-all ${isReliableTop ? 'border-raptor-accent/40 animate-glow' : ''}`}>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <div className="flex items-center gap-2">
-                  {isTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-accent/20 text-raptor-accent font-semibold">TOP MATCH</span>}
+                  {isReliableTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-accent/20 text-raptor-accent font-semibold">TOP MATCH</span>}
+                  {isUnreliableTop && <span className="text-xs px-2 py-0.5 rounded-full bg-raptor-warning/15 text-raptor-warning font-semibold">TENTATIVE</span>}
                   <h4 className="text-lg font-bold text-raptor-text">{result.apt_name}</h4>
                 </div>
                 {result.aliases && result.aliases.length > 0 && (
                   <p className="text-xs text-raptor-muted mt-0.5">
                     aka {result.aliases.slice(0, 3).join(', ')}
+                  </p>
+                )}
+                {isUnreliableTop && (
+                  <p className="text-xs text-raptor-warning mt-1">
+                    Confidence too low for trusted attribution. Treat as unconfirmed.
                   </p>
                 )}
               </div>
