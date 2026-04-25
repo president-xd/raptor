@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, MessageSquare, Loader2 } from 'lucide-react';
+import { Code2, Database, FileText, Loader2, MessageSquare, Send } from 'lucide-react';
 import { queryAPI } from '../api';
 
 export default function QueryBar({ investigationId }) {
@@ -25,7 +25,7 @@ export default function QueryBar({ investigationId }) {
       const response = await queryAPI.ask(question, investigationId);
       const result = response.data;
       setAnswer(result);
-      setHistory(prev => [...prev, { question, answer: result.answer, type: result.query_type }]);
+      setHistory(prev => [...prev, { question, answer: result.answer, type: result.query_type, sources: result.sources || [] }]);
     } catch (err) {
       setAnswer({ answer: 'Error: ' + (err.response?.data?.detail || 'Query failed'), confidence: 'low' });
     } finally {
@@ -78,18 +78,7 @@ export default function QueryBar({ investigationId }) {
             )}
           </div>
           <p className="text-sm text-raptor-text leading-relaxed whitespace-pre-wrap">{answer.answer}</p>
-          {answer.sources && answer.sources.length > 0 && (
-            <div className="mt-3 pt-2 border-t border-raptor-border">
-              <p className="text-xs text-raptor-muted mb-1">Sources:</p>
-              <div className="flex flex-wrap gap-1">
-                {answer.sources.slice(0, 5).map((s, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 rounded bg-raptor-card text-raptor-muted font-mono">
-                    {s.technique_id || s.type || 'source'}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          <SourceList sources={answer.sources || []} />
         </div>
       )}
 
@@ -104,6 +93,42 @@ export default function QueryBar({ investigationId }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function SourceList({ sources }) {
+  if (!sources.length) {
+    return (
+      <div className="query-sources empty">
+        <Database className="w-4 h-4" />
+        <span>No grounding sources returned.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="query-sources">
+      {sources.slice(0, 6).map((source, index) => (
+        <div key={index} className="source-card">
+          <div className="source-card-title">
+            {source.query ? <Code2 className="w-3.5 h-3.5" /> : source.type === 'threat_report' ? <FileText className="w-3.5 h-3.5" /> : <Database className="w-3.5 h-3.5" />}
+            <strong>{source.technique_id || source.title || source.type || 'source'}</strong>
+            {source.status && <span>{source.status}</span>}
+          </div>
+          {source.name && <p>{source.name}</p>}
+          {source.apt_group && <p>{source.apt_group}</p>}
+          {source.detail && <p>{source.detail}</p>}
+          {source.query && (
+            <pre>
+              <code>{source.query}</code>
+            </pre>
+          )}
+          {source.results && (
+            <p>{source.results.length} graph rows returned</p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
