@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   weaviate:
-    image: semitechnologies/weaviate:1.23.0
+    image: semitechnologies/weaviate:1.27.6
     container_name: raptor-weaviate
     environment:
       QUERY_DEFAULTS_LIMIT: 25
