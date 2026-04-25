@@ -12,7 +12,8 @@ langchain-openai>=0.1.7
 langchain-community>=0.2.0
 
 # Vector Store
-weaviate-client>=4.4.0
+# RAPTOR uses the Python v4 collection/gRPC API; keep installs on that major line.
+weaviate-client>=4.4.0,<5.0.0
 
 # Embeddings & Reranking
 sentence-transformers>=2.6.1
