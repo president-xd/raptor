@@ -13,6 +13,22 @@ _model = None
 _model_name = None
 
 
+def _allow_test_fallback() -> bool:
+    return os.environ.get("RAPTOR_ALLOW_TEST_EMBEDDINGS", "false").lower() == "true"
+
+
+def _deterministic_test_embedding(text: str, dim: int = 1024) -> np.ndarray:
+    """Deterministic non-semantic embedding for explicit test-only mode."""
+    import hashlib
+
+    digest = hashlib.sha512(text.encode("utf-8")).digest()
+    seed = int.from_bytes(digest[:8], byteorder="big", signed=False)
+    rng = np.random.default_rng(seed)
+    vec = rng.standard_normal(dim).astype(np.float32)
+    norm = np.linalg.norm(vec)
+    return vec / norm if norm > 0 else vec
+
+
 def get_model():
     """Lazy-load the embedding model."""
     global _model, _model_name
@@ -44,10 +60,16 @@ def embed_texts(texts: Union[str, List[str]], prefix: str = "") -> np.ndarray:
     if model is not None:
         embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
         return np.array(embeddings)
-    else:
-        # Fallback: return random vectors (for testing without model download)
-        logger.warning("Using random embeddings (model not available)")
-        return np.random.randn(len(texts), 1024).astype(np.float32)
+
+    if _allow_test_fallback():
+        logger.warning("Using deterministic test embeddings (RAPTOR_ALLOW_TEST_EMBEDDINGS=true)")
+        vectors = [_deterministic_test_embedding(t) for t in texts]
+        return np.array(vectors)
+
+    raise RuntimeError(
+        "Embedding model is unavailable. Install sentence-transformers or set "
+        "RAPTOR_ALLOW_TEST_EMBEDDINGS=true for non-production deterministic test vectors."
+    )
 
 
 def embed_query(text: str) -> np.ndarray:
