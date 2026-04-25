@@ -169,6 +169,7 @@ def run_investigation(investigation_id: str, log_content: str):
         db_update(investigation_id, progress=55, current_phase="Building attack graph")
         attack_graph = AttackGraph(investigation_id=investigation_id, nodes=[], edges=[])
         graph_json = attack_graph.model_dump_json()
+        neo4j = None
         try:
             from graph.neo4j_client import Neo4jClient
             from graph.graph_builder import GraphBuilder
@@ -178,7 +179,6 @@ def run_investigation(investigation_id: str, log_content: str):
                 builder = GraphBuilder(neo4j)
                 attack_graph = builder.build_graph(investigation_id, events, analysis)
                 graph_json = attack_graph.model_dump_json()
-                neo4j.close()
             else:
                 # Build graph without Neo4j (in-memory only)
                 builder = GraphBuilder.__new__(GraphBuilder)
@@ -193,6 +193,9 @@ def run_investigation(investigation_id: str, log_content: str):
                 graph_json = attack_graph.model_dump_json()
         except Exception as e:
             logger.warning(f"Graph building error (non-fatal): {e}")
+        finally:
+            if neo4j:
+                neo4j.close()
 
         # Phase 5: APT Attribution
         db_update(investigation_id, progress=70, current_phase="APT attribution scoring")
@@ -280,7 +283,7 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
     POST /api/v1/investigate
     """
     investigation_id = str(uuid.uuid4())
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
@@ -509,8 +512,10 @@ async def query(request: QueryRequest):
         neo4j = None
 
     engine = QueryEngine(neo4j_client=neo4j)
-    result = engine.answer_question(request.question, request.investigation_id)
-    engine.close()
+    try:
+        result = engine.answer_question(request.question, request.investigation_id)
+    finally:
+        engine.close()
 
     return QueryResponse(
         answer=result.get("answer", ""),
@@ -571,7 +576,7 @@ async def health_check_detailed():
     try:
         from rag.retriever import get_weaviate_client
         client = get_weaviate_client()
-        ready = bool(client)
+        ready = bool(client.is_ready()) if client and hasattr(client, "is_ready") else bool(client)
         checks["weaviate"] = {
             "status": "healthy" if ready else "degraded",
             "detail": "connected" if ready else "not connected",
