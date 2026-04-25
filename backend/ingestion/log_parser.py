@@ -17,6 +17,45 @@ class LogParser:
     ]
     IP_RE = re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b')
 
+    @staticmethod
+    def _coerce_optional_str(value: Any) -> Optional[str]:
+        """Return None for null-like values, otherwise stripped string."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate.lower() in {"", "none", "null", "n/a", "na"}:
+                return None
+            return candidate
+        return str(value)
+
+    @staticmethod
+    def _coerce_str(value: Any) -> str:
+        """Return empty string for null-like values, otherwise stripped string."""
+        coerced = LogParser._coerce_optional_str(value)
+        return coerced or ""
+
+    @staticmethod
+    def _normalize_event_type(value: Any) -> Optional[str]:
+        """Normalize producer-provided event type into RAPTOR canonical values."""
+        raw = LogParser._coerce_optional_str(value)
+        if raw is None:
+            return None
+
+        normalized = raw.lower().replace("_", "-").strip()
+        aliases = {
+            "authentication": "auth",
+            "login": "auth",
+            "logon": "auth",
+            "credential": "auth",
+            "net": "network",
+            "connection": "network",
+            "proc": "process",
+            "registry-key": "registry",
+            "lateral-movement": "lateral",
+        }
+        return aliases.get(normalized, normalized)
+
     def parse_file(self, filepath: str) -> List[Dict[str, Any]]:
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -52,16 +91,34 @@ class LogParser:
         ev = {'timestamp': '', 'source_host': '', 'source_ip': '', 'dest_host': None,
               'dest_ip': None, 'event_type': 'process', 'raw': json.dumps(obj)}
         for k in ['timestamp', 'ts', '@timestamp', 'time', 'EventTime']:
-            if k in obj: ev['timestamp'] = str(obj[k]); break
+            if k in obj:
+                ev['timestamp'] = self._coerce_str(obj[k])
+                break
         for k in ['source_host', 'hostname', 'host', 'ComputerName', 'Computer']:
-            if k in obj: ev['source_host'] = str(obj[k]); break
+            if k in obj:
+                ev['source_host'] = self._coerce_str(obj[k])
+                break
         for k in ['source_ip', 'src_ip', 'src', 'SourceAddress']:
-            if k in obj: ev['source_ip'] = str(obj[k]); break
+            if k in obj:
+                ev['source_ip'] = self._coerce_str(obj[k])
+                break
         for k in ['dest_host', 'dst_host', 'DestinationHostname']:
-            if k in obj: ev['dest_host'] = str(obj[k]); break
+            if k in obj:
+                ev['dest_host'] = self._coerce_optional_str(obj[k])
+                break
         for k in ['dest_ip', 'dst_ip', 'dst', 'DestinationAddress']:
-            if k in obj: ev['dest_ip'] = str(obj[k]); break
-        ev['event_type'] = self._detect_type(json.dumps(obj).lower())
+            if k in obj:
+                ev['dest_ip'] = self._coerce_optional_str(obj[k])
+                break
+
+        provided_type = None
+        for k in ['event_type', 'type', 'eventType', 'category']:
+            if k in obj:
+                provided_type = self._normalize_event_type(obj[k])
+                if provided_type:
+                    break
+
+        ev['event_type'] = provided_type or self._detect_type(json.dumps(obj).lower())
         return ev
 
     def _parse_xml(self, content: str) -> List[Dict[str, Any]]:
