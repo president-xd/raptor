@@ -102,9 +102,12 @@ export default function Dashboard() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [polling, setPolling] = useState(Boolean(investigationId));
   const [simLoading, setSimLoading] = useState(false);
+  const [simError, setSimError] = useState('');
   const [aptProfiles, setAptProfiles] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
+  const [investigations, setInvestigations] = useState([]);
   const [apiHealth, setApiHealth] = useState('checking');
+  const [healthSubsystems, setHealthSubsystems] = useState({});
 
   const isComplete = status?.status === 'complete';
   const isProcessing = status && status.status !== 'complete' && status.status !== 'failed';
@@ -115,16 +118,33 @@ export default function Dashboard() {
   const highRiskFindings = useMemo(() => {
     return (report?.findings || []).filter((finding) => finding.confidence === 'high').slice(0, 5);
   }, [report]);
+  const canRunSimulation = ['HIGH', 'MEDIUM'].includes((topAttribution?.confidence_label || '').toUpperCase());
+
+  const loadInvestigations = async () => {
+    try {
+      const resp = await investigateAPI.list(25);
+      setInvestigations(resp.data.investigations || []);
+    } catch (err) {
+      console.error('Investigation list load failed:', err);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
-    healthAPI.check()
-      .then(() => {
-        if (alive) setApiHealth('healthy');
+    healthAPI.checkDetailed()
+      .then((resp) => {
+        if (alive) {
+          setApiHealth(resp?.data?.status || 'healthy');
+          setHealthSubsystems(resp?.data?.subsystems || {});
+        }
       })
       .catch(() => {
-        if (alive) setApiHealth('offline');
+        if (alive) {
+          setApiHealth('offline');
+          setHealthSubsystems({});
+        }
       });
+    loadInvestigations();
     return () => { alive = false; };
   }, []);
 
@@ -147,9 +167,11 @@ export default function Dashboard() {
             setReport(reportResp.data);
             setGraphData(graphResp.data);
             setPolling(false);
+            loadInvestigations();
           }
         } else if (statusResp.data.status === 'failed') {
           setPolling(false);
+          loadInvestigations();
         }
       } catch {
         if (!cancelled) {
@@ -177,10 +199,12 @@ export default function Dashboard() {
           ]);
           setReport(reportResp.data);
           setGraphData(graphResp.data);
+          loadInvestigations();
           setActivePage('investigations');
           setDetailTab('timeline');
         } else if (resp.data.status === 'failed') {
           setPolling(false);
+          loadInvestigations();
           setActivePage('investigations');
         }
       } catch (err) {
@@ -204,6 +228,7 @@ export default function Dashboard() {
     setInvestigationId(id);
     localStorage.setItem(LAST_INVESTIGATION_KEY, id);
     setPolling(true);
+    setSimError('');
     setStatus({
       investigation_id: id,
       status: 'queued',
@@ -216,6 +241,7 @@ export default function Dashboard() {
     setSelectedNode(null);
     setActivePage('investigations');
     setDetailTab('timeline');
+    loadInvestigations();
   };
 
   const handleNewInvestigation = () => {
@@ -226,19 +252,37 @@ export default function Dashboard() {
     setReport(null);
     setGraphData(null);
     setSimulation(null);
+    setSimError('');
     setSelectedNode(null);
     setActivePage('dashboard');
   };
 
+  const handleSelectInvestigation = (id) => {
+    if (!id) return;
+    setInvestigationId(id);
+    localStorage.setItem(LAST_INVESTIGATION_KEY, id);
+    setPolling(true);
+    setStatus(null);
+    setReport(null);
+    setGraphData(null);
+    setSimulation(null);
+    setSimError('');
+    setSelectedNode(null);
+    setActivePage('investigations');
+    setDetailTab('timeline');
+  };
+
   const handleRunSimulation = async () => {
-    if (!investigationId || !report) return;
+    if (!investigationId || !report || !canRunSimulation) return;
     setSimLoading(true);
+    setSimError('');
     try {
       const resp = await simulateAPI.predict(investigationId);
       setSimulation(resp.data);
       setActivePage('simulation');
     } catch (err) {
       console.error('Simulation error:', err);
+      setSimError(err?.response?.data?.detail || 'Simulation unavailable for this investigation.');
     } finally {
       setSimLoading(false);
     }
@@ -264,10 +308,13 @@ export default function Dashboard() {
       return (
         <InvestigationPage
           investigationId={investigationId}
+          investigations={investigations}
           status={status}
           report={report}
           graphData={graphData}
           simulation={simulation}
+          canRunSimulation={canRunSimulation}
+          simError={simError}
           detailTab={detailTab}
           setDetailTab={setDetailTab}
           selectedNode={selectedNode}
@@ -275,6 +322,7 @@ export default function Dashboard() {
           isProcessing={isProcessing}
           isFailed={isFailed}
           onUpload={handleInvestigationStart}
+          onSelectInvestigation={handleSelectInvestigation}
           onRunSimulation={handleRunSimulation}
           simLoading={simLoading}
           onReset={handleNewInvestigation}
@@ -313,6 +361,8 @@ export default function Dashboard() {
         <SimulationPage
           simulation={simulation}
           report={report}
+          canRunSimulation={canRunSimulation}
+          simError={simError}
           simLoading={simLoading}
           onRunSimulation={handleRunSimulation}
         />
@@ -331,7 +381,7 @@ export default function Dashboard() {
       );
     }
 
-    return <SettingsPage apiHealth={apiHealth} />;
+    return <SettingsPage apiHealth={apiHealth} healthSubsystems={healthSubsystems} />;
   };
 
   return (
@@ -340,6 +390,7 @@ export default function Dashboard() {
       <main className="console-main">
         <TopBar
           apiHealth={apiHealth}
+          healthSubsystems={healthSubsystems}
           status={status}
           investigationId={investigationId}
           onNewInvestigation={handleNewInvestigation}
@@ -405,8 +456,10 @@ function Sidebar({ activePage, setActivePage, status }) {
   );
 }
 
-function TopBar({ apiHealth, status, investigationId, onNewInvestigation, onOpenUpload }) {
+function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInvestigation, onOpenUpload }) {
   const healthClass = apiHealth === 'healthy' ? 'online' : apiHealth === 'offline' ? 'offline' : 'pending';
+  const subsystemPills = Object.entries(healthSubsystems || {}).filter(([name]) => name !== 'api');
+
   return (
     <header className="console-topbar">
       <div>
@@ -418,6 +471,15 @@ function TopBar({ apiHealth, status, investigationId, onNewInvestigation, onOpen
           <span />
           API {apiHealth}
         </div>
+        {subsystemPills.map(([name, subsystem]) => {
+          const cls = subsystem?.status === 'healthy' ? 'online' : subsystem?.status === 'degraded' ? 'offline' : 'pending';
+          return (
+            <div key={name} className={`health-pill ${cls}`} title={subsystem?.detail || ''}>
+              <span />
+              {name}
+            </div>
+          );
+        })}
         {investigationId && (
           <div className="investigation-chip">
             <span>{status?.status || 'loaded'}</span>
@@ -505,10 +567,13 @@ function DashboardHome({ metrics, status, report, graphData, topAttribution, hig
 
 function InvestigationPage({
   investigationId,
+  investigations,
   status,
   report,
   graphData,
   simulation,
+  canRunSimulation,
+  simError,
   detailTab,
   setDetailTab,
   selectedNode,
@@ -516,6 +581,7 @@ function InvestigationPage({
   isProcessing,
   isFailed,
   onUpload,
+  onSelectInvestigation,
   onRunSimulation,
   simLoading,
   onReset,
@@ -524,6 +590,7 @@ function InvestigationPage({
     return (
       <ConsolePanel title="Start Investigation" icon={UploadCloud}>
         <FileUpload onInvestigationStart={onUpload} />
+        <InvestigationList investigations={investigations} onSelectInvestigation={onSelectInvestigation} />
       </ConsolePanel>
     );
   }
@@ -559,11 +626,31 @@ function InvestigationPage({
             <div className="section-eyebrow">Case Summary</div>
             <h2>{report?.attribution?.[0]?.apt_name || 'Unknown Actor'} activity assessment</h2>
           </div>
-          <button type="button" className="danger-button" onClick={onRunSimulation} disabled={simLoading || !report}>
+          <button
+            type="button"
+            className="danger-button"
+            onClick={onRunSimulation}
+            disabled={simLoading || !report || !canRunSimulation}
+            title={!canRunSimulation ? 'Simulation requires MEDIUM or HIGH attribution confidence' : ''}
+          >
             {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             Simulate Next Steps
           </button>
         </div>
+
+        {!canRunSimulation && report && (
+          <div className="upload-error" style={{ marginBottom: '12px' }}>
+            <AlertCircle className="w-4 h-4" />
+            <span>Simulation disabled: attribution confidence is too low (requires MEDIUM or HIGH).</span>
+          </div>
+        )}
+
+        {simError && (
+          <div className="upload-error" style={{ marginBottom: '12px' }}>
+            <AlertCircle className="w-4 h-4" />
+            <span>{simError}</span>
+          </div>
+        )}
 
         <div className="tab-strip">
           {INVESTIGATION_TABS.map((tab) => (
@@ -663,7 +750,7 @@ function ThreatFeedsPage() {
   );
 }
 
-function SimulationPage({ simulation, report, simLoading, onRunSimulation }) {
+function SimulationPage({ simulation, report, canRunSimulation, simError, simLoading, onRunSimulation }) {
   return (
     <ConsolePanel title="Simulation" icon={Zap}>
       <div className="detail-header">
@@ -671,13 +758,63 @@ function SimulationPage({ simulation, report, simLoading, onRunSimulation }) {
           <div className="section-eyebrow">Predictive Layer</div>
           <h2>Likely next attacker actions</h2>
         </div>
-        <button type="button" className="danger-button" onClick={onRunSimulation} disabled={!report || simLoading}>
+        <button
+          type="button"
+          className="danger-button"
+          onClick={onRunSimulation}
+          disabled={!report || simLoading || !canRunSimulation}
+          title={!canRunSimulation ? 'Simulation requires MEDIUM or HIGH attribution confidence' : ''}
+        >
           {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           Run Simulation
         </button>
       </div>
+
+      {!canRunSimulation && report && (
+        <div className="upload-error" style={{ marginBottom: '12px' }}>
+          <AlertCircle className="w-4 h-4" />
+          <span>Simulation is disabled for LOW/UNKNOWN attribution confidence.</span>
+        </div>
+      )}
+
+      {simError && (
+        <div className="upload-error" style={{ marginBottom: '12px' }}>
+          <AlertCircle className="w-4 h-4" />
+          <span>{simError}</span>
+        </div>
+      )}
+
       <Simulation predictions={simulation?.predictions} aptGroup={simulation?.apt_group} confidence={simulation?.confidence} />
     </ConsolePanel>
+  );
+}
+
+function InvestigationList({ investigations, onSelectInvestigation }) {
+  if (!investigations || investigations.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: '14px' }}>
+      <div className="section-eyebrow" style={{ marginBottom: '8px' }}>Recent Investigations</div>
+      <div className="feed-table">
+        {investigations.slice(0, 8).map((item) => (
+          <button
+            key={item.investigation_id}
+            type="button"
+            className="feed-row"
+            onClick={() => onSelectInvestigation(item.investigation_id)}
+            style={{ textAlign: 'left', width: '100%', cursor: 'pointer' }}
+          >
+            <div>
+              <strong>{item.investigation_id.slice(0, 8)}</strong>
+              <span>{item.current_phase || item.status}</span>
+            </div>
+            <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
+              {item.status}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -708,7 +845,7 @@ function MitreNavigatorPage({ findings }) {
   );
 }
 
-function SettingsPage({ apiHealth }) {
+function SettingsPage({ apiHealth, healthSubsystems }) {
   const rows = [
     ['API health', apiHealth],
     ['Frontend mode', import.meta.env.MODE],
@@ -717,10 +854,15 @@ function SettingsPage({ apiHealth }) {
     ['Report export', 'Markdown and PDF'],
   ];
 
+  const subsystemRows = Object.entries(healthSubsystems || {}).map(([name, data]) => [
+    `Subsystem ${name}`,
+    `${data?.status || 'unknown'}${data?.detail ? ` (${data.detail})` : ''}`,
+  ]);
+
   return (
     <ConsolePanel title="Settings" icon={SlidersHorizontal}>
       <div className="settings-list">
-        {rows.map(([label, value]) => (
+        {[...rows, ...subsystemRows].map(([label, value]) => (
           <div key={label} className="setting-row">
             <span>{label}</span>
             <code>{value}</code>
@@ -871,7 +1013,7 @@ function buildMetrics(report, graphData, status) {
     },
     {
       label: 'Hosts Compromised',
-      value: compromisedHosts || '--',
+      value: hosts.length ? String(compromisedHosts) : '--',
       sub: hosts.length ? `${hosts.length} hosts observed` : 'waiting for graph',
       tone: 'danger',
       icon: ShieldAlert,
