@@ -17,6 +17,17 @@ class InvestigateRequest(BaseModel):
     time_range_end: Optional[str] = None
 
 
+class InvestigateTextRequest(BaseModel):
+    """Request body for text/query based investigations."""
+    log_content: str = ""
+    source: str = "paste"
+    elastic_query: Optional[str] = None
+    time_range_start: Optional[str] = None
+    time_range_end: Optional[str] = None
+    sensitivity: str = "medium"
+    apt_filters: List[str] = Field(default_factory=list)
+
+
 class InvestigateResponse(BaseModel):
     """Response for POST /api/v1/investigate"""
     investigation_id: str
