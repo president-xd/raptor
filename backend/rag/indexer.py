@@ -48,7 +48,7 @@ def get_weaviate_client():
             grpc_secure=False,
         )
     except Exception:
-        return weaviate.connect_to_local(host=http_host, port=http_port)
+        return weaviate.connect_to_local(host=http_host, port=http_port, grpc_port=grpc_port)
 
 
 def setup_weaviate_schema(client) -> None:
