@@ -1,0 +1,184 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/Simulation.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=d9929519"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("D:/raptor/frontend/src/components/Simulation.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=d9929519"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react;
+import { Zap, AlertTriangle, ShieldAlert } from "/node_modules/.vite/deps/lucide-react.js?v=d9929519";
+const URGENCY_STYLES = {
+  critical: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/30" },
+  high: { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/30" },
+  medium: { color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/30" }
+};
+export default function Simulation({ predictions, aptGroup, confidence }) {
+  if (!predictions || predictions.length === 0) {
+    return /* @__PURE__ */ jsxDEV("div", { className: "glass-card p-8 text-center", children: [
+      /* @__PURE__ */ jsxDEV(Zap, { className: "w-12 h-12 mx-auto text-raptor-muted mb-3" }, void 0, false, {
+        fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+        lineNumber: 33,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("p", { className: "text-raptor-muted", children: "Run simulation to see predicted next steps" }, void 0, false, {
+        fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+        lineNumber: 34,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+      lineNumber: 32,
+      columnNumber: 7
+    }, this);
+  }
+  return /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", children: [
+      /* @__PURE__ */ jsxDEV("h3", { className: "text-lg font-semibold gradient-text flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxDEV(ShieldAlert, { className: "w-5 h-5" }, void 0, false, {
+          fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+          lineNumber: 43,
+          columnNumber: 11
+        }, this),
+        "Predicted Next Steps"
+      ] }, void 0, true, {
+        fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+        lineNumber: 42,
+        columnNumber: 9
+      }, this),
+      aptGroup && /* @__PURE__ */ jsxDEV("span", { className: "text-xs px-3 py-1 rounded-full bg-raptor-danger/10 border border-raptor-danger/30 text-raptor-danger font-medium", children: [
+        "Simulating: ",
+        aptGroup
+      ] }, void 0, true, {
+        fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+        lineNumber: 47,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+      lineNumber: 41,
+      columnNumber: 7
+    }, this),
+    predictions.map((pred, i) => {
+      const style = URGENCY_STYLES[pred.urgency] || URGENCY_STYLES.medium;
+      return /* @__PURE__ */ jsxDEV("div", { className: "glass-card p-5 animate-slide-up", style: { animationDelay: `${i * 0.15}s` }, children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "flex items-start justify-between mb-3", children: [
+          /* @__PURE__ */ jsxDEV("div", { children: /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2 mb-1", children: [
+            /* @__PURE__ */ jsxDEV("span", { className: "text-sm font-bold text-raptor-accent font-mono", children: pred.technique_id }, void 0, false, {
+              fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+              lineNumber: 60,
+              columnNumber: 19
+            }, this),
+            /* @__PURE__ */ jsxDEV("span", { className: "text-sm font-semibold text-raptor-text", children: pred.technique_name }, void 0, false, {
+              fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+              lineNumber: 61,
+              columnNumber: 19
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 59,
+            columnNumber: 17
+          }, this) }, void 0, false, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 58,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { className: `badge ${style.bg} ${style.border} ${style.color} border`, children: pred.urgency }, void 0, false, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 64,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+          lineNumber: 57,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { className: "text-sm text-raptor-muted mb-3", children: pred.rationale }, void 0, false, {
+          fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+          lineNumber: 69,
+          columnNumber: 13
+        }, this),
+        pred.likely_tools && pred.likely_tools.length > 0 && /* @__PURE__ */ jsxDEV("div", { className: "mb-3", children: [
+          /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-raptor-muted font-semibold mb-1", children: "Likely Tools:" }, void 0, false, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 73,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "flex flex-wrap gap-1", children: pred.likely_tools.map(
+            (tool, j) => /* @__PURE__ */ jsxDEV("span", { className: "text-xs px-2 py-0.5 rounded bg-raptor-card text-raptor-warning font-mono", children: tool }, j, false, {
+              fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+              lineNumber: 76,
+              columnNumber: 17
+            }, this)
+          ) }, void 0, false, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 74,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+          lineNumber: 72,
+          columnNumber: 13
+        }, this),
+        pred.detection_guidance && /* @__PURE__ */ jsxDEV("div", { className: "p-3 rounded-lg bg-raptor-success/5 border border-raptor-success/20", children: [
+          /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-raptor-success font-semibold mb-1 flex items-center gap-1", children: [
+            /* @__PURE__ */ jsxDEV(AlertTriangle, { className: "w-3 h-3" }, void 0, false, {
+              fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+              lineNumber: 87,
+              columnNumber: 19
+            }, this),
+            " Detection Guidance"
+          ] }, void 0, true, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 86,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "text-xs text-raptor-success/80", children: pred.detection_guidance }, void 0, false, {
+            fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+            lineNumber: 89,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+          lineNumber: 85,
+          columnNumber: 13
+        }, this)
+      ] }, i, true, {
+        fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+        lineNumber: 56,
+        columnNumber: 11
+      }, this);
+    })
+  ] }, void 0, true, {
+    fileName: "D:/raptor/frontend/src/components/Simulation.jsx",
+    lineNumber: 40,
+    columnNumber: 5
+  }, this);
+}
+_c = Simulation;
+var _c;
+$RefreshReg$(_c, "Simulation");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/raptor/frontend/src/components/Simulation.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/raptor/frontend/src/components/Simulation.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFYO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBRUE7QUFBQSxVQUNELEtBTEg7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFNQTtBQUFBLGFBUkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQVNBO0FBQUEsUUFHRFYsS0FBS1csc0JBQ0osdUJBQUMsU0FBSSxXQUFVLHNFQUNiO0FBQUEsaUNBQUMsT0FBRSxXQUFVLDBFQUNYO0FBQUEsbUNBQUMsaUJBQWMsV0FBVSxhQUF6QjtBQUFBO0FBQUE7QUFBQTtBQUFBLG1CQUFrQztBQUFBLFlBQUc7QUFBQSxlQUR2QztBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUVBO0FBQUEsVUFDQSx1QkFBQyxPQUFFLFdBQVUsa0NBQWtDWCxlQUFLVyxzQkFBcEQ7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBdUU7QUFBQSxhQUp6RTtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBS0E7QUFBQSxXQWxDTVYsR0FBVjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBb0NBO0FBQUEsSUFFSixDQUFDO0FBQUEsT0F0REg7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQXVEQTtBQUVKO0FBQUNXLEtBcEV1QmxCO0FBQVUsSUFBQWtCO0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbIlJlYWN0IiwiWmFwIiwiQWxlcnRUcmlhbmdsZSIsIlNoaWVsZEFsZXJ0IiwiVVJHRU5DWV9TVFlMRVMiLCJjcml0aWNhbCIsImNvbG9yIiwiYmciLCJib3JkZXIiLCJoaWdoIiwibWVkaXVtIiwiU2ltdWxhdGlvbiIsInByZWRpY3Rpb25zIiwiYXB0R3JvdXAiLCJjb25maWRlbmNlIiwibGVuZ3RoIiwibWFwIiwicHJlZCIsImkiLCJzdHlsZSIsInVyZ2VuY3kiLCJhbmltYXRpb25EZWxheSIsInRlY2huaXF1ZV9pZCIsInRlY2huaXF1ZV9uYW1lIiwicmF0aW9uYWxlIiwibGlrZWx5X3Rvb2xzIiwidG9vbCIsImoiLCJkZXRlY3Rpb25fZ3VpZGFuY2UiLCJfYyJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJTaW11bGF0aW9uLmpzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgUmVhY3QgZnJvbSAncmVhY3QnO1xuaW1wb3J0IHsgWmFwLCBBbGVydFRyaWFuZ2xlLCBTaGllbGRBbGVydCB9IGZyb20gJ2x1Y2lkZS1yZWFjdCc7XG5cbmNvbnN0IFVSR0VOQ1lfU1RZTEVTID0ge1xuICBjcml0aWNhbDogeyBjb2xvcjogJ3RleHQtcmVkLTQwMCcsIGJnOiAnYmctcmVkLTUwMC8xMCcsIGJvcmRlcjogJ2JvcmRlci1yZWQtNTAwLzMwJyB9LFxuICBoaWdoOiB7IGNvbG9yOiAndGV4dC1vcmFuZ2UtNDAwJywgYmc6ICdiZy1vcmFuZ2UtNTAwLzEwJywgYm9yZGVyOiAnYm9yZGVyLW9yYW5nZS01MDAvMzAnIH0sXG4gIG1lZGl1bTogeyBjb2xvcjogJ3RleHQteWVsbG93LTQwMCcsIGJnOiAnYmcteWVsbG93LTUwMC8xMCcsIGJvcmRlcjogJ2JvcmRlci15ZWxsb3ctNTAwLzMwJyB9LFxufTtcblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gU2ltdWxhdGlvbih7IHByZWRpY3Rpb25zLCBhcHRHcm91cCwgY29uZmlkZW5jZSB9KSB7XG4gIGlmICghcHJlZGljdGlvbnMgfHwgcHJlZGljdGlvbnMubGVuZ3RoID09PSAwKSB7XG4gICAgcmV0dXJuIChcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZ2xhc3MtY2FyZCBwLTggdGV4dC1jZW50ZXJcIj5cbiAgICAgICAgPFphcCBjbGFzc05hbWU9XCJ3LTEyIGgtMTIgbXgtYXV0byB0ZXh0LXJhcHRvci1tdXRlZCBtYi0zXCIgLz5cbiAgICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC1yYXB0b3ItbXV0ZWRcIj5SdW4gc2ltdWxhdGlvbiB0byBzZWUgcHJlZGljdGVkIG5leHQgc3RlcHM8L3A+XG4gICAgICA8L2Rpdj5cbiAgICApO1xuICB9XG5cbiAgcmV0dXJuIChcbiAgICA8ZGl2IGNsYXNzTmFtZT1cInNwYWNlLXktNFwiPlxuICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWJldHdlZW5cIj5cbiAgICAgICAgPGgzIGNsYXNzTmFtZT1cInRleHQtbGcgZm9udC1zZW1pYm9sZCBncmFkaWVudC10ZXh0IGZsZXggaXRlbXMtY2VudGVyIGdhcC0yXCI+XG4gICAgICAgICAgPFNoaWVsZEFsZXJ0IGNsYXNzTmFtZT1cInctNSBoLTVcIiAvPlxuICAgICAgICAgIFByZWRpY3RlZCBOZXh0IFN0ZXBzXG4gICAgICAgIDwvaDM+XG4gICAgICAgIHthcHRHcm91cCAmJiAoXG4gICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwidGV4dC14cyBweC0zIHB5LTEgcm91bmRlZC1mdWxsIGJnLXJhcHRvci1kYW5nZXIvMTAgYm9yZGVyIGJvcmRlci1yYXB0b3ItZGFuZ2VyLzMwIHRleHQtcmFwdG9yLWRhbmdlciBmb250LW1lZGl1bVwiPlxuICAgICAgICAgICAgU2ltdWxhdGluZzoge2FwdEdyb3VwfVxuICAgICAgICAgIDwvc3Bhbj5cbiAgICAgICAgKX1cbiAgICAgIDwvZGl2PlxuXG4gICAgICB7cHJlZGljdGlvbnMubWFwKChwcmVkLCBpKSA9PiB7XG4gICAgICAgIGNvbnN0IHN0eWxlID0gVVJHRU5DWV9TVFlMRVNbcHJlZC51cmdlbmN5XSB8fCBVUkdFTkNZX1NUWUxFUy5tZWRpdW07XG4gICAgICAgIHJldHVybiAoXG4gICAgICAgICAgPGRpdiBrZXk9e2l9IGNsYXNzTmFtZT1cImdsYXNzLWNhcmQgcC01IGFuaW1hdGUtc2xpZGUtdXBcIiBzdHlsZT17eyBhbmltYXRpb25EZWxheTogYCR7aSAqIDAuMTV9c2AgfX0+XG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImZsZXggaXRlbXMtc3RhcnQganVzdGlmeS1iZXR3ZWVuIG1iLTNcIj5cbiAgICAgICAgICAgICAgPGRpdj5cbiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImZsZXggaXRlbXMtY2VudGVyIGdhcC0yIG1iLTFcIj5cbiAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInRleHQtc20gZm9udC1ib2xkIHRleHQtcmFwdG9yLWFjY2VudCBmb250LW1vbm9cIj57cHJlZC50ZWNobmlxdWVfaWR9PC9zcGFuPlxuICAgICAgICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwidGV4dC1zbSBmb250LXNlbWlib2xkIHRleHQtcmFwdG9yLXRleHRcIj57cHJlZC50ZWNobmlxdWVfbmFtZX08L3NwYW4+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9e2BiYWRnZSAke3N0eWxlLmJnfSAke3N0eWxlLmJvcmRlcn0gJHtzdHlsZS5jb2xvcn0gYm9yZGVyYH0+XG4gICAgICAgICAgICAgICAge3ByZWQudXJnZW5jeX1cbiAgICAgICAgICAgICAgPC9zcGFuPlxuICAgICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInRleHQtc20gdGV4dC1yYXB0b3ItbXV0ZWQgbWItM1wiPntwcmVkLnJhdGlvbmFsZX08L3A+XG5cbiAgICAgICAgICAgIHtwcmVkLmxpa2VseV90b29scyAmJiBwcmVkLmxpa2VseV90b29scy5sZW5ndGggPiAwICYmIChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtYi0zXCI+XG4gICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LXJhcHRvci1tdXRlZCBmb250LXNlbWlib2xkIG1iLTFcIj5MaWtlbHkgVG9vbHM6PC9wPlxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBmbGV4LXdyYXAgZ2FwLTFcIj5cbiAgICAgICAgICAgICAgICAgIHtwcmVkLmxpa2VseV90b29scy5tYXAoKHRvb2wsIGopID0+IChcbiAgICAgICAgICAgICAgICAgICAgPHNwYW4ga2V5PXtqfSBjbGFzc05hbWU9XCJ0ZXh0LXhzIHB4LTIgcHktMC41IHJvdW5kZWQgYmctcmFwdG9yLWNhcmQgdGV4dC1yYXB0b3Itd2FybmluZyBmb250LW1vbm9cIj5cbiAgICAgICAgICAgICAgICAgICAgICB7dG9vbH1cbiAgICAgICAgICAgICAgICAgICAgPC9zcGFuPlxuICAgICAgICAgICAgICAgICAgKSl9XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKX1cblxuICAgICAgICAgICAge3ByZWQuZGV0ZWN0aW9uX2d1aWRhbmNlICYmIChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJwLTMgcm91bmRlZC1sZyBiZy1yYXB0b3Itc3VjY2Vzcy81IGJvcmRlciBib3JkZXItcmFwdG9yLXN1Y2Nlc3MvMjBcIj5cbiAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9XCJ0ZXh0LXhzIHRleHQtcmFwdG9yLXN1Y2Nlc3MgZm9udC1zZW1pYm9sZCBtYi0xIGZsZXggaXRlbXMtY2VudGVyIGdhcC0xXCI+XG4gICAgICAgICAgICAgICAgICA8QWxlcnRUcmlhbmdsZSBjbGFzc05hbWU9XCJ3LTMgaC0zXCIgLz4gRGV0ZWN0aW9uIEd1aWRhbmNlXG4gICAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInRleHQteHMgdGV4dC1yYXB0b3Itc3VjY2Vzcy84MFwiPntwcmVkLmRldGVjdGlvbl9ndWlkYW5jZX08L3A+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKX1cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgKTtcbiAgICAgIH0pfVxuICAgIDwvZGl2PlxuICApO1xufVxuIl0sImZpbGUiOiJEOi9yYXB0b3IvZnJvbnRlbmQvc3JjL2NvbXBvbmVudHMvU2ltdWxhdGlvbi5qc3gifQ==

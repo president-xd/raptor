@@ -1,0 +1,3201 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAPTOR — Retrieval-Augmented Persistent Threat Orchestration and Reasoning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("6cfa3bf1-9e82-4e39-a399-71ffee061329") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("44c5b9fc-3a4d-4172-b9ea-bfaa16f6507a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("f137e4f2-bc36-4099-b940-86795d7de841") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("4aab4afa-38fd-408b-b0fd-162c69a6ea63") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("cdbb24d5-61e3-4f0a-9723-55054cb8ae55") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("3e83e6a8-bd55-4fed-a80b-7619e5bd56fb") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("38d72c37-b756-49d6-9d18-ed4f7e5fef2b") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("6fc7848d-2816-46c1-a3af-9e354f2cd594") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("96f93513-3031-4a88-8b70-e5c9b1b49360") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("8cf65cd8-a64c-49e4-a19d-861852b000d4") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("379529e2-3ae2-4189-b42e-62f82b494f8e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fe9779c3-cca5-4d5d-a695-ee72bce5e977") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("9d036075-4814-4858-8371-78b0eb22e80f") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("e581b647-a042-4dc8-915e-c55d5064f9a9") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("2b2f3c2b-6aee-47e4-ba1b-1f799f1f53b0") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("811216f3-e25f-4120-a57f-9174ef73e11e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("4a4ad661-9b2c-4611-a356-1a17dc223e2a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("34467708-4334-444b-a110-4d8adcb5f77b") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("11958cc8-d36c-4985-b7d1-ddd5f2fcdeae") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("54c7c4e1-7cfc-43d4-a523-f7a43c41d159") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("1d82fe0d-2bcf-44ad-9d4b-95ae265f021f") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("811216f3-e25f-4120-a57f-9174ef73e11e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("4a4ad661-9b2c-4611-a356-1a17dc223e2a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("34467708-4334-444b-a110-4d8adcb5f77b") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("11958cc8-d36c-4985-b7d1-ddd5f2fcdeae") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("54c7c4e1-7cfc-43d4-a523-f7a43c41d159") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("1d82fe0d-2bcf-44ad-9d4b-95ae265f021f") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("811216f3-e25f-4120-a57f-9174ef73e11e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("4a4ad661-9b2c-4611-a356-1a17dc223e2a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("34467708-4334-444b-a110-4d8adcb5f77b") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("11958cc8-d36c-4985-b7d1-ddd5f2fcdeae") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("54c7c4e1-7cfc-43d4-a523-f7a43c41d159") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("1d82fe0d-2bcf-44ad-9d4b-95ae265f021f") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("811216f3-e25f-4120-a57f-9174ef73e11e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("4a4ad661-9b2c-4611-a356-1a17dc223e2a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("34467708-4334-444b-a110-4d8adcb5f77b") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("11958cc8-d36c-4985-b7d1-ddd5f2fcdeae") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("54c7c4e1-7cfc-43d4-a523-f7a43c41d159") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("1d82fe0d-2bcf-44ad-9d4b-95ae265f021f") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("811216f3-e25f-4120-a57f-9174ef73e11e") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("4a4ad661-9b2c-4611-a356-1a17dc223e2a") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("34467708-4334-444b-a110-4d8adcb5f77b") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("11958cc8-d36c-4985-b7d1-ddd5f2fcdeae") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("54c7c4e1-7cfc-43d4-a523-f7a43c41d159") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("1d82fe0d-2bcf-44ad-9d4b-95ae265f021f") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<script src="7789286d-cae3-4fe0-8aae-a37dd56d56ea" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="2f5bcd2c-49b3-44b7-9054-e5292d99a912" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="3fbc4008-2ce2-4188-ac91-cb24e9c2751e" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-base:      #07080e;
+  --bg-surface:   #0c0e18;
+  --bg-elevated:  #121624;
+  --bg-overlay:   #181d2e;
+  --border:       #1f2638;
+  --border-subtle:#161b29;
+  --border-bright:#2a3350;
+  --text-primary: #dde2f0;
+  --text-secondary:#7c8aA2;
+  --text-muted:   #3e4d65;
+  --accent:       oklch(62% 0.18 228);
+  --accent-hover: oklch(67% 0.18 228);
+  --accent-dim:   oklch(62% 0.07 228);
+  --danger:       oklch(58% 0.22 15);
+  --danger-dim:   oklch(58% 0.08 15);
+  --warning:      oklch(73% 0.17 55);
+  --success:      oklch(66% 0.15 155);
+  --purple:       oklch(63% 0.17 286);
+  --font-ui:      'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:    'IBM Plex Mono', 'Courier New', monospace;
+}
+
+html, body, #root {
+  height: 100%; width: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4560; }
+
+input, select, textarea, button { font-family: inherit; }
+
+a { color: inherit; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%           { transform: scale(1.0); opacity: 1; }
+}
+@keyframes progress-bar {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter { animation: fadeIn 0.2s ease forwards; }
+</style>
+
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState } = React;
+
+const NAV_ITEMS = [
+  {
+    section: null,
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+      { id: 'investigations', label: 'Investigations', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2', badge: 3 },
+      { id: 'attack-graph', label: 'Attack Graph', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+      { id: 'apt-library', label: 'APT Library', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+      { id: 'query', label: 'Intelligence Query', icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
+    ]
+  },
+  {
+    section: 'THREAT INTEL',
+    items: [
+      { id: 'threat-feeds', label: 'Threat Feeds', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', dot: 'green' },
+      { id: 'simulation', label: 'Simulation', icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+      { id: 'mitre-navigator', label: 'MITRE ATT&CK', icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
+    ]
+  },
+  {
+    section: 'SYSTEM',
+    items: [
+      { id: 'reports', label: 'Reports', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+      { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+    ]
+  }
+];
+
+function SvgIcon({ d, size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      {d.split(' M').map((segment, i) => (
+        <path key={i} d={i === 0 ? segment : 'M' + segment} />
+      ))}
+    </svg>
+  );
+}
+
+function StatusDot({ color }) {
+  const colors = { green: '#22c55e', amber: '#f59e0b', red: '#ef4444' };
+  return (
+    <span style={{
+      display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+      background: colors[color] || colors.green, flexShrink: 0
+    }} />
+  );
+}
+
+function Sidebar({ currentPage, navigate, systemStatus }) {
+  return (
+    <aside style={{
+      width: 224, minWidth: 224, height: '100vh',
+      background: 'var(--bg-surface)',
+      borderRight: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden', flexShrink: 0,
+    }}>
+      {/* Logo */}
+      <div style={{
+        padding: '20px 20px 16px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 6,
+          background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
+            <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
+            <line x1="12" y1="22" x2="12" y2="15.5" />
+            <polyline points="22 8.5 12 15.5 2 8.5" />
+          </svg>
+        </div>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: '0.04em', color: 'var(--text-primary)' }}>RAPTOR</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>v2.4.1 — SECURE</div>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav style={{ flex: 1, overflowY: 'auto', padding: '12px 10px' }}>
+        {NAV_ITEMS.map((group, gi) => (
+          <div key={gi} style={{ marginBottom: 6 }}>
+            {group.section && (
+              <div style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: '0.1em',
+                color: 'var(--text-muted)', padding: '10px 10px 4px',
+                fontFamily: 'var(--font-mono)',
+              }}>{group.section}</div>
+            )}
+            {group.items.map(item => {
+              const active = currentPage === item.id;
+              return (
+                <button key={item.id} onClick={() => navigate(item.id)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '8px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                    background: active ? 'var(--accent-dim)' : 'transparent',
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                    fontSize: 13, fontWeight: active ? 500 : 400,
+                    transition: 'all 0.12s ease', textAlign: 'left', marginBottom: 1,
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                  onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.color = 'var(--text-primary)'; }}}
+                  onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}}
+                >
+                  <span style={{ opacity: active ? 1 : 0.7, flexShrink: 0 }}>
+                    <SvgIcon d={item.icon} size={15} />
+                  </span>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.badge && (
+                    <span style={{
+                      background: 'var(--danger)', color: '#fff', fontSize: 10, fontWeight: 600,
+                      padding: '1px 6px', borderRadius: 10, fontFamily: 'var(--font-mono)',
+                    }}>{item.badge}</span>
+                  )}
+                  {item.dot && <StatusDot color={item.dot} />}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      {/* System status */}
+      <div style={{
+        padding: '12px 16px 14px',
+        borderTop: '1px solid var(--border)',
+      }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>PIPELINE STATUS</div>
+        {[
+          { label: 'RAG Engine', status: 'online' },
+          { label: 'Neo4j Graph', status: 'online' },
+          { label: 'Vector Store', status: 'online' },
+          { label: 'LLM Inference', status: 'online' },
+        ].map(s => (
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.label}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <StatusDot color="green" />
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>{s.status}</span>
+            </div>
+          </div>
+        ))}
+        <div style={{
+          marginTop: 10, padding: '8px 10px', borderRadius: 6,
+          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%',
+            background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>SA</span>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>Analyst-01</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>SOC Tier-2</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+Object.assign(window, { Sidebar, SvgIcon });
+
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const STAT_CARDS = [
+  { label: 'Active Investigations', value: '3', sub: '+1 today', color: 'var(--accent)', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+  { label: 'Hosts Compromised', value: '11', sub: 'Across 2 campaigns', color: 'var(--danger)', icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v10a2 2 0 01-2 2h-2' },
+  { label: 'TTPs Detected', value: '47', sub: '12 high-confidence', color: 'var(--warning)', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
+  { label: 'Avg Attribution Confidence', value: '68%', sub: 'Top: APT29 at 74%', color: 'var(--success)', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+];
+
+const RECENT_INV = [
+  { id: 'INV-0047', name: 'Operation Shadow Broker', apt: 'APT29', confidence: 74, status: 'complete', hosts: 4, ttps: 12, time: '2h ago', severity: 'critical' },
+  { id: 'INV-0046', name: 'Suspicious PowerShell Activity — HQ', apt: null, confidence: null, status: 'processing', hosts: 1, ttps: 4, time: '6h ago', severity: 'high', progress: 67 },
+  { id: 'INV-0045', name: 'Lateral Movement — Finance Subnet', apt: 'APT41', confidence: 58, status: 'complete', hosts: 6, ttps: 8, time: '4d ago', severity: 'high' },
+  { id: 'INV-0044', name: 'Credential Dump Detection — AD', apt: 'Lazarus', confidence: 41, status: 'complete', hosts: 2, ttps: 5, time: '6d ago', severity: 'medium' },
+  { id: 'INV-0043', name: 'C2 Beaconing — DMZ', apt: null, confidence: null, status: 'queued', hosts: 0, ttps: 0, time: '8d ago', severity: 'low' },
+];
+
+const ALERT_FEED = [
+  { time: '08:41', msg: 'T1003.001 — LSASS memory read on WKSTN-FIN-02', sev: 'critical' },
+  { time: '08:39', msg: 'New lateral movement edge: FILE-SRV-01 → DC-01 via T1021.002', sev: 'high' },
+  { time: '08:22', msg: 'APT29 attribution confidence crossed 70% threshold', sev: 'high' },
+  { time: '07:58', msg: 'Weaviate reranker: 14 new ATT&CK technique retrievals', sev: 'info' },
+  { time: '07:45', msg: 'IoC match: 185.220.101.x in MISP feed — C2 confirmed', sev: 'critical' },
+  { time: '07:31', msg: 'RAG pipeline ingested 2,847 new log events', sev: 'info' },
+  { time: '07:12', msg: 'T1078 — Valid account abuse detected on WKSTN-HR-01', sev: 'high' },
+  { time: '06:50', msg: 'Sigma rule match: Mimikatz CLI pattern — powershell.exe', sev: 'critical' },
+];
+
+const KILL_CHAIN_COVERAGE = [
+  { phase: 'Initial Access', pct: 100, count: 3 },
+  { phase: 'Execution', pct: 85, count: 5 },
+  { phase: 'Persistence', pct: 60, count: 2 },
+  { phase: 'Privilege Esc.', pct: 90, count: 3 },
+  { phase: 'Defense Evasion', pct: 45, count: 4 },
+  { phase: 'Credential Access', pct: 100, count: 2 },
+  { phase: 'Lateral Movement', pct: 80, count: 3 },
+  { phase: 'Exfiltration', pct: 30, count: 1 },
+];
+
+function StatusBadge({ status }) {
+  const cfg = {
+    complete: { label: 'Complete', bg: 'rgba(34,197,94,0.12)', color: 'var(--success)' },
+    processing: { label: 'Processing', bg: 'rgba(59,130,246,0.12)', color: 'var(--accent)' },
+    queued: { label: 'Queued', bg: 'rgba(100,116,139,0.12)', color: 'var(--text-secondary)' },
+    failed: { label: 'Failed', bg: 'rgba(239,68,68,0.12)', color: 'var(--danger)' },
+  };
+  const c = cfg[status] || cfg.queued;
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+      background: c.bg, color: c.color, fontFamily: 'var(--font-mono)',
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+    }}>{c.label}</span>
+  );
+}
+
+function SevDot({ sev }) {
+  const colors = { critical: 'var(--danger)', high: 'var(--warning)', medium: 'var(--accent)', low: 'var(--text-muted)', info: 'var(--text-muted)' };
+  return <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: colors[sev] || colors.info, flexShrink: 0 }} />;
+}
+
+function ConfBar({ value, color }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: `${value}%`, height: '100%', background: color || 'var(--accent)', borderRadius: 2, transition: 'width 0.6s ease' }} />
+      </div>
+      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', minWidth: 28 }}>{value}%</span>
+    </div>
+  );
+}
+
+function DashboardPage({ navigate }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 3000); return () => clearInterval(id); }, []);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+
+      {/* Stat cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+        {STAT_CARDS.map((s, i) => (
+          <div key={i} style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 10, padding: '18px 20px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>{s.label}</span>
+              <span style={{ color: s.color, opacity: 0.8 }}>
+                <SvgIcon d={s.icon} size={16} />
+              </span>
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 14 }}>
+
+        {/* Investigations table */}
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Recent Investigations</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => navigate('investigations')} style={{
+                padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)',
+                background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+                View All
+              </button>
+              <button onClick={() => navigate('new-investigation')} style={{
+                padding: '5px 14px', borderRadius: 6, border: 'none',
+                background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer',
+                fontWeight: 500, fontFamily: 'var(--font-ui)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                + New
+              </button>
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-elevated)' }}>
+                {['ID', 'Investigation', 'Attribution', 'Hosts', 'TTPs', 'Status', 'When'].map(h => (
+                  <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {RECENT_INV.map((inv, i) => (
+                <tr key={inv.id}
+                  onClick={() => navigate('investigation-detail', inv)}
+                  style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', transition: 'background 0.1s' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <td style={{ padding: '11px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{inv.id}</td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <SevDot sev={inv.severity} />
+                      <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{inv.name}</span>
+                    </div>
+                    {inv.status === 'processing' && (
+                      <div style={{ marginTop: 4, height: 2, background: 'var(--border)', borderRadius: 1, width: '70%', overflow: 'hidden' }}>
+                        <div style={{ width: `${inv.progress}%`, height: '100%', background: 'var(--accent)', borderRadius: 1 }} />
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    {inv.apt ? (
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{inv.apt}</span>
+                        <div style={{ marginTop: 2 }}><ConfBar value={inv.confidence} /></div>
+                      </div>
+                    ) : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pending...</span>}
+                  </td>
+                  <td style={{ padding: '11px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>{inv.hosts}</td>
+                  <td style={{ padding: '11px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>{inv.ttps}</td>
+                  <td style={{ padding: '11px 16px' }}><StatusBadge status={inv.status} /></td>
+                  <td style={{ padding: '11px 16px', fontSize: 11, color: 'var(--text-muted)' }}>{inv.time}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Right column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* Alert feed */}
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', flex: 1 }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>Live Alert Feed</span>
+                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--danger)', boxShadow: '0 0 6px var(--danger)', animation: 'pulse 2s infinite' }} />
+              </div>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>TODAY</span>
+            </div>
+            <div style={{ maxHeight: 280, overflowY: 'auto', padding: '6px 0' }}>
+              {ALERT_FEED.map((a, i) => (
+                <div key={i} style={{
+                  padding: '8px 18px', display: 'flex', gap: 10, alignItems: 'flex-start',
+                  borderBottom: '1px solid var(--border-subtle)',
+                }}>
+                  <SevDot sev={a.sev} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 11, color: a.sev === 'info' ? 'var(--text-muted)' : 'var(--text-secondary)', lineHeight: 1.4, display: 'block', fontFamily: 'var(--font-mono)' }}>{a.msg}</span>
+                  </div>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{a.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Kill chain coverage */}
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 18px' }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 14 }}>Kill Chain Coverage</div>
+            {KILL_CHAIN_COVERAGE.map((k, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{k.phase}</span>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{k.count} TTPs</span>
+                </div>
+                <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${k.pct}%`, height: '100%', borderRadius: 2,
+                    background: k.pct >= 80 ? 'var(--danger)' : k.pct >= 50 ? 'var(--warning)' : 'var(--accent)',
+                    transition: 'width 0.8s ease',
+                  }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom row: RAG metrics */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+        {[
+          { label: 'TTP Extraction Recall', value: '87%', target: '>80%', ok: true },
+          { label: 'TTP Precision', value: '91%', target: '>85%', ok: true },
+          { label: 'Hallucination Rate', value: '2.1%', target: '<5%', ok: true },
+          { label: 'Avg. Report Latency', value: '38s', target: '<60s', ok: true },
+        ].map((m, i) => (
+          <div key={i} style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{m.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)', color: m.ok ? 'var(--success)' : 'var(--danger)' }}>{m.value}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>TARGET</div>
+              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', marginTop: 2 }}>{m.target}</div>
+              <div style={{ marginTop: 4, fontSize: 10, color: m.ok ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>{m.ok ? 'PASSING' : 'FAILING'}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { DashboardPage, StatusBadge, ConfBar, SevDot });
+
+</script>
+
+<script type="text/babel">
+const { useState, useRef } = React;
+
+const ALL_INVESTIGATIONS = [
+  { id: 'INV-0047', name: 'Operation Shadow Broker', apt: 'APT29', confidence: 74, status: 'complete', hosts: 4, ttps: 12, time: '2026-04-22 08:14', severity: 'critical', logs: '2,847 events', duration: '72h 14m' },
+  { id: 'INV-0046', name: 'Suspicious PowerShell Activity — HQ', apt: null, confidence: null, status: 'processing', hosts: 1, ttps: 4, time: '2026-04-24 06:30', severity: 'high', logs: '412 events', progress: 67, duration: 'In progress' },
+  { id: 'INV-0045', name: 'Lateral Movement — Finance Subnet', apt: 'APT41', confidence: 58, status: 'complete', hosts: 6, ttps: 8, time: '2026-04-20 14:22', severity: 'high', logs: '5,130 events', duration: '48h 02m' },
+  { id: 'INV-0044', name: 'Credential Dump Detection — AD', apt: 'Lazarus', confidence: 41, status: 'complete', hosts: 2, ttps: 5, time: '2026-04-18 11:08', severity: 'medium', logs: '876 events', duration: '12h 30m' },
+  { id: 'INV-0043', name: 'C2 Beaconing — DMZ Segment', apt: null, confidence: null, status: 'queued', hosts: 0, ttps: 0, time: '2026-04-16 09:00', severity: 'low', logs: '203 events', duration: 'Queued' },
+  { id: 'INV-0042', name: 'Ransomware Precursor — Storage Array', apt: 'BlackCat', confidence: 81, status: 'complete', hosts: 8, ttps: 15, time: '2026-04-14 03:47', severity: 'critical', logs: '9,204 events', duration: '96h 10m' },
+  { id: 'INV-0041', name: 'Spearphish Campaign — Executives', apt: 'APT28', confidence: 66, status: 'complete', hosts: 3, ttps: 7, time: '2026-04-10 16:21', severity: 'high', logs: '1,490 events', duration: '24h 55m' },
+  { id: 'INV-0040', name: 'Anomalous DNS Exfiltration', apt: null, confidence: null, status: 'failed', hosts: 0, ttps: 2, time: '2026-04-08 20:15', severity: 'medium', logs: '318 events', duration: 'Failed' },
+];
+
+function InvestigationsPage({ navigate }) {
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [sortCol, setSortCol] = useState('time');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const filtered = ALL_INVESTIGATIONS.filter(inv => {
+    const matchSearch = inv.name.toLowerCase().includes(search.toLowerCase()) || inv.id.toLowerCase().includes(search.toLowerCase()) || (inv.apt && inv.apt.toLowerCase().includes(search.toLowerCase()));
+    const matchStatus = filterStatus === 'all' || inv.status === filterStatus;
+    return matchSearch && matchStatus;
+  });
+
+  const sevColor = { critical: 'var(--danger)', high: 'var(--warning)', medium: 'var(--accent)', low: 'var(--text-muted)' };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}>Investigations</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{ALL_INVESTIGATIONS.length} total — {ALL_INVESTIGATIONS.filter(i => i.status === 'complete').length} complete, {ALL_INVESTIGATIONS.filter(i => i.status === 'processing').length} active</div>
+        </div>
+        <button onClick={() => navigate('new-investigation')} style={{
+          padding: '9px 20px', borderRadius: 8, border: 'none',
+          background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)',
+        }}
+        onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+        onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Investigation
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, ID, or APT group..."
+            style={{
+              width: '100%', padding: '9px 12px 9px 36px', borderRadius: 8,
+              background: 'var(--bg-surface)', border: '1px solid var(--border)',
+              color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-ui)',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+          {['all', 'complete', 'processing', 'queued', 'failed'].map(s => (
+            <button key={s} onClick={() => setFilterStatus(s)} style={{
+              padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-ui)',
+              background: filterStatus === s ? 'var(--bg-elevated)' : 'transparent',
+              color: filterStatus === s ? 'var(--text-primary)' : 'var(--text-muted)',
+              borderRight: '1px solid var(--border)', fontWeight: filterStatus === s ? 600 : 400,
+              textTransform: 'capitalize',
+            }}>{s}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: 'var(--bg-elevated)' }}>
+              {[['ID','id'],['Investigation','name'],['Severity','severity'],['Attribution','apt'],['Hosts','hosts'],['TTPs','ttps'],['Log Volume','logs'],['Duration','duration'],['Status','status'],['Date','time']].map(([label, col]) => (
+                <th key={col} onClick={() => { setSortCol(col); setSortDir(d => d === 'asc' ? 'desc' : 'asc'); }}
+                  style={{ padding: '10px 16px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+                  {label} {sortCol === col ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                </th>
+              ))}
+              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((inv, i) => (
+              <tr key={inv.id}
+                onClick={() => navigate('investigation-detail', inv)}
+                style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', transition: 'background 0.1s' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-elevated)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{inv.id}</td>
+                <td style={{ padding: '12px 16px', maxWidth: 260 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inv.name}</div>
+                  {inv.status === 'processing' && (
+                    <div style={{ marginTop: 5, height: 2, background: 'var(--border)', borderRadius: 1, width: '100%', overflow: 'hidden' }}>
+                      <div style={{ width: `${inv.progress}%`, height: '100%', background: 'var(--accent)', borderRadius: 1, transition: 'width 0.4s' }} />
+                    </div>
+                  )}
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', color: sevColor[inv.severity], textTransform: 'uppercase', letterSpacing: '0.04em' }}>{inv.severity}</span>
+                </td>
+                <td style={{ padding: '12px 16px' }}>
+                  {inv.apt ? (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{inv.apt}</div>
+                      <div style={{ marginTop: 3 }}><ConfBar value={inv.confidence} /></div>
+                    </div>
+                  ) : <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>—</span>}
+                </td>
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>{inv.hosts}</td>
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>{inv.ttps}</td>
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{inv.logs}</td>
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{inv.duration}</td>
+                <td style={{ padding: '12px 16px' }}><StatusBadge status={inv.status} /></td>
+                <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{inv.time}</td>
+                <td style={{ padding: '12px 16px' }}>
+                  <button onClick={e => { e.stopPropagation(); navigate('investigation-detail', inv); }} style={{
+                    padding: '4px 12px', borderRadius: 5, border: '1px solid var(--border)',
+                    background: 'transparent', color: 'var(--accent)', fontSize: 11, cursor: 'pointer',
+                    fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-dim)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    Open →
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No investigations match your filters.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── New Investigation Wizard ───────────────────────────────────────────────
+
+const STEP_LABELS = ['Log Source', 'Configure', 'Review & Submit'];
+
+function NewInvestigationPage({ navigate }) {
+  const [step, setStep] = useState(0);
+  const [source, setSource] = useState('file');
+  const [dragging, setDragging] = useState(false);
+  const [file, setFile] = useState(null);
+  const [timeRange, setTimeRange] = useState({ start: '2026-04-22T00:00', end: '2026-04-24T23:59' });
+  const [sensitivity, setSensitivity] = useState('high');
+  const [selectedApts, setSelectedApts] = useState(['APT29', 'APT41', 'APT28', 'Lazarus']);
+  const [invName, setInvName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef();
+
+  const aptOptions = ['APT28', 'APT29', 'APT41', 'Lazarus', 'Turla', 'BlackCat', 'Kimsuky', 'SandWorm', 'Cozy Bear', 'Fancy Bear'];
+
+  const handleDrop = e => {
+    e.preventDefault(); setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) { setFile(f); if (!invName) setInvName(f.name.replace(/\.[^.]+$/, '')); }
+  };
+
+  const handleSubmit = () => {
+    setSubmitting(true);
+    setTimeout(() => navigate('investigations'), 2200);
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28 }}>
+      <div style={{ width: '100%', maxWidth: 720 }}>
+
+        {/* Back */}
+        <button onClick={() => navigate('investigations')} style={{
+          background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12,
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, fontFamily: 'var(--font-ui)', padding: 0,
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+          ← Back to Investigations
+        </button>
+
+        <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 6 }}>New Investigation</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 28 }}>RAPTOR RAG pipeline will analyze your logs, extract TTPs, and attribute the campaign.</div>
+
+        {/* Stepper */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 32, gap: 0 }}>
+          {STEP_LABELS.map((label, i) => (
+            <React.Fragment key={i}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: i < step ? 'var(--success)' : i === step ? 'var(--accent)' : 'var(--bg-elevated)',
+                  border: `2px solid ${i <= step ? 'transparent' : 'var(--border)'}`,
+                  fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                  color: i <= step ? '#fff' : 'var(--text-muted)',
+                  transition: 'all 0.3s',
+                }}>
+                  {i < step ? '✓' : i + 1}
+                </div>
+                <span style={{ fontSize: 11, color: i === step ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: i === step ? 500 : 400, whiteSpace: 'nowrap' }}>{label}</span>
+              </div>
+              {i < STEP_LABELS.length - 1 && (
+                <div style={{ flex: 1, height: 2, background: i < step ? 'var(--success)' : 'var(--border)', margin: '0 12px', marginBottom: 20, transition: 'background 0.3s' }} />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* Step content */}
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '28px 32px' }}>
+
+          {step === 0 && (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 20 }}>Select Log Source</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
+                {[
+                  { id: 'file', label: 'Upload File', desc: '.log, .json, .csv, .evtx', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
+                  { id: 'elastic', label: 'Elastic Query', desc: 'Query live Elasticsearch index', icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
+                  { id: 'paste', label: 'Paste Logs', desc: 'Paste raw log text directly', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+                ].map(s => (
+                  <button key={s.id} onClick={() => setSource(s.id)} style={{
+                    padding: '18px 16px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                    background: source === s.id ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                    border: `2px solid ${source === s.id ? 'var(--accent)' : 'var(--border)'}`,
+                    color: 'var(--text-primary)', transition: 'all 0.15s', fontFamily: 'var(--font-ui)',
+                  }}>
+                    <div style={{ color: source === s.id ? 'var(--accent)' : 'var(--text-secondary)', marginBottom: 10 }}>
+                      <SvgIcon d={s.icon} size={20} />
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{s.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {source === 'file' && (
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileRef.current.click()}
+                  style={{
+                    border: `2px dashed ${dragging ? 'var(--accent)' : file ? 'var(--success)' : 'var(--border)'}`,
+                    borderRadius: 10, padding: '36px', textAlign: 'center', cursor: 'pointer',
+                    background: dragging ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                    transition: 'all 0.2s',
+                  }}>
+                  <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (f) { setFile(f); if (!invName) setInvName(f.name.replace(/\.[^.]+$/, '')); }}} />
+                  <div style={{ fontSize: 32, marginBottom: 12, color: file ? 'var(--success)' : 'var(--text-muted)' }}>
+                    {file ? '✓' : '↑'}
+                  </div>
+                  {file ? (
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--success)', marginBottom: 4 }}>{file.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(file.size / 1024).toFixed(1)} KB — click to replace</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 4 }}>Drop log file here or click to browse</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supports Windows Event Logs, Zeek/Suricata JSON, Syslog CEF, EDR telemetry</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {source === 'elastic' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <input placeholder="Elasticsearch host (e.g. https://elastic:9200)" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono)' }} />
+                  <input placeholder="Index pattern (e.g. raptor-events-*)" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono)' }} />
+                </div>
+              )}
+
+              {source === 'paste' && (
+                <textarea placeholder="Paste raw log content here..." rows={8} style={{ width: '100%', padding: '12px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-mono)', resize: 'vertical' }} />
+              )}
+            </div>
+          )}
+
+          {step === 1 && (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 20 }}>Configure Analysis</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>Investigation Name</label>
+                  <input value={invName} onChange={e => setInvName(e.target.value)} placeholder="e.g. Operation Shadow Broker" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-ui)' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>Time Range Start</label>
+                    <input type="datetime-local" value={timeRange.start} onChange={e => setTimeRange(r => ({ ...r, start: e.target.value }))} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono)', colorScheme: 'dark' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>Time Range End</label>
+                    <input type="datetime-local" value={timeRange.end} onChange={e => setTimeRange(r => ({ ...r, end: e.target.value }))} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-mono)', colorScheme: 'dark' }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>Detection Sensitivity</label>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    {['low', 'medium', 'high', 'maximum'].map(s => (
+                      <button key={s} onClick={() => setSensitivity(s)} style={{
+                        flex: 1, padding: '9px 0', borderRadius: 8, border: `2px solid ${sensitivity === s ? 'var(--accent)' : 'var(--border)'}`,
+                        background: sensitivity === s ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                        color: sensitivity === s ? 'var(--accent)' : 'var(--text-muted)',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-ui)', textTransform: 'capitalize',
+                      }}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>APT Groups to Check Against</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {aptOptions.map(apt => {
+                      const sel = selectedApts.includes(apt);
+                      return (
+                        <button key={apt} onClick={() => setSelectedApts(prev => sel ? prev.filter(a => a !== apt) : [...prev, apt])} style={{
+                          padding: '5px 12px', borderRadius: 6, border: `1px solid ${sel ? 'var(--accent)' : 'var(--border)'}`,
+                          background: sel ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                          color: sel ? 'var(--accent)' : 'var(--text-secondary)',
+                          fontSize: 12, fontWeight: sel ? 600 : 400, cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                        }}>{apt}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 20 }}>Review & Submit</div>
+              {[
+                { label: 'Investigation Name', value: invName || '(Unnamed)' },
+                { label: 'Source', value: source === 'file' ? (file ? file.name : 'No file selected') : source === 'elastic' ? 'Elasticsearch' : 'Pasted Logs' },
+                { label: 'Time Range', value: `${timeRange.start} → ${timeRange.end}` },
+                { label: 'Sensitivity', value: sensitivity.toUpperCase() },
+                { label: 'APT Groups', value: selectedApts.join(', ') || 'All groups' },
+                { label: 'LLM', value: 'Claude Sonnet (primary) → GPT-4o (fallback)' },
+                { label: 'Embedding Model', value: 'BAAI/bge-large-en-v1.5' },
+                { label: 'Attribution Method', value: 'Jaccard Similarity + TTP Cosine' },
+              ].map(r => (
+                <div key={r.label} style={{ display: 'flex', gap: 24, padding: '11px 0', borderBottom: '1px solid var(--border-subtle)', alignItems: 'flex-start' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', width: 160, flexShrink: 0 }}>{r.label}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: r.label === 'Time Range' || r.label === 'LLM' || r.label === 'Embedding Model' ? 'var(--font-mono)' : 'var(--font-ui)', flex: 1 }}>{r.value}</div>
+                </div>
+              ))}
+
+              {!submitting ? (
+                <button onClick={handleSubmit} style={{
+                  marginTop: 24, width: '100%', padding: '12px', borderRadius: 8, border: 'none',
+                  background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'var(--font-ui)', letterSpacing: '0.02em',
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                  Launch Investigation
+                </button>
+              ) : (
+                <div style={{ marginTop: 24, padding: '16px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: 8 }}>Queuing investigation pipeline...</div>
+                  <div style={{ height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: 'var(--accent)', borderRadius: 2, animation: 'progress-bar 2s ease forwards' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Step nav */}
+        {!submitting && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
+            <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate('investigations')} style={{
+              padding: '9px 20px', borderRadius: 8, border: '1px solid var(--border)',
+              background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-ui)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border-bright)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
+              {step > 0 ? 'Back' : 'Cancel'}
+            </button>
+            {step < 2 && (
+              <button onClick={() => setStep(s => s + 1)} style={{
+                padding: '9px 24px', borderRadius: 8, border: 'none',
+                background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-ui)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                Continue
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { InvestigationsPage, NewInvestigationPage });
+
+</script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const FINDINGS = [
+  { event_ids: ['e001','e002'], technique_id: 'T1566.001', technique_name: 'Spearphishing Attachment', kill_chain_phase: 'initial-access', confidence: 'high', evidence_summary: 'Malicious .docx attachment opened by jsmith@corp.local on WKSTN-HR-01. Macro execution triggered via WMI. Attachment hash matches known APT29 dropper.', apt_indicators: ['APT29','Cozy Bear'], time: '2026-04-22 08:14' },
+  { event_ids: ['e003','e004','e005'], technique_id: 'T1059.001', technique_name: 'PowerShell', kill_chain_phase: 'execution', confidence: 'high', evidence_summary: 'Encoded PowerShell invocation via cmd.exe spawned from WINWORD.EXE. Base64 payload decoded to download stager from 185.220.101.47:443.', apt_indicators: ['APT29'], time: '2026-04-22 08:21' },
+  { event_ids: ['e006'], technique_id: 'T1105', technique_name: 'Ingress Tool Transfer', kill_chain_phase: 'c2', confidence: 'high', evidence_summary: 'HTTPS GET to 185.220.101.47 (known C2 infrastructure). 4.2 MB binary dropped to %TEMP%\\svchost32.exe. Cert SHA1 matches APT29 staging server.', apt_indicators: ['APT29'], time: '2026-04-22 08:24' },
+  { event_ids: ['e007','e008'], technique_id: 'T1547.001', technique_name: 'Registry Run Keys / Startup Folder', kill_chain_phase: 'persistence', confidence: 'medium', evidence_summary: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run modified to persist svchost32.exe across reboots. Registry write from powershell.exe (PID 4812).', apt_indicators: ['APT29','APT41'], time: '2026-04-22 08:31' },
+  { event_ids: ['e009','e010'], technique_id: 'T1003.001', technique_name: 'LSASS Memory', kill_chain_phase: 'credential-access', confidence: 'high', evidence_summary: 'OpenProcess with PROCESS_VM_READ on lsass.exe (PID 744). MiniDumpWriteDump API call detected via ETW. Credential material extracted for 3 domain accounts.', apt_indicators: ['APT29'], time: '2026-04-22 09:47' },
+  { event_ids: ['e011','e012'], technique_id: 'T1021.002', technique_name: 'SMB/Windows Admin Shares', kill_chain_phase: 'lateral-movement', confidence: 'high', evidence_summary: 'Authenticated SMB session from WKSTN-HR-01 to FILE-SRV-01 using stolen credential jdoe@corp.local (domain admin). Net use to ADMIN$ share. Tool copied via SMB.', apt_indicators: ['APT29'], time: '2026-04-22 11:02' },
+  { event_ids: ['e013'], technique_id: 'T1078', technique_name: 'Valid Accounts', kill_chain_phase: 'privilege-esc', confidence: 'medium', evidence_summary: 'Domain admin account svc-backup used for interactive logon from FILE-SRV-01. Account last used 87 days prior. No legitimate change control record found.', apt_indicators: ['APT29','Cozy Bear'], time: '2026-04-22 11:15' },
+  { event_ids: ['e014','e015'], technique_id: 'T1083', technique_name: 'File and Directory Discovery', kill_chain_phase: 'discovery', confidence: 'medium', evidence_summary: 'dir /s /b execution across network shares. Targeting: *.xlsx, *.docx, *password*, *credential*, *vpn*. Output redirected to hidden file C:\\Windows\\Temp\\.tmp.', apt_indicators: ['APT29'], time: '2026-04-22 12:34' },
+  { event_ids: ['e016','e017'], technique_id: 'T1048.003', technique_name: 'Exfiltration Over Unencrypted Protocol', kill_chain_phase: 'exfiltration', confidence: 'low', evidence_summary: 'DNS TXT record queries from FILE-SRV-01 to attacker-controlled subdomain. 847 queries over 4 hours. Encoded data in subdomain labels. Total estimated: 2.1 MB.', apt_indicators: ['APT29'], time: '2026-04-22 16:00' },
+];
+
+const KILL_CHAIN_PHASES = ['recon','resource-dev','initial-access','execution','persistence','privilege-esc','defense-evasion','credential-access','discovery','lateral-movement','collection','c2','exfiltration','impact'];
+
+function PhaseLabel({ phase }) {
+  const color = {
+    'initial-access': 'var(--danger)', 'execution': 'var(--danger)', 'persistence': 'var(--warning)',
+    'privilege-esc': 'var(--warning)', 'credential-access': 'var(--danger)', 'lateral-movement': 'var(--warning)',
+    'discovery': 'var(--accent)', 'c2': 'var(--danger)', 'exfiltration': 'var(--danger)', 'defense-evasion': 'var(--accent)',
+  }[phase] || 'var(--text-muted)';
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+      background: color + '18', color, fontFamily: 'var(--font-mono)',
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+    }}>{phase}</span>
+  );
+}
+
+function ConfidencePill({ confidence }) {
+  const cfg = { high: { color: 'var(--success)', bg: 'rgba(34,197,94,0.1)' }, medium: { color: 'var(--warning)', bg: 'rgba(245,158,11,0.1)' }, low: { color: 'var(--text-muted)', bg: 'var(--bg-elevated)' } };
+  const c = cfg[confidence] || cfg.low;
+  return <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: c.bg, color: c.color, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>{confidence}</span>;
+}
+
+function ReportTab({ investigation }) {
+  const [selected, setSelected] = useState(null);
+  const activeFinding = selected !== null ? FINDINGS[selected] : null;
+
+  const phasesPresent = [...new Set(FINDINGS.map(f => f.kill_chain_phase))];
+
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {/* Kill chain visual */}
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)', overflowX: 'auto' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.1em', marginBottom: 10 }}>MITRE ATT&CK KILL CHAIN COVERAGE</div>
+        <div style={{ display: 'flex', gap: 3, minWidth: 'max-content' }}>
+          {KILL_CHAIN_PHASES.map((phase, i) => {
+            const hit = phasesPresent.includes(phase);
+            const count = FINDINGS.filter(f => f.kill_chain_phase === phase).length;
+            return (
+              <div key={phase} style={{
+                padding: '8px 14px', borderRadius: 6, textAlign: 'center', minWidth: 80,
+                background: hit ? 'var(--danger)' + '22' : 'var(--bg-overlay)',
+                border: `1px solid ${hit ? 'var(--danger)' : 'var(--border)'}`,
+                position: 'relative',
+              }}>
+                {i > 0 && hit && (
+                  <div style={{ position: 'absolute', left: -6, top: '50%', transform: 'translateY(-50%)', color: 'var(--danger)', fontSize: 12, fontWeight: 700 }}>›</div>
+                )}
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: hit ? 'var(--danger)' : 'var(--text-muted)', fontWeight: hit ? 600 : 400, lineHeight: 1.3 }}>
+                  {phase.replace('-', '\n')}
+                </div>
+                {hit && <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginTop: 4 }}>{count}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Findings + detail panel */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+
+        {/* Findings list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+          {FINDINGS.map((f, i) => (
+            <div key={i} onClick={() => setSelected(selected === i ? null : i)}
+              style={{
+                margin: '0 20px 6px', padding: '14px 16px', borderRadius: 8, cursor: 'pointer',
+                background: selected === i ? 'var(--bg-elevated)' : 'transparent',
+                border: `1px solid ${selected === i ? 'var(--border-bright)' : 'var(--border-subtle)'}`,
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { if (selected !== i) { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border)'; }}}
+              onMouseLeave={e => { if (selected !== i) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 4 }}>{f.technique_id}</span>
+                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', flex: 1 }}>{f.technique_name}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{f.time}</span>
+                <ConfidencePill confidence={f.confidence} />
+                <PhaseLabel phase={f.kill_chain_phase} />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{f.evidence_summary}</div>
+              {f.apt_indicators.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Indicators:</span>
+                  {f.apt_indicators.map(a => (
+                    <span key={a} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '1px 7px', borderRadius: 4, background: 'var(--accent-dim)', color: 'var(--accent)', fontWeight: 600 }}>{a}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Detail panel */}
+        {activeFinding && (
+          <div style={{
+            width: 320, flexShrink: 0, borderLeft: '1px solid var(--border)',
+            background: 'var(--bg-surface)', overflowY: 'auto', padding: '20px 20px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--accent)', marginBottom: 4 }}>{activeFinding.technique_id}</div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{activeFinding.technique_name}</div>
+              </div>
+              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+              <ConfidencePill confidence={activeFinding.confidence} />
+              <PhaseLabel phase={activeFinding.kill_chain_phase} />
+            </div>
+            {[
+              { label: 'Event IDs', value: activeFinding.event_ids.join(', ') },
+              { label: 'Timestamp', value: activeFinding.time },
+              { label: 'Kill Chain Phase', value: activeFinding.kill_chain_phase },
+              { label: 'Confidence', value: activeFinding.confidence.toUpperCase() },
+            ].map(r => (
+              <div key={r.label} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 4 }}>{r.label.toUpperCase()}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{r.value}</div>
+              </div>
+            ))}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6 }}>EVIDENCE SUMMARY</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{activeFinding.evidence_summary}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>MITRE ATT&CK REFERENCE</div>
+              <a href={`https://attack.mitre.org/techniques/${activeFinding.technique_id.replace('.', '/')}`} target="_blank" rel="noopener noreferrer" style={{
+                display: 'block', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)',
+                background: 'var(--bg-elevated)', color: 'var(--accent)', fontSize: 12, textDecoration: 'none',
+                fontFamily: 'var(--font-mono)', textAlign: 'center',
+              }}>
+                View {activeFinding.technique_id} on ATT&CK ↗
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ReportTab, PhaseLabel, ConfidencePill, FINDINGS });
+
+</script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+
+const GRAPH_NODES = [
+  { id: 'internet', label: 'INTERNET', sublabel: '185.220.101.47', type: 'external', x: 100, y: 300, compromised: false, c2: true },
+  { id: 'wkstn-hr-01', label: 'WKSTN-HR-01', sublabel: 'Windows 10 — 10.0.1.42', type: 'host', x: 320, y: 180, compromised: true, user: 'jsmith' },
+  { id: 'wkstn-fin-02', label: 'WKSTN-FIN-02', sublabel: 'Windows 10 — 10.0.1.58', type: 'host', x: 320, y: 420, compromised: true, user: 'aconner' },
+  { id: 'file-srv-01', label: 'FILE-SRV-01', sublabel: 'Windows Server 2019 — 10.0.2.10', type: 'server', x: 560, y: 180, compromised: true, user: 'jdoe' },
+  { id: 'dc-01', label: 'DC-01', sublabel: 'Windows Server 2022 — 10.0.2.5', type: 'dc', x: 800, y: 300, compromised: false, targeted: true },
+  { id: 'jsmith', label: 'jsmith', sublabel: 'Domain User', type: 'user', x: 200, y: 60, compromised: true },
+  { id: 'jdoe', label: 'svc-backup', sublabel: 'Domain Admin', type: 'user', x: 680, y: 60, compromised: true },
+  { id: 'c2-server', label: 'C2 SERVER', sublabel: 'TOR Exit — AS209322', type: 'external', x: 100, y: 120, compromised: false, c2: true },
+];
+
+const GRAPH_EDGES = [
+  { from: 'c2-server', to: 'internet', label: '', dashed: true, color: '#ef4444' },
+  { from: 'internet', to: 'wkstn-hr-01', label: 'T1566.001\nSpearphish', color: '#ef4444', seq: 1 },
+  { from: 'jsmith', to: 'wkstn-hr-01', label: 'Victim', color: '#3b82f6', dashed: true },
+  { from: 'wkstn-hr-01', to: 'internet', label: 'T1105\nDownload', color: '#f59e0b', seq: 2 },
+  { from: 'wkstn-hr-01', to: 'wkstn-fin-02', label: 'T1021.002\nSMB Move', color: '#ef4444', seq: 3 },
+  { from: 'wkstn-hr-01', to: 'file-srv-01', label: 'T1021.002\nLateral', color: '#ef4444', seq: 4 },
+  { from: 'jdoe', to: 'file-srv-01', label: 'T1078\nStolen Cred', color: '#f59e0b', seq: 5 },
+  { from: 'file-srv-01', to: 'dc-01', label: 'T1078\nTarget', color: '#ef4444', seq: 6, dashed: true },
+  { from: 'wkstn-hr-01', to: 'internet', label: 'T1048\nExfil DNS', color: '#8b5cf6', seq: 7 },
+];
+
+const NODE_DETAIL = {
+  'wkstn-hr-01': { ttps: ['T1566.001','T1059.001','T1547.001','T1003.001'], firstSeen: '2026-04-22 08:14', lastSeen: '2026-04-22 16:42', events: 842 },
+  'wkstn-fin-02': { ttps: ['T1021.002','T1083'], firstSeen: '2026-04-22 11:02', lastSeen: '2026-04-22 14:30', events: 231 },
+  'file-srv-01': { ttps: ['T1021.002','T1078','T1083','T1048.003'], firstSeen: '2026-04-22 11:02', lastSeen: '2026-04-22 18:00', events: 1104 },
+  'dc-01': { ttps: ['Targeted — not yet compromised'], firstSeen: 'N/A', lastSeen: 'N/A', events: 0 },
+};
+
+function nodeColor(n) {
+  if (n.type === 'external') return n.c2 ? '#ef4444' : '#6b7280';
+  if (n.type === 'user') return n.compromised ? '#f59e0b' : '#3b82f6';
+  if (n.type === 'dc') return n.targeted ? '#a855f7' : '#6b7280';
+  if (n.compromised) return '#ef4444';
+  return '#3b82f6';
+}
+
+function nodeStroke(n) {
+  if (n.targeted) return '#a855f7';
+  if (n.compromised) return '#ef4444';
+  if (n.c2) return '#ef4444';
+  return '#374151';
+}
+
+function GraphNode({ node, selected, onClick, scale }) {
+  const isHost = node.type === 'host' || node.type === 'server' || node.type === 'dc';
+  const size = node.type === 'dc' ? 36 : node.type === 'server' ? 30 : node.type === 'user' ? 22 : 26;
+  const fill = nodeColor(node) + '22';
+  const stroke = nodeStroke(node);
+
+  return (
+    <g transform={`translate(${node.x},${node.y})`} onClick={() => onClick(node)} style={{ cursor: 'pointer' }}>
+      {selected && <circle r={size + 10} fill="none" stroke={stroke} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.6">
+        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="8s" repeatCount="indefinite"/>
+      </circle>}
+      <circle r={size} fill={fill} stroke={stroke} strokeWidth={selected ? 2.5 : 1.5} />
+      {node.type === 'dc' && (
+        <text textAnchor="middle" dy="5" fontSize="14" fill={stroke} fontFamily="var(--font-mono)" fontWeight="700">DC</text>
+      )}
+      {node.type === 'external' && (
+        <text textAnchor="middle" dy="5" fontSize="11" fill={stroke} fontFamily="var(--font-mono)">NET</text>
+      )}
+      {(node.type === 'host' || node.type === 'server') && (
+        <g>
+          <rect x="-10" y="-9" width="20" height="14" rx="2" fill="none" stroke={stroke} strokeWidth="1.2"/>
+          <rect x="-4" y="5" width="8" height="3" rx="1" fill={stroke}/>
+          <rect x="-7" y="8" width="14" height="1.5" rx="0.5" fill={stroke}/>
+        </g>
+      )}
+      {node.type === 'user' && (
+        <g>
+          <circle cx="0" cy="-5" r="5" fill="none" stroke={stroke} strokeWidth="1.2"/>
+          <path d="M-9 10 Q-9 2 0 2 Q9 2 9 10" fill="none" stroke={stroke} strokeWidth="1.2"/>
+        </g>
+      )}
+      {node.compromised && !selected && (
+        <circle r={size + 2} fill="none" stroke="#ef4444" strokeWidth="0.8" opacity="0.4">
+          <animate attributeName="r" values={`${size+2};${size+6};${size+2}`} dur="2.5s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.4;0;0.4" dur="2.5s" repeatCount="indefinite"/>
+        </circle>
+      )}
+      <text textAnchor="middle" dy={size + 16} fontSize="11" fill="var(--text-primary)" fontFamily="var(--font-ui)" fontWeight="600">{node.label}</text>
+      <text textAnchor="middle" dy={size + 28} fontSize="9" fill="var(--text-muted)" fontFamily="var(--font-mono)">{node.sublabel}</text>
+    </g>
+  );
+}
+
+function GraphEdge({ edge, nodes, visible }) {
+  const from = nodes.find(n => n.id === edge.from);
+  const to = nodes.find(n => n.id === edge.to);
+  if (!from || !to) return null;
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const fromSize = from.type === 'dc' ? 36 : from.type === 'server' ? 30 : from.type === 'user' ? 22 : 26;
+  const toSize = to.type === 'dc' ? 36 : to.type === 'server' ? 30 : to.type === 'user' ? 22 : 26;
+  const ux = dx/dist, uy = dy/dist;
+  const x1 = from.x + ux * (fromSize + 2), y1 = from.y + uy * (fromSize + 2);
+  const x2 = to.x - ux * (toSize + 2), y2 = to.y - uy * (toSize + 2);
+  const mx = (x1 + x2) / 2 + (dy / dist) * 30;
+  const my = (y1 + y2) / 2 - (dx / dist) * 30;
+
+  const labelParts = edge.label.split('\n');
+  const lx = (x1 + x2) / 2 + (dy / dist) * 44;
+  const ly = (y1 + y2) / 2 - (dx / dist) * 44;
+
+  return (
+    <g opacity={visible ? 1 : 0.15} style={{ transition: 'opacity 0.4s' }}>
+      <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
+        fill="none" stroke={edge.color || '#4b5563'} strokeWidth="1.5"
+        strokeDasharray={edge.dashed ? '5 4' : 'none'}
+        markerEnd="url(#arrow)"
+      />
+      {edge.label && (
+        <g>
+          <rect x={lx - 38} y={ly - 11} width="76" height={labelParts.length > 1 ? 24 : 14} rx="3" fill="var(--bg-base)" opacity="0.85"/>
+          {labelParts.map((p, i) => (
+            <text key={i} x={lx} y={ly - 3 + i * 12} textAnchor="middle" fontSize="8.5" fill={edge.color || '#9ca3af'} fontFamily="var(--font-mono)" fontWeight="600">{p}</text>
+          ))}
+        </g>
+      )}
+    </g>
+  );
+}
+
+function AttackGraphTab() {
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [timelinePos, setTimelinePos] = useState(7);
+  const [playing, setPlaying] = useState(false);
+  const playRef = useRef();
+
+  useEffect(() => {
+    if (playing) {
+      playRef.current = setInterval(() => {
+        setTimelinePos(p => { if (p >= 7) { setPlaying(false); return 7; } return p + 1; });
+      }, 900);
+    } else clearInterval(playRef.current);
+    return () => clearInterval(playRef.current);
+  }, [playing]);
+
+  const handleNodeClick = node => setSelectedNode(prev => prev?.id === node.id ? null : node);
+  const visibleEdge = e => !e.seq || e.seq <= timelinePos;
+  const detail = selectedNode ? NODE_DETAIL[selectedNode.id] : null;
+
+  const TIMELINE_STEPS = [
+    { label: 'Initial Access', time: '08:14', technique: 'T1566.001' },
+    { label: 'C2 Established', time: '08:24', technique: 'T1105' },
+    { label: 'Persistence', time: '08:31', technique: 'T1547.001' },
+    { label: 'Cred Dump', time: '09:47', technique: 'T1003.001' },
+    { label: 'Lateral to FIN', time: '11:02', technique: 'T1021.002' },
+    { label: 'Lateral to SRV', time: '11:15', technique: 'T1021.002' },
+    { label: 'DC Targeting', time: '11:15', technique: 'T1078' },
+    { label: 'DNS Exfil', time: '16:00', technique: 'T1048.003' },
+  ];
+
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+      {/* Legend */}
+      <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 20, alignItems: 'center', background: 'var(--bg-elevated)', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>LEGEND</span>
+        {[
+          { color: '#ef4444', label: 'Compromised Host' },
+          { color: '#f59e0b', label: 'Stolen Credential' },
+          { color: '#a855f7', label: 'Domain Controller' },
+          { color: '#3b82f6', label: 'Clean / User' },
+          { color: '#6b7280', label: 'External / C2' },
+        ].map(l => (
+          <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: l.color, border: '1.5px solid ' + l.color }} />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{l.label}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Animate attack path:</span>
+          <button onClick={() => { setTimelinePos(0); setPlaying(true); }} style={{
+            padding: '4px 12px', borderRadius: 5, border: '1px solid var(--border)', background: playing ? 'var(--accent-dim)' : 'var(--bg-overlay)',
+            color: playing ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)',
+          }}>
+            {playing ? 'Playing...' : 'Play'}
+          </button>
+          <button onClick={() => { setTimelinePos(7); setPlaying(false); }} style={{
+            padding: '4px 12px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg-overlay)',
+            color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)',
+          }}>Reset</button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        {/* SVG Graph */}
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'radial-gradient(ellipse at 50% 50%, var(--bg-elevated) 0%, var(--bg-base) 100%)' }}>
+          <svg width="100%" height="100%" viewBox="0 0 960 520" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L8,3 z" fill="#6b7280"/>
+              </marker>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+
+            {/* Grid dots */}
+            {Array.from({length: 20}, (_, row) => Array.from({length: 30}, (_, col) => (
+              <circle key={`${row}-${col}`} cx={col * 32 + 16} cy={row * 28 + 14} r="0.8" fill="var(--border)" opacity="0.5"/>
+            )))}
+
+            {/* Edges */}
+            {GRAPH_EDGES.map((e, i) => (
+              <GraphEdge key={i} edge={e} nodes={GRAPH_NODES} visible={visibleEdge(e)} />
+            ))}
+
+            {/* Nodes */}
+            {GRAPH_NODES.map(node => (
+              <GraphNode key={node.id} node={node} selected={selectedNode?.id === node.id} onClick={handleNodeClick} />
+            ))}
+          </svg>
+
+          {/* Floating tip */}
+          {!selectedNode && (
+            <div style={{
+              position: 'absolute', bottom: 20, left: 20, fontSize: 11,
+              color: 'var(--text-muted)', fontFamily: 'var(--font-mono)',
+              background: 'var(--bg-surface)', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
+            }}>Click any node to inspect</div>
+          )}
+        </div>
+
+        {/* Node detail panel */}
+        {selectedNode && (
+          <div style={{ width: 280, flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--bg-surface)', overflowY: 'auto', padding: '20px 18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: 4 }}>{selectedNode.type.toUpperCase()}</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{selectedNode.label}</div>
+              </div>
+              <button onClick={() => setSelectedNode(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18 }}>×</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+              {selectedNode.compromised && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>COMPROMISED</span>}
+              {selectedNode.targeted && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(168,85,247,0.12)', color: 'var(--purple)', fontFamily: 'var(--font-mono)' }}>TARGETED</span>}
+              {selectedNode.c2 && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>C2 NODE</span>}
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6 }}>IP / IDENTIFIER</div>
+              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{selectedNode.sublabel}</div>
+            </div>
+
+            {detail && (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>OBSERVED TTPS</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {detail.ttps.map(t => (
+                      <span key={t} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 4, background: 'var(--accent-dim)', color: 'var(--accent)', fontWeight: 600 }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+                {[{ label: 'First Seen', value: detail.firstSeen }, { label: 'Last Seen', value: detail.lastSeen }, { label: 'Events Logged', value: detail.events.toLocaleString() }].map(r => (
+                  <div key={r.label} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 3 }}>{r.label.toUpperCase()}</div>
+                    <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{r.value}</div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Timeline scrubber */}
+      <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: 8 }}>ATTACK TIMELINE — APR 22, 2026</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 14, left: 0, right: 0, height: 2, background: 'var(--border)', borderRadius: 1 }}>
+            <div style={{ width: `${(timelinePos / 7) * 100}%`, height: '100%', background: 'var(--danger)', borderRadius: 1, transition: 'width 0.5s ease' }} />
+          </div>
+          {TIMELINE_STEPS.map((s, i) => (
+            <div key={i} onClick={() => setTimelinePos(i)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', zIndex: 1 }}>
+              <div style={{
+                width: 12, height: 12, borderRadius: '50%',
+                background: i <= timelinePos ? 'var(--danger)' : 'var(--bg-overlay)',
+                border: `2px solid ${i <= timelinePos ? 'var(--danger)' : 'var(--border)'}`,
+                transition: 'all 0.3s', marginBottom: 8,
+              }} />
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: i <= timelinePos ? 'var(--text-secondary)' : 'var(--text-muted)', textAlign: 'center', lineHeight: 1.3 }}>
+                <div style={{ color: i <= timelinePos ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>{s.technique}</div>
+                <div>{s.time}</div>
+                <div style={{ fontSize: 8 }}>{s.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { AttackGraphTab });
+
+</script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const ATTRIBUTION_DATA = [
+  {
+    rank: 1, apt: 'APT29', aliases: 'Cozy Bear, The Dukes, YTTRIUM', nation: 'Russia (SVR)',
+    confidence: 74, jaccard: 0.74, overlap: 8, total: 12,
+    ttps: ['T1566.001','T1059.001','T1003.001','T1021.002','T1078','T1083','T1547.001','T1105'],
+    penalty: -0.06, bonus: +0.20,
+    reasoning: 'Strong TTP overlap with known APT29 playbook. C2 infrastructure (185.220.101.47) matches MISP feed for Cozy Bear operations. Temporal TTP sequence (phish → PS → LSASS → SMB lateral) matches documented APT29 campaign pattern from 2024 SolarWinds follow-on activity.',
+    warning: null,
+  },
+  {
+    rank: 2, apt: 'APT41', aliases: 'Winnti, Barium, Double Dragon', nation: 'China (MSS)',
+    confidence: 41, jaccard: 0.41, overlap: 5, total: 12,
+    ttps: ['T1059.001','T1078','T1083','T1547.001','T1105'],
+    penalty: -0.10, bonus: +0.05,
+    reasoning: 'Moderate TTP overlap, but C2 infrastructure does not match known APT41 staging. Missing APT41 signature techniques (T1195, T1027, T1036). Note: APT41 has been observed mimicking APT29 TTPs in at least 3 documented campaigns.',
+    warning: 'FALSE FLAG RISK: APT41 has documented history of mimicking APT29 TTPs. Do not dismiss.',
+  },
+  {
+    rank: 3, apt: 'Turla', aliases: 'Snake, Uroburos, Waterbug', nation: 'Russia (FSB)',
+    confidence: 28, jaccard: 0.28, overlap: 3, total: 12,
+    ttps: ['T1059.001','T1003.001','T1105'],
+    penalty: -0.05, bonus: 0,
+    reasoning: 'Low overlap. Missing Turla signature techniques (T1071.004, T1090, T1573). Campaign duration and tempo inconsistent with Turla operational patterns.',
+    warning: null,
+  },
+];
+
+const NEXT_STEPS = [
+  {
+    rank: 1, technique: 'T1558.003', name: 'Kerberoasting', confidence: 'high',
+    rationale: 'APT29 consistently targets Kerberos service accounts after establishing foothold on FILE-SRV-01. svc-backup account suggests SPNs are registered. Kerberoasting would yield crackable hashes for further privilege escalation.',
+    tools: ['Rubeus.exe /kerberoast', 'Invoke-Kerberoast (PowerView)', 'impacket-GetUserSPNs'],
+    detect: 'Monitor EventID 4769 — Kerberos service ticket requests from non-service accounts. Alert on bulk TGS requests (>5 in 60s).',
+    urgency: 'critical',
+  },
+  {
+    rank: 2, technique: 'T1053.005', name: 'Scheduled Task Creation', confidence: 'high',
+    rationale: 'After lateral movement to FILE-SRV-01, APT29 typically establishes secondary persistence via scheduled tasks using domain admin credentials. This provides redundant access if the Run key payload is removed.',
+    tools: ['schtasks /create /tr "cmd /c ..."', 'at.exe (legacy)', 'New-ScheduledTaskAction (PS)'],
+    detect: 'Monitor EventID 4698 — Scheduled task created. Alert if task created by svc-backup or jdoe accounts outside business hours.',
+    urgency: 'high',
+  },
+  {
+    rank: 3, technique: 'T1003.006', name: 'DCSync', confidence: 'medium',
+    rationale: 'With domain admin via svc-backup, APT29 may attempt DCSync to replicate all Active Directory credentials without touching LSASS directly. This would enable complete domain takeover.',
+    tools: ['mimikatz "lsadump::dcsync /all"', 'impacket-secretsdump', 'Invoke-DCSync'],
+    detect: 'Monitor for Directory Service Replication (EventID 4662) with DS-Replication-Get-Changes-All right from non-DC hosts. This is the highest-priority detection.',
+    urgency: 'critical',
+  },
+];
+
+function ConfidenceGauge({ value, size = 80 }) {
+  const angle = (value / 100) * 180;
+  const r = size * 0.42;
+  const cx = size / 2, cy = size * 0.6;
+  const toRad = deg => (deg - 180) * Math.PI / 180;
+  const sx = cx + r * Math.cos(toRad(0)), sy = cy + r * Math.sin(toRad(0));
+  const ex = cx + r * Math.cos(toRad(angle)), ey = cy + r * Math.sin(toRad(angle));
+  const large = angle > 90 ? 1 : 0;
+  const color = value >= 70 ? 'var(--danger)' : value >= 50 ? 'var(--warning)' : 'var(--text-muted)';
+  return (
+    <svg width={size} height={size * 0.65} viewBox={`0 0 ${size} ${size * 0.65}`}>
+      <path d={`M${cx - r},${cy} A${r},${r} 0 0,1 ${cx + r},${cy}`} fill="none" stroke="var(--border)" strokeWidth="5" strokeLinecap="round"/>
+      {value > 0 && <path d={`M${sx},${sy} A${r},${r} 0 ${large},1 ${ex},${ey}`} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"/>}
+      <text x={cx} y={cy - 2} textAnchor="middle" fontSize={size * 0.22} fontWeight="700" fill={color} fontFamily="var(--font-mono)">{value}%</text>
+    </svg>
+  );
+}
+
+function AttributionTab() {
+  const [expanded, setExpanded] = useState(0);
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+      {/* False flag warning */}
+      <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 1 }}>
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--warning)', marginBottom: 3 }}>False Flag Advisory</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            TTP overlap between top-2 candidates (APT29 74% / APT41 41%) triggers false flag protocol. APT41 has documented history of mimicking APT29 operations. Confidence penalized by -0.10 for APT41 per scoring formula. C2 infrastructure cross-reference with MISP confirms APT29 origin.
+          </div>
+        </div>
+      </div>
+
+      {/* Scoring formula */}
+      <div style={{ padding: '14px 18px', borderRadius: 8, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', marginBottom: 10 }}>CONFIDENCE SCORING FORMULA</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+          {[
+            { label: 'Base (Jaccard)', color: 'var(--accent)', value: '0.64' },
+            { label: '+ IoC Match', color: 'var(--success)', value: '+0.10' },
+            { label: '+ Infra Match', color: 'var(--success)', value: '+0.10' },
+            { label: '+ Sequence Match', color: 'var(--success)', value: '+0.05' },
+            { label: '- False Flag Risk', color: 'var(--warning)', value: '-0.15' },
+            { label: '= Final', color: 'var(--text-primary)', value: '0.74 HIGH' },
+          ].map((t, i) => (
+            <React.Fragment key={i}>
+              <span style={{ padding: '3px 10px', borderRadius: 5, background: t.color + '18', color: t.color, fontWeight: 600 }}>{t.label}: {t.value}</span>
+              {i < 5 && <span style={{ color: 'var(--text-muted)' }}>→</span>}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      {/* Attribution cards */}
+      {ATTRIBUTION_DATA.map((apt, i) => (
+        <div key={apt.apt} style={{
+          background: 'var(--bg-surface)', border: `1px solid ${i === 0 ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 10, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+            onClick={() => setExpanded(expanded === i ? -1 : i)}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, width: 90, flexShrink: 0 }}>
+              <ConfidenceGauge value={apt.confidence} size={80} />
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: apt.confidence >= 70 ? 'var(--danger)' : apt.confidence >= 50 ? 'var(--warning)' : 'var(--text-muted)', fontWeight: 700 }}>
+                {apt.confidence >= 70 ? 'HIGH' : apt.confidence >= 50 ? 'MEDIUM' : 'LOW'}
+              </span>
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 5 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>#{apt.rank} {apt.apt}</span>
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{apt.nation}</span>
+                {i === 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(59,130,246,0.15)', color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>ATTRIBUTED</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>AKA: {apt.aliases}</div>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {apt.ttps.map(t => (
+                  <span key={t} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '1px 6px', borderRadius: 3, background: 'var(--accent-dim)', color: 'var(--accent)', fontWeight: 600 }}>{t}</span>
+                ))}
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', padding: '1px 6px' }}>{apt.overlap}/{apt.total} TTPs matched</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>JACCARD</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{apt.jaccard.toFixed(2)}</div>
+                </div>
+              </div>
+              {apt.warning && <div style={{ fontSize: 10, color: 'var(--warning)', maxWidth: 160, textAlign: 'right', lineHeight: 1.4 }}>{apt.warning.split(':')[0]}</div>}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{expanded === i ? '▲' : '▼'}</span>
+            </div>
+          </div>
+
+          {expanded === i && (
+            <div style={{ padding: '0 20px 18px', borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ paddingTop: 14, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: 12 }}>{apt.reasoning}</div>
+              <div style={{ display: 'flex', gap: 20 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6 }}>SCORE BREAKDOWN</div>
+                  {[
+                    { label: 'Jaccard base', value: apt.jaccard.toFixed(2), positive: true },
+                    { label: 'Penalties', value: apt.penalty.toFixed(2), positive: false },
+                    { label: 'Bonuses', value: '+' + apt.bonus.toFixed(2), positive: true },
+                    { label: 'Final score', value: (apt.confidence / 100).toFixed(2), bold: true },
+                  ].map(r => (
+                    <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.label}</span>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: r.bold ? 700 : 400, color: r.bold ? 'var(--text-primary)' : r.positive ? 'var(--success)' : 'var(--danger)' }}>{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SimulationTab() {
+  const [expanded, setExpanded] = useState(0);
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      <div style={{ padding: '14px 18px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.2)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', marginBottom: 4 }}>Predictive Simulation — APT29 Playbook</div>
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          Based on APT29 attribution (74% confidence) and current network state, RAPTOR has simulated the 3 most likely next actions. Predictions sourced from CALDERA APT29 adversary profile + RAG-retrieved ATT&CK documentation. <strong style={{ color: 'var(--warning)' }}>Act on these now.</strong>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, padding: '12px 18px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: 4 }}>CURRENT FOOTHOLD</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {['WKSTN-HR-01 (User)', 'WKSTN-FIN-02 (User)', 'FILE-SRV-01 (Domain Admin)'].map(h => (
+              <span key={h} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '3px 8px', borderRadius: 4, background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', fontWeight: 500 }}>{h}</span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: 4 }}>DC STATUS</div>
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '3px 8px', borderRadius: 4, background: 'rgba(168,85,247,0.1)', color: 'var(--purple)', fontWeight: 600 }}>DC-01 — NOT YET COMPROMISED</span>
+        </div>
+      </div>
+
+      {NEXT_STEPS.map((step, i) => (
+        <div key={i} style={{
+          background: 'var(--bg-surface)', border: `1px solid ${step.urgency === 'critical' ? 'var(--danger)' : 'var(--border)'}`,
+          borderRadius: 10, overflow: 'hidden',
+        }}>
+          <div style={{ padding: '16px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14 }}
+            onClick={() => setExpanded(expanded === i ? -1 : i)}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+              background: step.urgency === 'critical' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+              border: `1px solid ${step.urgency === 'critical' ? 'var(--danger)' : 'var(--warning)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 16, fontWeight: 800, fontFamily: 'var(--font-mono)',
+              color: step.urgency === 'critical' ? 'var(--danger)' : 'var(--warning)',
+            }}>#{step.rank}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', fontSize: 12 }}>{step.technique}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{step.name}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 4, fontFamily: 'var(--font-mono)',
+                  background: step.urgency === 'critical' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.1)',
+                  color: step.urgency === 'critical' ? 'var(--danger)' : 'var(--warning)',
+                }}>{step.urgency.toUpperCase()}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.rationale.substring(0, 90)}...</div>
+            </div>
+            <ConfidencePill confidence={step.confidence} />
+            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{expanded === i ? '▲' : '▼'}</span>
+          </div>
+
+          {expanded === i && (
+            <div style={{ padding: '0 20px 18px', borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ paddingTop: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 6 }}>ANALYST RATIONALE</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.65 }}>{step.rationale}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>EXPECTED TOOLS / COMMANDS</div>
+                  {step.tools.map((t, ti) => (
+                    <div key={ti} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 5, marginBottom: 4, border: '1px solid var(--border-subtle)' }}>{t}</div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>DETECTION GUIDANCE</div>
+                  <div style={{ fontSize: 12, color: 'var(--success)', lineHeight: 1.6, padding: '10px 12px', background: 'rgba(34,197,94,0.05)', borderRadius: 6, border: '1px solid rgba(34,197,94,0.2)' }}>{step.detect}</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+Object.assign(window, { AttributionTab, SimulationTab });
+
+</script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const APT_GROUPS = [
+  { name: 'APT29', aliases: 'Cozy Bear, The Dukes', nation: 'Russia', sponsor: 'SVR', ttps: 187, tactics: ['Initial Access','Execution','Persistence','Lateral Movement','Exfiltration'], active: true, since: 2008, targets: 'Government, Defense, Think Tanks', recent: '2026-02' },
+  { name: 'APT28', aliases: 'Fancy Bear, Sofacy, Sednit', nation: 'Russia', sponsor: 'GRU', ttps: 212, tactics: ['Initial Access','Credential Access','Discovery','Collection'], active: true, since: 2007, targets: 'Government, Military, Media', recent: '2026-03' },
+  { name: 'APT41', aliases: 'Winnti, Double Dragon, Barium', nation: 'China', sponsor: 'MSS', ttps: 224, tactics: ['Initial Access','Execution','Privilege Escalation','Lateral Movement'], active: true, since: 2012, targets: 'Healthcare, Telecom, Technology', recent: '2026-04' },
+  { name: 'Lazarus Group', aliases: 'Hidden Cobra, Zinc', nation: 'North Korea', sponsor: 'RGB', ttps: 156, tactics: ['Initial Access','Execution','Exfiltration','Impact'], active: true, since: 2009, targets: 'Finance, Crypto, Defense', recent: '2026-01' },
+  { name: 'Turla', aliases: 'Snake, Uroburos, Waterbug', nation: 'Russia', sponsor: 'FSB', ttps: 198, tactics: ['Initial Access','Persistence','Defense Evasion','C2'], active: true, since: 2006, targets: 'Government, Embassies, Military', recent: '2025-11' },
+  { name: 'APT10', aliases: 'MenuPass, Stone Panda', nation: 'China', sponsor: 'MSS', ttps: 143, tactics: ['Initial Access','Discovery','Lateral Movement','Exfiltration'], active: true, since: 2009, targets: 'MSP Providers, Healthcare, Government', recent: '2025-09' },
+  { name: 'Sandworm', aliases: 'Voodoo Bear, BlackEnergy', nation: 'Russia', sponsor: 'GRU', ttps: 167, tactics: ['Initial Access','Execution','Impact'], active: true, since: 2009, targets: 'Energy, ICS/SCADA, Ukraine', recent: '2026-03' },
+  { name: 'Kimsuky', aliases: 'Velvet Chollima, Black Banshee', nation: 'North Korea', sponsor: 'RGB', ttps: 132, tactics: ['Spearphishing','Credential Access','Collection'], active: true, since: 2012, targets: 'Korea, US Policy, Think Tanks', recent: '2026-02' },
+  { name: 'BlackCat', aliases: 'ALPHV, Noberus', nation: 'Unknown', sponsor: 'Criminal', ttps: 98, tactics: ['Initial Access','Privilege Escalation','Impact'], active: true, since: 2021, targets: 'Cross-sector (RaaS)', recent: '2026-04' },
+  { name: 'Volt Typhoon', aliases: 'Bronze Silhouette', nation: 'China', sponsor: 'PLA', ttps: 89, tactics: ['Initial Access','Persistence','Defense Evasion'], active: true, since: 2021, targets: 'Critical Infrastructure, US Military', recent: '2026-03' },
+  { name: 'FIN7', aliases: 'Carbanak, Navigator Group', nation: 'Unknown', sponsor: 'Criminal', ttps: 141, tactics: ['Initial Access','Execution','Collection','Exfiltration'], active: true, since: 2015, targets: 'Finance, Retail, Hospitality', recent: '2025-12' },
+  { name: 'APT38', aliases: 'Bluenoroff', nation: 'North Korea', sponsor: 'RGB', ttps: 88, tactics: ['Initial Access','Lateral Movement','Exfiltration'], active: true, since: 2014, targets: 'Banking, SWIFT Networks', recent: '2025-10' },
+];
+
+const NATION_COLORS = { Russia: 'var(--danger)', China: 'var(--warning)', 'North Korea': 'var(--purple)', Unknown: 'var(--text-muted)' };
+const TACTIC_COLORS = {
+  'Initial Access': '#ef4444', 'Execution': '#f97316', 'Persistence': '#f59e0b',
+  'Privilege Escalation': '#eab308', 'Defense Evasion': '#84cc16', 'Credential Access': '#22c55e',
+  'Discovery': '#14b8a6', 'Lateral Movement': '#3b82f6', 'Collection': '#8b5cf6',
+  'C2': '#ec4899', 'Exfiltration': '#ef4444', 'Impact': '#dc2626',
+  'Spearphishing': '#f97316', 'Healthcare': '#14b8a6',
+};
+
+function APTCard({ apt, onClick }) {
+  return (
+    <div onClick={() => onClick(apt)}
+      style={{
+        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
+        padding: '18px 20px', cursor: 'pointer', transition: 'all 0.15s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-bright)'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--bg-surface)'; }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginBottom: 3 }}>{apt.name}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{apt.aliases}</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, fontFamily: 'var(--font-mono)', background: NATION_COLORS[apt.nation] + '18', color: NATION_COLORS[apt.nation] }}>{apt.nation.toUpperCase()}</span>
+          {apt.active && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', color: 'var(--success)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ACTIVE</span>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>SPONSOR</div>
+          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>{apt.sponsor}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>KNOWN TTPs</div>
+          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--accent)', fontWeight: 700 }}>{apt.ttps}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>ACTIVE SINCE</div>
+          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>{apt.since}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em' }}>LAST SEEN</div>
+          <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>{apt.recent}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Targets: </span>{apt.targets}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {apt.tactics.map(t => (
+          <span key={t} style={{ fontSize: 9, padding: '2px 7px', borderRadius: 3, fontFamily: 'var(--font-mono)', fontWeight: 600,
+            background: (TACTIC_COLORS[t] || '#6b7280') + '18', color: TACTIC_COLORS[t] || '#6b7280' }}>
+            {t}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function APTDetailModal({ apt, onClose }) {
+  if (!apt) return null;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 560, background: 'var(--bg-surface)', border: '1px solid var(--border-bright)',
+        borderRadius: 14, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <span style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{apt.name}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, fontFamily: 'var(--font-mono)', background: NATION_COLORS[apt.nation] + '18', color: NATION_COLORS[apt.nation] }}>{apt.nation}</span>
+              {apt.active && <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.1)', color: 'var(--success)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ACTIVE</span>}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>AKA: {apt.aliases}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 22, lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+        <div style={{ padding: '20px 24px', overflowY: 'auto', maxHeight: '60vh' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 20 }}>
+            {[{ label: 'Sponsor', value: apt.sponsor }, { label: 'Known TTPs', value: apt.ttps }, { label: 'Active Since', value: apt.since }, { label: 'Last Activity', value: apt.recent }, { label: 'Primary Targets', value: apt.targets }].map(r => (
+              <div key={r.label} style={{ background: 'var(--bg-elevated)', borderRadius: 8, padding: '12px 14px' }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 4 }}>{r.label.toUpperCase()}</div>
+                <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', fontWeight: 600 }}>{r.value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>PRIMARY TACTICS</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {apt.tactics.map(t => (
+                <span key={t} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, fontFamily: 'var(--font-mono)', fontWeight: 600, background: (TACTIC_COLORS[t] || '#6b7280') + '18', color: TACTIC_COLORS[t] || '#6b7280' }}>{t}</span>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <a href={`https://attack.mitre.org/groups/`} target="_blank" rel="noopener noreferrer" style={{
+              flex: 1, display: 'block', padding: '10px', borderRadius: 7, border: '1px solid var(--border)',
+              background: 'var(--bg-elevated)', color: 'var(--accent)', fontSize: 12, textDecoration: 'none',
+              fontFamily: 'var(--font-mono)', textAlign: 'center',
+            }}>View on MITRE ATT&CK ↗</a>
+            <button style={{
+              flex: 1, padding: '10px', borderRadius: 7, border: 'none',
+              background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer',
+              fontFamily: 'var(--font-mono)', fontWeight: 600,
+            }}>Check Against Investigations</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function APTLibraryPage() {
+  const [search, setSearch] = useState('');
+  const [filterNation, setFilterNation] = useState('all');
+  const [selected, setSelected] = useState(null);
+
+  const nations = ['all', 'Russia', 'China', 'North Korea', 'Unknown'];
+  const filtered = APT_GROUPS.filter(a => {
+    const m = search.toLowerCase();
+    const matchS = a.name.toLowerCase().includes(m) || a.aliases.toLowerCase().includes(m) || a.targets.toLowerCase().includes(m);
+    const matchN = filterNation === 'all' || a.nation === filterNation;
+    return matchS && matchN;
+  });
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {selected && <APTDetailModal apt={selected} onClose={() => setSelected(null)} />}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>APT Library</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{APT_GROUPS.length} tracked groups — sourced from MITRE ATT&CK STIX + APTNotes corpus</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Last sync:</span>
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>2026-04-24 04:00 UTC</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search APT groups, aliases, targets..."
+            style={{ width: '100%', padding: '9px 12px 9px 36px', borderRadius: 8, background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-ui)' }} />
+        </div>
+        <div style={{ display: 'flex', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+          {nations.map(n => (
+            <button key={n} onClick={() => setFilterNation(n)} style={{
+              padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-ui)',
+              background: filterNation === n ? 'var(--bg-elevated)' : 'transparent',
+              color: filterNation === n ? (NATION_COLORS[n] || 'var(--text-primary)') : 'var(--text-muted)',
+              borderRight: '1px solid var(--border)', fontWeight: filterNation === n ? 600 : 400,
+            }}>{n === 'all' ? 'All' : n}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+        {filtered.map(apt => <APTCard key={apt.name} apt={apt} onClick={setSelected} />)}
+      </div>
+      {filtered.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No APT groups match your search.</div>}
+    </div>
+  );
+}
+
+Object.assign(window, { APTLibraryPage });
+
+</script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const EXAMPLE_QUERIES = [
+  'What would APT29 do next given the current foothold?',
+  'How many hops from initial compromise to domain controller?',
+  'Which TTPs overlap with Cozy Bear\'s known playbook?',
+  'What should I block right now to contain this attack?',
+  'Show me all paths to DC-01 from compromised hosts',
+  'Which credentials have been stolen and what is the blast radius?',
+  'Is there evidence of DCSync or Kerberoasting preparation?',
+  'Summarize the exfiltration risk in plain language',
+];
+
+const CANNED_RESPONSES = {
+  'What would APT29 do next given the current foothold?': {
+    answer: `Based on current network state and APT29 attribution at 74% confidence, the three most probable next actions are:
+
+**1. Kerberoasting (T1558.003) — CRITICAL PRIORITY**
+With domain admin access on FILE-SRV-01 via the svc-backup account, APT29 will likely enumerate Service Principal Names and request TGS tickets for offline cracking. The svc-backup account suggests registered SPNs. Expected tool: Rubeus.exe or impacket-GetUserSPNs.
+
+**2. Scheduled Task Persistence (T1053.005) — HIGH PRIORITY**  
+APT29 consistently establishes secondary persistence mechanisms after lateral movement. A scheduled task using the stolen domain admin credentials will be created on FILE-SRV-01 or DC-01 if accessible.
+
+**3. DCSync (T1003.006) — CRITICAL — DOMAIN TAKEOVER RISK**
+If APT29 achieves any foothold on DC-01 or retains domain admin, they will likely execute DCSync to replicate the entire NTDS.dit credential database. This would give them persistent access to every account in the domain, including krbtgt.
+
+**Immediate action required:** Block replication rights (EventID 4662) from non-DC hosts. Disable svc-backup account now. Isolate FILE-SRV-01 from the domain.`,
+    sources: [
+      { title: 'APT29 MITRE ATT&CK Profile', id: 'G0016', confidence: 'high' },
+      { title: 'APTNotes: Cozy Bear TTPs 2024', id: 'APTNotes-2024-0142', confidence: 'high' },
+      { title: 'T1558.003 — Kerberoasting', id: 'attack.mitre.org', confidence: 'high' },
+    ],
+    confidence: 'high',
+    cypher: 'MATCH (g:APTGroup {name: "APT29"})-[:USES]->(t:Technique) WHERE t.id IN ["T1558.003","T1053.005","T1003.006"] RETURN t.id, t.name ORDER BY t.kill_chain_phase',
+  },
+  'What should I block right now to contain this attack?': {
+    answer: `**Immediate containment actions (prioritized by impact):**
+
+**1. ISOLATE FILE-SRV-01** from the domain network immediately. This host has domain admin credentials and is the pivot point for DC access. Network-level isolation will break the lateral movement chain.
+
+**2. DISABLE svc-backup account** in Active Directory. This is the stolen domain admin credential in use. Rotate all service account passwords associated with this account.
+
+**3. BLOCK outbound DNS to non-corporate resolvers** — DNS exfiltration detected via T1048.003. Whitelist only approved resolvers. Rate-limit TXT record queries per host.
+
+**4. TERMINATE C2 connection** to 185.220.101.47. Add this IP and its /24 subnet to perimeter block list. Monitor for new C2 domains via certificate transparency logs.
+
+**5. FORCE re-authentication on domain** for all privileged accounts. Revoke active Kerberos tickets (krbtgt password reset ×2 with 10h interval).
+
+**6. ENABLE enhanced auditing** on DC-01: Event IDs 4662, 4769, 4768, 4776. Alert on any replication events from non-DC hosts within the next 72 hours.`,
+    sources: [
+      { title: 'RAPTOR Threat Analysis — INV-0047', id: 'internal', confidence: 'high' },
+      { title: 'CISA Advisory AA22-321A — APT29', id: 'CISA', confidence: 'high' },
+    ],
+    confidence: 'high',
+    cypher: null,
+  },
+};
+
+function QueryMessage({ msg }) {
+  const isUser = msg.role === 'user';
+  return (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 22, flexDirection: isUser ? 'row-reverse' : 'row' }}>
+      <div style={{
+        width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+        background: isUser ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+        border: `1px solid ${isUser ? 'var(--accent)' : 'var(--border)'}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)',
+        color: isUser ? 'var(--accent)' : 'var(--text-secondary)',
+      }}>{isUser ? 'SA' : 'AI'}</div>
+      <div style={{ flex: 1, minWidth: 0, maxWidth: '84%' }}>
+        {isUser ? (
+          <div style={{ padding: '10px 14px', borderRadius: '10px 10px 4px 10px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55 }}>{msg.content}</div>
+        ) : (
+          <div style={{ padding: '14px 18px', borderRadius: '10px 10px 10px 4px', background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            {msg.thinking && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: 10, padding: '6px 10px', background: 'var(--bg-elevated)', borderRadius: 5, border: '1px solid var(--border-subtle)' }}>
+                Querying: RAG pipeline → Neo4j graph → CALDERA profiles → ATT&CK STIX...
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-line' }}>
+              {msg.content.split('**').map((part, i) =>
+                i % 2 === 1 ? <strong key={i} style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{part}</strong> : part
+              )}
+            </div>
+            {msg.sources && msg.sources.length > 0 && (
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 8 }}>SOURCES</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {msg.sources.map((s, i) => (
+                    <span key={i} style={{ fontSize: 10, padding: '3px 9px', borderRadius: 4, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {s.title}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {msg.cypher && (
+              <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--bg-base)', borderRadius: 6, border: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--success)' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.06em', marginBottom: 4 }}>GENERATED CYPHER QUERY</div>
+                {msg.cypher}
+              </div>
+            )}
+            {msg.confidence && (
+              <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Response confidence:</span>
+                <ConfidencePill confidence={msg.confidence} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QueryPage() {
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'RAPTOR Intelligence Query online. I have full access to investigation INV-0047 (Operation Shadow Broker), the Neo4j attack graph, ATT&CK STIX database, and CALDERA APT29 adversary profiles.\n\nAsk me anything about this campaign. I will retrieve relevant context before answering.', sources: [], confidence: null },
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef();
+
+  useEffect(() => {
+    if (bottomRef.current) bottomRef.current.scrollTop = bottomRef.current.scrollHeight;
+  }, [messages]);
+
+  const sendMessage = async (text) => {
+    const q = text || input.trim();
+    if (!q || loading) return;
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: q }]);
+    setLoading(true);
+
+    setMessages(prev => [...prev, { role: 'assistant', content: '', thinking: true, sources: [], confidence: null }]);
+
+    await new Promise(r => setTimeout(r, 1400));
+
+    const canned = CANNED_RESPONSES[q];
+    let response;
+    if (canned) {
+      response = { role: 'assistant', content: canned.answer, sources: canned.sources, confidence: canned.confidence, cypher: canned.cypher, thinking: false };
+    } else {
+      const prompt = `You are RAPTOR, a forensic APT analyst AI. The active investigation is INV-0047 "Operation Shadow Broker" with APT29 attributed at 74% confidence. Answer this analyst question concisely and technically: "${q}". Focus on actionable insights. Reference specific MITRE ATT&CK technique IDs where relevant.`;
+      let answer = '';
+      try {
+        answer = await window.claude.complete(prompt);
+      } catch(e) {
+        answer = 'Unable to reach LLM endpoint. Ensure Claude API is configured in Settings > Model Configuration.';
+      }
+      response = { role: 'assistant', content: answer, sources: [{ title: 'RAG Context — INV-0047', id: 'internal', confidence: 'medium' }], confidence: 'medium', thinking: false };
+    }
+
+    setMessages(prev => [...prev.slice(0, -1), response]);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {/* Context bar */}
+      <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)', display: 'flex', gap: 16, alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>CONTEXT:</span>
+        {['INV-0047 — Op Shadow Broker', 'APT29 @ 74%', 'Neo4j Graph', 'ATT&CK STIX v14', 'CALDERA Profiles'].map(c => (
+          <span key={c} style={{ fontSize: 11, padding: '2px 9px', borderRadius: 4, background: 'var(--bg-overlay)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{c}</span>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Model: claude-sonnet-4-5 | RAG: ON | Reranker: bge-large</span>
+      </div>
+
+      {/* Messages */}
+      <div ref={bottomRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
+        {messages.map((m, i) => <QueryMessage key={i} msg={m} />)}
+        {loading && messages[messages.length - 1]?.thinking && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '0 0 16px 42px' }}>
+            {[0,1,2].map(i => (
+              <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: `bounce 1.2s ease ${i * 0.2}s infinite` }} />
+            ))}
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginLeft: 8 }}>Retrieving from RAG pipeline...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Example queries */}
+      <div style={{ padding: '8px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 6, overflowX: 'auto', flexWrap: 'nowrap' }}>
+        {EXAMPLE_QUERIES.slice(0, 4).map(q => (
+          <button key={q} onClick={() => sendMessage(q)} style={{
+            padding: '5px 12px', borderRadius: 16, border: '1px solid var(--border)',
+            background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 11,
+            cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'var(--font-ui)',
+            transition: 'all 0.15s', flexShrink: 0,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+            {q}
+          </button>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '12px 24px 20px', borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', gap: 10, background: 'var(--bg-surface)', border: '1px solid var(--border-bright)', borderRadius: 10, padding: '4px 4px 4px 16px', transition: 'border-color 0.15s' }}>
+          <input value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+            placeholder="Ask anything about this campaign... (Enter to send)"
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-ui)', padding: '8px 0' }} />
+          <button onClick={() => sendMessage()} disabled={!input.trim() || loading} style={{
+            padding: '8px 18px', borderRadius: 7, border: 'none',
+            background: input.trim() && !loading ? 'var(--accent)' : 'var(--bg-elevated)',
+            color: input.trim() && !loading ? '#fff' : 'var(--text-muted)',
+            fontSize: 13, fontWeight: 600, cursor: input.trim() && !loading ? 'pointer' : 'default',
+            fontFamily: 'var(--font-ui)', transition: 'all 0.15s',
+          }}>Send</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { QueryPage });
+
+</script>
+
+<script type="text/babel">
+const { useState } = React;
+
+function Toggle({ value, onChange }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{
+      width: 40, height: 22, borderRadius: 11, cursor: 'pointer',
+      background: value ? 'var(--accent)' : 'var(--bg-overlay)',
+      border: `1px solid ${value ? 'var(--accent)' : 'var(--border)'}`,
+      position: 'relative', transition: 'all 0.2s', flexShrink: 0,
+    }}>
+      <div style={{
+        width: 16, height: 16, borderRadius: '50%', background: '#fff',
+        position: 'absolute', top: 2, left: value ? 20 : 2, transition: 'left 0.2s',
+      }} />
+    </div>
+  );
+}
+
+function SettingRow({ label, sub, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid var(--border-subtle)', gap: 20 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+      </div>
+      <div style={{ flexShrink: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+function SettingSection({ title, children }) {
+  return (
+    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>{title}</span>
+      </div>
+      <div style={{ padding: '0 20px' }}>{children}</div>
+    </div>
+  );
+}
+
+function StyledInput({ value, onChange, mono, placeholder }) {
+  return (
+    <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      style={{
+        padding: '7px 12px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        color: 'var(--text-primary)', fontSize: 12, outline: 'none', width: 260,
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-ui)',
+      }} />
+  );
+}
+
+function StyledSelect({ value, onChange, options }) {
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} style={{
+      padding: '7px 12px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+      color: 'var(--text-primary)', fontSize: 12, outline: 'none', cursor: 'pointer',
+      fontFamily: 'var(--font-mono)', width: 200,
+    }}>
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function SettingsPage() {
+  const [settings, setSettings] = useState({
+    primaryLlm: 'claude-sonnet', fallbackLlm: 'gpt-4o', embeddingModel: 'bge-large-en-v1.5',
+    ragEnabled: true, rerankerEnabled: true, stixValidation: true, falseFlag: true,
+    weaviateUrl: 'http://localhost:8080', neo4jUrl: 'bolt://localhost:7687',
+    elasticUrl: 'http://localhost:9200', calderaUrl: 'http://localhost:8888',
+    batchWindow: 15, maxTokens: 4096, retrievalK: 20, rerankK: 5, alpha: 0.6,
+    alertEmail: 'soc@corp.local', webhookUrl: '', slackChannel: '#soc-alerts',
+    highConfidenceThreshold: 75, mediumConfidenceThreshold: 50, autoSimulate: true,
+    mlflowEnabled: true, auditLogs: true, piiRedaction: true,
+  });
+  const set = (k, v) => setSettings(s => ({ ...s, [k]: v }));
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+      <div style={{ maxWidth: 800 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>System Settings</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Configure RAPTOR pipeline components and integrations</div>
+          </div>
+          <button onClick={handleSave} style={{
+            padding: '9px 22px', borderRadius: 8, border: 'none',
+            background: saved ? 'var(--success)' : 'var(--accent)', color: '#fff',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-ui)', transition: 'background 0.3s',
+          }}>{saved ? 'Saved' : 'Save Changes'}</button>
+        </div>
+
+        <SettingSection title="LLM Configuration">
+          <SettingRow label="Primary LLM" sub="Used for all log analysis and report generation">
+            <StyledSelect value={settings.primaryLlm} onChange={v => set('primaryLlm', v)} options={[
+              { value: 'claude-sonnet', label: 'Claude Sonnet (recommended)' },
+              { value: 'claude-haiku', label: 'Claude Haiku (faster)' },
+              { value: 'gpt-4o', label: 'GPT-4o' },
+              { value: 'mistral-7b', label: 'Mistral-7B (local)' },
+            ]} />
+          </SettingRow>
+          <SettingRow label="Fallback LLM" sub="Used when primary LLM is unavailable">
+            <StyledSelect value={settings.fallbackLlm} onChange={v => set('fallbackLlm', v)} options={[
+              { value: 'gpt-4o', label: 'GPT-4o' },
+              { value: 'claude-haiku', label: 'Claude Haiku' },
+              { value: 'mistral-7b', label: 'Mistral-7B (local/air-gap)' },
+            ]} />
+          </SettingRow>
+          <SettingRow label="Embedding Model" sub="Domain-specific embeddings — do not use generic models">
+            <StyledSelect value={settings.embeddingModel} onChange={v => set('embeddingModel', v)} options={[
+              { value: 'bge-large-en-v1.5', label: 'BAAI/bge-large-en-v1.5 (recommended)' },
+              { value: 'bge-base-en-v1.5', label: 'BAAI/bge-base-en-v1.5 (faster)' },
+              { value: 'sentence-bert-cti', label: 'Sentence-BERT (CTI fine-tuned)' },
+            ]} />
+          </SettingRow>
+          <SettingRow label="Max Context Tokens" sub="Per RAG call — events + retrieved context">
+            <input type="number" value={settings.maxTokens} onChange={e => set('maxTokens', +e.target.value)} min={1024} max={8192} step={512}
+              style={{ padding: '7px 12px', width: 100, borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-mono)', textAlign: 'right' }} />
+          </SettingRow>
+        </SettingSection>
+
+        <SettingSection title="RAG Pipeline">
+          <SettingRow label="RAG Augmentation" sub="Non-negotiable — disabling causes missed attack artifacts">
+            <Toggle value={settings.ragEnabled} onChange={v => set('ragEnabled', v)} />
+          </SettingRow>
+          <SettingRow label="Reranker" sub="Cross-encoder reranking after k=20 retrieval — required for precision">
+            <Toggle value={settings.rerankerEnabled} onChange={v => set('rerankerEnabled', v)} />
+          </SettingRow>
+          <SettingRow label="STIX Validation" sub="Reject hallucinated ATT&CK technique IDs post-inference">
+            <Toggle value={settings.stixValidation} onChange={v => set('stixValidation', v)} />
+          </SettingRow>
+          <SettingRow label="False Flag Detection" sub="Apply confidence penalties for APT mimicry patterns">
+            <Toggle value={settings.falseFlag} onChange={v => set('falseFlag', v)} />
+          </SettingRow>
+          <SettingRow label="Batch Window (minutes)" sub="Events grouped per RAG call — 15m recommended">
+            <input type="number" value={settings.batchWindow} onChange={e => set('batchWindow', +e.target.value)} min={5} max={60} step={5}
+              style={{ padding: '7px 12px', width: 100, borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-mono)', textAlign: 'right' }} />
+          </SettingRow>
+          <SettingRow label="Retrieval K" sub="Candidates before reranking (default 20)">
+            <input type="number" value={settings.retrievalK} onChange={e => set('retrievalK', +e.target.value)} min={5} max={50}
+              style={{ padding: '7px 12px', width: 100, borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-mono)', textAlign: 'right' }} />
+          </SettingRow>
+          <SettingRow label="Reranked K" sub="Final context injected into LLM (default 5)">
+            <input type="number" value={settings.rerankK} onChange={e => set('rerankK', +e.target.value)} min={1} max={20}
+              style={{ padding: '7px 12px', width: 100, borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-mono)', textAlign: 'right' }} />
+          </SettingRow>
+          <SettingRow label="Hybrid Search Alpha" sub="0.0 = BM25 only, 1.0 = semantic only (0.6 recommended)">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input type="range" min={0} max={1} step={0.05} value={settings.alpha} onChange={e => set('alpha', +e.target.value)}
+                style={{ width: 120, accentColor: 'var(--accent)' }} />
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', minWidth: 30 }}>{settings.alpha.toFixed(2)}</span>
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        <SettingSection title="Data Sources">
+          {[
+            { label: 'Weaviate (Vector Store)', key: 'weaviateUrl', placeholder: 'http://localhost:8080' },
+            { label: 'Neo4j (Graph DB)', key: 'neo4jUrl', placeholder: 'bolt://localhost:7687' },
+            { label: 'Elasticsearch', key: 'elasticUrl', placeholder: 'http://localhost:9200' },
+            { label: 'CALDERA', key: 'calderaUrl', placeholder: 'http://localhost:8888' },
+          ].map(ds => (
+            <SettingRow key={ds.key} label={ds.label} sub={`Connection URL for ${ds.label.split(' ')[0]}`}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <StyledInput value={settings[ds.key]} onChange={v => set(ds.key, v)} mono placeholder={ds.placeholder} />
+                <button style={{
+                  padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)',
+                  background: 'var(--bg-elevated)', color: 'var(--success)', fontSize: 11,
+                  cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                }}>Test</button>
+              </div>
+            </SettingRow>
+          ))}
+        </SettingSection>
+
+        <SettingSection title="Attribution & Confidence">
+          <SettingRow label="Auto-Simulate on HIGH Attribution" sub="Automatically run CALDERA simulation when confidence exceeds HIGH threshold">
+            <Toggle value={settings.autoSimulate} onChange={v => set('autoSimulate', v)} />
+          </SettingRow>
+          <SettingRow label="HIGH Confidence Threshold" sub="Above this score — attribute with high confidence">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input type="range" min={50} max={95} step={5} value={settings.highConfidenceThreshold} onChange={e => set('highConfidenceThreshold', +e.target.value)}
+                style={{ width: 100, accentColor: 'var(--danger)' }} />
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--danger)', minWidth: 36 }}>{settings.highConfidenceThreshold}%</span>
+            </div>
+          </SettingRow>
+          <SettingRow label="MEDIUM Confidence Threshold" sub="Below HIGH, above this — probable attribution">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input type="range" min={20} max={70} step={5} value={settings.mediumConfidenceThreshold} onChange={e => set('mediumConfidenceThreshold', +e.target.value)}
+                style={{ width: 100, accentColor: 'var(--warning)' }} />
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--warning)', minWidth: 36 }}>{settings.mediumConfidenceThreshold}%</span>
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        <SettingSection title="Notifications">
+          <SettingRow label="Alert Email" sub="Critical findings and attribution results">
+            <StyledInput value={settings.alertEmail} onChange={v => set('alertEmail', v)} placeholder="soc@corp.local" />
+          </SettingRow>
+          <SettingRow label="Slack Channel" sub="Real-time alert feed">
+            <StyledInput value={settings.slackChannel} onChange={v => set('slackChannel', v)} placeholder="#soc-alerts" mono />
+          </SettingRow>
+          <SettingRow label="Webhook URL" sub="Custom webhook for SIEM/SOAR integration">
+            <StyledInput value={settings.webhookUrl} onChange={v => set('webhookUrl', v)} placeholder="https://..." mono />
+          </SettingRow>
+        </SettingSection>
+
+        <SettingSection title="Audit & Compliance">
+          <SettingRow label="MLflow Experiment Tracking" sub="Log all LLM calls, attribution decisions, and model versions for audit trail">
+            <Toggle value={settings.mlflowEnabled} onChange={v => set('mlflowEnabled', v)} />
+          </SettingRow>
+          <SettingRow label="Full Audit Logs" sub="Store all queries, results, and analyst actions to immutable log">
+            <Toggle value={settings.auditLogs} onChange={v => set('auditLogs', v)} />
+          </SettingRow>
+          <SettingRow label="PII Redaction in Logs" sub="Redact usernames and IPs from stdout logs in production">
+            <Toggle value={settings.piiRedaction} onChange={v => set('piiRedaction', v)} />
+          </SettingRow>
+        </SettingSection>
+
+        <div style={{ padding: '16px 20px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Danger Zone</div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+            <button style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>Reset All Settings</button>
+            <button style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>Purge Vector Store</button>
+            <button style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>Clear Neo4j Graph</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { SettingsPage });
+
+</script>
+
+<script type="text/babel">
+const { useState } = React;
+
+const TABS = [
+  { id: 'report', label: 'Forensic Report' },
+  { id: 'graph', label: 'Attack Graph' },
+  { id: 'attribution', label: 'APT Attribution' },
+  { id: 'simulation', label: 'Simulation' },
+  { id: 'query', label: 'Intelligence Query' },
+];
+
+const MOCK_INV = {
+  id: 'INV-0047', name: 'Operation Shadow Broker',
+  apt: 'APT29', confidence: 74, status: 'complete',
+  hosts: 4, ttps: 12, severity: 'critical',
+  time: '2026-04-22 08:14', duration: '72h 14m', logs: '2,847 events',
+};
+
+function InvestigationDetailPage({ investigation, navigate }) {
+  const [activeTab, setActiveTab] = useState('report');
+  const inv = investigation || MOCK_INV;
+
+  const sevColor = { critical: 'var(--danger)', high: 'var(--warning)', medium: 'var(--accent)', low: 'var(--text-muted)' };
+
+  return (
+    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+      {/* Investigation header */}
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 14 }}>
+          <button onClick={() => navigate('investigations')} style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+            fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 0', marginTop: 2,
+            fontFamily: 'var(--font-ui)', flexShrink: 0,
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+            ← Back
+          </button>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 5, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>{inv.id}</span>
+              <span style={{ width: 1, height: 12, background: 'var(--border)' }} />
+              <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{inv.name}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 4, fontFamily: 'var(--font-mono)', background: sevColor[inv.severity] + '18', color: sevColor[inv.severity], textTransform: 'uppercase', letterSpacing: '0.04em' }}>{inv.severity}</span>
+              <StatusBadge status={inv.status} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {[
+                { label: 'Attributed APT', value: inv.apt || 'Pending', accent: !!inv.apt },
+                { label: 'Confidence', value: inv.confidence ? `${inv.confidence}%` : '—', accent: false },
+                { label: 'Hosts Compromised', value: inv.hosts, accent: false },
+                { label: 'TTPs Detected', value: inv.ttps, accent: false },
+                { label: 'Log Volume', value: inv.logs || '—', accent: false },
+                { label: 'Duration', value: inv.duration || '—', accent: false },
+                { label: 'Started', value: inv.time, accent: false },
+              ].map(m => (
+                <div key={m.label}>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>{m.label.toUpperCase()}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: m.accent ? 'var(--accent)' : 'var(--text-secondary)', marginTop: 2 }}>{m.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button style={{
+              padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)',
+              background: 'transparent', color: 'var(--text-secondary)', fontSize: 12,
+              cursor: 'pointer', fontFamily: 'var(--font-ui)', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export PDF
+            </button>
+            <button onClick={() => navigate('simulation')} style={{
+              padding: '7px 14px', borderRadius: 7, border: 'none',
+              background: 'var(--danger)', color: '#fff', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'var(--font-ui)', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '0.88'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run Simulation
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: -2 }}>
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              padding: '8px 18px', border: 'none', background: 'transparent', cursor: 'pointer',
+              fontSize: 13, fontFamily: 'var(--font-ui)', fontWeight: activeTab === tab.id ? 600 : 400,
+              color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-secondary)',
+              borderBottom: `2px solid ${activeTab === tab.id ? 'var(--accent)' : 'transparent'}`,
+              marginBottom: -2, transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--text-primary)'; }}
+            onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {activeTab === 'report' && <ReportTab investigation={inv} />}
+        {activeTab === 'graph' && <AttackGraphTab />}
+        {activeTab === 'attribution' && <AttributionTab />}
+        {activeTab === 'simulation' && <SimulationTab />}
+        {activeTab === 'query' && <QueryPage />}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { InvestigationDetailPage });
+
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ── Tweaks panel (inline, no external dep) ─────────────────────────────────
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentHue": 228,
+  "density": "comfortable",
+  "showTimestamps": true,
+  "graphDotGrid": true
+}/*EDITMODE-END*/;
+
+function TweaksPanel({ visible, onClose }) {
+  const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
+  const set = (k, v) => {
+    const next = { ...tweaks, [k]: v };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: next }, '*');
+    if (k === 'accentHue') {
+      document.documentElement.style.setProperty('--accent', `oklch(62% 0.18 ${v})`);
+      document.documentElement.style.setProperty('--accent-hover', `oklch(67% 0.18 ${v})`);
+      document.documentElement.style.setProperty('--accent-dim', `oklch(62% 0.07 ${v})`);
+    }
+  };
+  if (!visible) return null;
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+      width: 280, background: 'var(--bg-surface)', border: '1px solid var(--border-bright)',
+      borderRadius: 12, boxShadow: '0 16px 48px rgba(0,0,0,0.7)', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)' }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Tweaks</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18 }}
+          onMouseEnter={e => { window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*'); onClose(); }}>×</button>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>ACCENT HUE</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[{ h: 228, label: 'Blue' }, { h: 158, label: 'Green' }, { h: 15, label: 'Red' }, { h: 286, label: 'Purple' }, { h: 55, label: 'Amber' }].map(({ h, label }) => (
+              <button key={h} onClick={() => set('accentHue', h)} title={label} style={{
+                width: 28, height: 28, borderRadius: 6, border: `2px solid ${tweaks.accentHue === h ? '#fff' : 'transparent'}`,
+                background: `oklch(62% 0.18 ${h})`, cursor: 'pointer',
+              }} />
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>DENSITY</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['compact', 'comfortable', 'spacious'].map(d => (
+              <button key={d} onClick={() => set('density', d)} style={{
+                flex: 1, padding: '6px 0', borderRadius: 6, border: `1px solid ${tweaks.density === d ? 'var(--accent)' : 'var(--border)'}`,
+                background: tweaks.density === d ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                color: tweaks.density === d ? 'var(--accent)' : 'var(--text-muted)',
+                fontSize: 11, cursor: 'pointer', fontWeight: tweaks.density === d ? 600 : 400, textTransform: 'capitalize',
+              }}>{d}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Show Timestamps</span>
+          <div onClick={() => set('showTimestamps', !tweaks.showTimestamps)} style={{
+            width: 38, height: 20, borderRadius: 10, cursor: 'pointer', position: 'relative',
+            background: tweaks.showTimestamps ? 'var(--accent)' : 'var(--bg-overlay)', border: '1px solid var(--border)', transition: 'all 0.2s',
+          }}>
+            <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: tweaks.showTimestamps ? 20 : 2, transition: 'left 0.2s' }} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Graph Dot Grid</span>
+          <div onClick={() => set('graphDotGrid', !tweaks.graphDotGrid)} style={{
+            width: 38, height: 20, borderRadius: 10, cursor: 'pointer', position: 'relative',
+            background: tweaks.graphDotGrid ? 'var(--accent)' : 'var(--bg-overlay)', border: '1px solid var(--border)', transition: 'all 0.2s',
+          }}>
+            <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: tweaks.graphDotGrid ? 20 : 2, transition: 'left 0.2s' }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Threat Feeds placeholder page ──────────────────────────────────────────
+function ThreatFeedsPage() {
+  const feeds = [
+    { name: 'MISP Feed — Emerging Threats', type: 'IoC', records: '4,210', updated: '4m ago', status: 'live' },
+    { name: 'OpenCTI — APT Intelligence', type: 'CTI', records: '1,843', updated: '12m ago', status: 'live' },
+    { name: 'CISA KEV — Known Exploited Vulns', type: 'CVE', records: '1,109', updated: '6h ago', status: 'live' },
+    { name: 'Feodo Tracker — C2 IPs', type: 'IoC', records: '892', updated: '1h ago', status: 'live' },
+    { name: 'URLhaus — Malware URLs', type: 'IoC', records: '18,402', updated: '8m ago', status: 'live' },
+    { name: 'APTNotes Corpus (2018–2024)', type: 'RAG', records: '2,847 docs', updated: 'Indexed', status: 'indexed' },
+    { name: 'ATT&CK STIX Bundle v14', type: 'RAG', records: '754 techniques', updated: '2026-04-01', status: 'indexed' },
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+      <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Threat Intelligence Feeds</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 24 }}>Live IoC feeds, CTI sources, and RAG corpus status</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {feeds.map((f, i) => (
+          <div key={i} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: f.status === 'live' ? 'var(--success)' : 'var(--accent)', boxShadow: f.status === 'live' ? '0 0 8px var(--success)' : 'none' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>{f.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{f.records} records — Updated {f.updated}</div>
+            </div>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 9px', borderRadius: 4, fontFamily: 'var(--font-mono)', background: 'var(--accent-dim)', color: 'var(--accent)' }}>{f.type}</span>
+            <button style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+              Sync Now
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── MITRE Navigator placeholder ─────────────────────────────────────────────
+function MitreNavigatorPage() {
+  const tactics = ['Reconnaissance','Resource Dev','Initial Access','Execution','Persistence','Privilege Esc','Defense Evasion','Credential Access','Discovery','Lateral Movement','Collection','C2','Exfiltration','Impact'];
+  const detected = ['T1566.001','T1059.001','T1003.001','T1021.002','T1078','T1083','T1048.003','T1105','T1547.001'];
+  const rows = [
+    ['T1566.001','T1078','T1059.001','T1547.001','T1078','T1055','T1003.001','T1083','T1021.002','T1048.003','','',''],
+    ['T1566.002','T1588.002','T1059.003','T1098','T1548.002','T1027','T1558.003','T1016','T1021.001','T1041','T1560','T1071','T1486'],
+    ['T1190','','T1106','T1136','T1134','T1036','T1110.003','T1049','T1210','T1074','T1105','T1499',''],
+    ['T1195','','T1053.005','T1546','T1574','T1070','T1552.001','T1135','T1550','T1003.006','','T1573',''],
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+      <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>MITRE ATT&CK Matrix</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>INV-0047 overlay — highlighted cells detected in this campaign</div>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 'max-content' }}>
+          <div style={{ display: 'flex', gap: 3, marginBottom: 3 }}>
+            {tactics.map(t => (
+              <div key={t} style={{ width: 100, padding: '8px 6px', background: 'var(--bg-elevated)', borderRadius: '6px 6px 0 0', textAlign: 'center', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', letterSpacing: '0.02em', border: '1px solid var(--border)', borderBottom: 'none' }}>{t}</div>
+            ))}
+          </div>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: 'flex', gap: 3, marginBottom: 3 }}>
+              {row.map((tid, ci) => {
+                const hit = tid && detected.includes(tid);
+                return (
+                  <div key={ci} style={{
+                    width: 100, height: 36, borderRadius: ri === rows.length - 1 ? '0 0 6px 6px' : 0,
+                    background: hit ? 'rgba(239,68,68,0.2)' : tid ? 'var(--bg-elevated)' : 'var(--bg-base)',
+                    border: `1px solid ${hit ? 'var(--danger)' : 'var(--border)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: tid ? 'pointer' : 'default',
+                    transition: 'all 0.12s',
+                  }}
+                  onMouseEnter={e => { if (tid) e.currentTarget.style.background = hit ? 'rgba(239,68,68,0.3)' : 'var(--bg-overlay)'; }}
+                  onMouseLeave={e => { if (tid) e.currentTarget.style.background = hit ? 'rgba(239,68,68,0.2)' : 'var(--bg-elevated)'; }}>
+                    {tid && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: hit ? 'var(--danger)' : 'var(--text-muted)', fontWeight: hit ? 700 : 400 }}>{tid}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 16, display: 'flex', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 14, height: 14, borderRadius: 3, background: 'rgba(239,68,68,0.2)', border: '1px solid var(--danger)' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Detected in INV-0047 ({detected.length} techniques)</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Known ATT&CK technique</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Reports page ─────────────────────────────────────────────────────────────
+function ReportsPage({ navigate }) {
+  const reports = [
+    { id: 'RPT-0047', title: 'Operation Shadow Broker — Executive Summary', inv: 'INV-0047', date: '2026-04-24', pages: 12, format: 'PDF' },
+    { id: 'RPT-0046', title: 'APT41 Lateral Movement Analysis', inv: 'INV-0045', date: '2026-04-22', pages: 8, format: 'PDF' },
+    { id: 'RPT-0045', title: 'Q1 2026 Threat Landscape Report', inv: 'Multiple', date: '2026-04-01', pages: 34, format: 'PDF' },
+    { id: 'RPT-0044', title: 'Credential Dump Incident Report', inv: 'INV-0044', date: '2026-04-19', pages: 6, format: 'PDF' },
+  ];
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 600 }}>Reports</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Generated investigation reports and threat summaries</div>
+        </div>
+        <button onClick={() => navigate('investigation-detail')} style={{
+          padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-ui)',
+        }}>Generate New Report</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {reports.map(r => (
+          <div key={r.id} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ width: 42, height: 48, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="1.5" strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{r.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{r.id} · {r.inv} · {r.pages} pages · {r.date}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>Preview</button>
+              <button style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>Download</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Top bar ──────────────────────────────────────────────────────────────────
+const PAGE_TITLES = {
+  dashboard: 'Dashboard', investigations: 'Investigations', 'new-investigation': 'New Investigation',
+  'investigation-detail': 'Investigation Detail', 'attack-graph': 'Attack Graph',
+  'apt-library': 'APT Library', query: 'Intelligence Query', 'threat-feeds': 'Threat Feeds',
+  simulation: 'Simulation', 'mitre-navigator': 'MITRE ATT&CK', reports: 'Reports', settings: 'Settings',
+};
+
+function TopBar({ currentPage, navigate }) {
+  const [search, setSearch] = useState('');
+  const [searching, setSearching] = useState(false);
+
+  return (
+    <div style={{
+      height: 52, flexShrink: 0, borderBottom: '1px solid var(--border)',
+      background: 'var(--bg-surface)', display: 'flex', alignItems: 'center',
+      padding: '0 24px', gap: 16,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>
+        {PAGE_TITLES[currentPage] || 'RAPTOR'}
+      </div>
+      <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
+
+      <div style={{ flex: 1, position: 'relative', maxWidth: 400 }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          onFocus={() => setSearching(true)} onBlur={() => setTimeout(() => setSearching(false), 200)}
+          placeholder="Search investigations, TTPs, APT groups..."
+          style={{ width: '100%', padding: '6px 10px 6px 30px', borderRadius: 7, background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'var(--font-ui)' }} />
+      </div>
+
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 5px var(--success)' }} />
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>All Systems Nominal</span>
+        </div>
+
+        <button onClick={() => navigate('investigations')} title="Notifications" style={{
+          width: 34, height: 34, borderRadius: 7, border: '1px solid var(--border)',
+          background: 'var(--bg-elevated)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--text-secondary)', position: 'relative',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
+          </svg>
+          <div style={{ position: 'absolute', top: 6, right: 6, width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentInvestigation, setCurrentInvestigation] = useState(null);
+  const [tweaksVisible, setTweaksVisible] = useState(false);
+
+  useEffect(() => {
+    window.addEventListener('message', e => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    });
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+  }, []);
+
+  const navigate = (page, data) => {
+    setCurrentPage(page);
+    if (data) setCurrentInvestigation(data);
+    else if (page !== 'investigation-detail') setCurrentInvestigation(null);
+  };
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'dashboard':           return <DashboardPage navigate={navigate} />;
+      case 'investigations':      return <InvestigationsPage navigate={navigate} />;
+      case 'new-investigation':   return <NewInvestigationPage navigate={navigate} />;
+      case 'investigation-detail':return <InvestigationDetailPage investigation={currentInvestigation} navigate={navigate} />;
+      case 'attack-graph':        return <InvestigationDetailPage investigation={null} navigate={navigate} defaultTab="graph" />;
+      case 'apt-library':         return <APTLibraryPage />;
+      case 'query':               return <QueryPage />;
+      case 'threat-feeds':        return <ThreatFeedsPage />;
+      case 'simulation':          return <InvestigationDetailPage investigation={null} navigate={navigate} defaultTab="simulation" />;
+      case 'mitre-navigator':     return <MitreNavigatorPage />;
+      case 'reports':             return <ReportsPage navigate={navigate} />;
+      case 'settings':            return <SettingsPage />;
+      default:                    return <DashboardPage navigate={navigate} />;
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg-base)' }}>
+      <Sidebar currentPage={currentPage} navigate={navigate} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <TopBar currentPage={currentPage} navigate={navigate} />
+        <div key={currentPage} className="page-enter" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {renderPage()}
+        </div>
+      </div>
+      <TweaksPanel visible={tweaksVisible} onClose={() => { setTweaksVisible(false); window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*'); }} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+
+</body></html>

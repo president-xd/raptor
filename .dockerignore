@@ -1,0 +1,35 @@
+# Dependencies
+frontend/node_modules
+backend/__pycache__
+backend/**/__pycache__
+*.pyc
+
+# Build artifacts
+frontend/dist
+
+# Secrets and local runtime state
+.env
+*.log
+backend/raptor.db
+backend/backend.log
+frontend/frontend.log
+ERRORS.txt
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Documentation
+*.md
+!README.md
+WHAT_TO_CREATE.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Volumes / data

