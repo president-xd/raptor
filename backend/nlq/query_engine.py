@@ -143,7 +143,7 @@ class QueryEngine:
         if "lateral" in q and any(token in q for token in ["path", "movement", "move"]):
             return (
                 "MATCH (a:Host {investigation_id: $investigation_id})"
-                "-[r:LATERAL_MOVED_TO]->"
+                "-[r:LATERAL_MOVED_TO {investigation_id: $investigation_id}]->"
                 "(b:Host {investigation_id: $investigation_id}) "
                 "RETURN a.hostname AS source, b.hostname AS target, "
                 "r.technique AS technique, r.timestamp AS timestamp "
@@ -155,6 +155,7 @@ class QueryEngine:
                 "MATCH p=shortestPath((src:Host {investigation_id: $investigation_id, compromised: true})"
                 "-[:LATERAL_MOVED_TO*..6]->"
                 "(dc:Host {investigation_id: $investigation_id, is_dc: true})) "
+                "WHERE all(n IN nodes(p) WHERE n.investigation_id = $investigation_id) "
                 "RETURN src.hostname AS source_host, dc.hostname AS domain_controller, "
                 "length(p) AS hops LIMIT 5"
             )
@@ -279,6 +280,17 @@ class QueryEngine:
             sources.append({"type": "threat_report", "apt_group": r.get("apt_group", ""),
                            "title": r.get("title", "")})
 
+        if not context_lines:
+            return {
+                "answer": (
+                    "RAG retrieval returned no indexed ATT&CK or threat-report context for this question. "
+                    "Check Weaviate indexing/health before treating this as a grounded answer."
+                ),
+                "sources": [{"type": "rag", "status": "empty", "detail": "no retrieved context"}],
+                "confidence": "low",
+                "query_type": "rag",
+            }
+
         prompt = f"""Based on the following retrieved ATT&CK context, answer this question:
 
 Question: {question}
@@ -317,6 +329,18 @@ Provide a clear, specific answer citing the ATT&CK techniques referenced."""
         context_lines = []
         for t in techniques:
             context_lines.append(f"- {t.get('technique_id', '')}: {t.get('name', '')} — {t.get('description', '')[:200]}")
+
+        if not context_lines:
+            return {
+                "answer": (
+                    "No RAG context was retrieved for simulation-style guidance. General immediate containment: "
+                    "isolate confirmed compromised hosts, revoke exposed credentials, block known C2 destinations, "
+                    "and hunt laterally for the observed techniques. Treat this as low-confidence local guidance."
+                ),
+                "sources": [{"type": "rag", "status": "empty", "detail": "no retrieved simulation context"}],
+                "confidence": "low",
+                "query_type": "simulation",
+            }
 
         prompt = f"""You are a cybersecurity analyst advising on defense.
 
