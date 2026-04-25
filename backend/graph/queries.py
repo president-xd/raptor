@@ -5,20 +5,22 @@ Key graph queries from spec Section 4.3 (BloodHound-inspired).
 
 # Shortest path from compromised user to Domain Admin
 SHORTEST_PATH_TO_DA = """
-MATCH p=shortestPath((u:User {username: $username})-[*]->(h:Host {is_dc: true}))
+MATCH p=shortestPath((u:User {investigation_id: $inv_id, username: $username})-[*]->(h:Host {investigation_id: $inv_id, is_dc: true}))
+WHERE all(n IN nodes(p) WHERE n.investigation_id = $inv_id)
 RETURN p
 """
 
 # All hosts reachable from a compromised host
 REACHABLE_HOSTS = """
-MATCH (h:Host {hostname: $hostname})-[:LATERAL_MOVED_TO*1..5]->(target:Host)
+MATCH p=(h:Host {investigation_id: $inv_id, hostname: $hostname})-[:LATERAL_MOVED_TO*1..5]->(target:Host {investigation_id: $inv_id})
+WHERE all(n IN nodes(p) WHERE n.investigation_id = $inv_id)
 RETURN DISTINCT target.hostname as hostname, target.ip as ip,
        target.compromised as compromised
 """
 
 # Full attack path for an investigation
 ATTACK_PATH = """
-MATCH (h1:Host {investigation_id: $inv_id})-[r:LATERAL_MOVED_TO]->(h2:Host)
+MATCH (h1:Host {investigation_id: $inv_id})-[r:LATERAL_MOVED_TO {investigation_id: $inv_id}]->(h2:Host {investigation_id: $inv_id})
 RETURN h1.hostname as source, h2.hostname as target,
        r.technique as technique, r.timestamp as timestamp
 ORDER BY r.timestamp
@@ -26,7 +28,7 @@ ORDER BY r.timestamp
 
 # Techniques observed on a specific host
 HOST_TECHNIQUES = """
-MATCH (t:Technique)-[:OBSERVED_IN]->(h:Host {hostname: $hostname})
+MATCH (t:Technique {investigation_id: $inv_id})-[:OBSERVED_IN]->(h:Host {investigation_id: $inv_id, hostname: $hostname})
 RETURN t.id as technique_id, t.name as technique_name,
        t.kill_chain_phase as phase
 """
@@ -48,7 +50,7 @@ RETURN t.id as technique_id, t.name as technique_name
 # Full graph for investigation (Sigma.js export)
 FULL_INVESTIGATION_GRAPH = """
 MATCH (n {investigation_id: $inv_id})
-OPTIONAL MATCH (n)-[r]->(m {investigation_id: $inv_id})
+OPTIONAL MATCH (n)-[r {investigation_id: $inv_id}]->(m {investigation_id: $inv_id})
 RETURN labels(n) as src_labels, properties(n) as src_props,
        type(r) as rel_type, properties(r) as rel_props,
        labels(m) as dst_labels, properties(m) as dst_props
@@ -64,7 +66,7 @@ ORDER BY cnt DESC
 
 # Timeline of events on a host
 HOST_TIMELINE = """
-MATCH (t:Technique)-[:OBSERVED_IN]->(h:Host {hostname: $hostname})
+MATCH (t:Technique {investigation_id: $inv_id})-[:OBSERVED_IN]->(h:Host {investigation_id: $inv_id, hostname: $hostname})
 RETURN t.id as technique_id, t.name as technique_name,
        t.kill_chain_phase as phase
 ORDER BY t.kill_chain_phase
