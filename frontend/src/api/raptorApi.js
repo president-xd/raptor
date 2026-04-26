@@ -1,6 +1,7 @@
 const DEFAULT_TIMEOUT_MS = 30000;
 
 export const API_BASE = normalizeBase(import.meta.env.VITE_API_BASE_URL || '/api/v1');
+const API_KEY = import.meta.env.VITE_RAPTOR_API_KEY || '';
 
 function normalizeBase(value) {
   return String(value || '/api/v1').replace(/\/+$/, '');
@@ -27,6 +28,10 @@ async function request(path, options = {}) {
   const headers = new Headers(options.headers || {});
   const body = options.body;
   const isFormData = body instanceof FormData;
+
+  if (API_KEY && !headers.has('X-RAPTOR-API-Key')) {
+    headers.set('X-RAPTOR-API-Key', API_KEY);
+  }
 
   if (body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -83,6 +88,10 @@ export function getInvestigationGraph(investigationId) {
   return request(`/investigate/${encodeURIComponent(investigationId)}/graph`);
 }
 
+export function getInvestigationEvidence(investigationId) {
+  return request(`/investigate/${encodeURIComponent(investigationId)}/evidence`);
+}
+
 export function uploadInvestigation({ file, caseName }) {
   const form = new FormData();
   form.append('file', file);
@@ -124,4 +133,32 @@ export function listAptProfiles() {
 
 export function getDetailedHealth() {
   return request('/health/detailed', { timeoutMs: 15000 });
+}
+
+export function listAuditEntries({ limit = 100, investigationId = '' } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (investigationId) query.set('investigation_id', investigationId);
+  return request(`/audit?${query.toString()}`);
+}
+
+export function listCisaKev({ query = '', limit = 50, refresh = false } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), refresh: String(refresh) });
+  if (query) params.set('query', query);
+  return request(`/threat-feeds/cisa-kev?${params.toString()}`, { timeoutMs: 60000 });
+}
+
+export function syncCisaKev() {
+  return request('/threat-feeds/cisa-kev/sync', { method: 'POST', timeoutMs: 60000 });
+}
+
+export function pollElasticsearch(payload) {
+  return request('/ingest/elasticsearch/poll', {
+    method: 'POST',
+    body: payload,
+    timeoutMs: 60000,
+  });
+}
+
+export function getElasticsearchPollStatus() {
+  return request('/ingest/elasticsearch/status');
 }
