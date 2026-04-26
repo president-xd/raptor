@@ -9,9 +9,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           react: ['react', 'react-dom'],
-          graph: ['sigma', 'graphology', 'graphology-layout-forceatlas2'],
-          reports: ['react-markdown', 'remark-gfm'],
-          charts: ['recharts'],
         },
       },
     },
