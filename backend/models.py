@@ -87,6 +87,97 @@ class InvestigationListResponse(BaseModel):
     total_count: int = 0
 
 
+class EvidenceFileSummary(BaseModel):
+    """Stored raw evidence metadata."""
+    id: int = 0
+    investigation_id: str
+    original_filename: str = ""
+    stored_path: str = ""
+    sha256: str = ""
+    size_bytes: int = 0
+    content_type: str = ""
+    source: str = ""
+    created_at: str = ""
+
+
+class EvidenceListResponse(BaseModel):
+    """Response payload for investigation evidence."""
+    investigation_id: str
+    evidence: List[EvidenceFileSummary] = Field(default_factory=list)
+    total_count: int = 0
+
+
+class AuditEntry(BaseModel):
+    """Append-only audit entry."""
+    id: int = 0
+    timestamp: str = ""
+    actor: str = ""
+    action: str = ""
+    investigation_id: Optional[str] = None
+    detail: Dict[str, Any] = Field(default_factory=dict)
+    ip_address: str = ""
+
+
+class AuditLogResponse(BaseModel):
+    """Response payload for audit log queries."""
+    entries: List[AuditEntry] = Field(default_factory=list)
+    total_count: int = 0
+
+
+class CisaKevVulnerability(BaseModel):
+    """CISA KEV vulnerability summary."""
+    cve_id: str = Field(default="", alias="cveID")
+    vendor_project: str = Field(default="", alias="vendorProject")
+    product: str = ""
+    vulnerability_name: str = Field(default="", alias="vulnerabilityName")
+    date_added: str = Field(default="", alias="dateAdded")
+    short_description: str = Field(default="", alias="shortDescription")
+    required_action: str = Field(default="", alias="requiredAction")
+    due_date: str = Field(default="", alias="dueDate")
+    known_ransomware_campaign_use: str = Field(default="", alias="knownRansomwareCampaignUse")
+    notes: str = ""
+
+
+class CisaKevResponse(BaseModel):
+    """Response payload for the CISA KEV connector."""
+    title: str = ""
+    catalog_version: str = Field(default="", alias="catalogVersion")
+    date_released: str = Field(default="", alias="dateReleased")
+    count: int = 0
+    source: str = ""
+    cached_at: str = ""
+    vulnerabilities: List[CisaKevVulnerability] = Field(default_factory=list)
+
+
+class ElasticPollRequest(BaseModel):
+    """Request body for manually polling Elasticsearch."""
+    query: str = "*"
+    time_range_start: Optional[str] = None
+    time_range_end: Optional[str] = None
+    case_name: str = ""
+    apt_filters: List[str] = Field(default_factory=list)
+
+
+class ElasticPollResponse(BaseModel):
+    """Response payload for Elasticsearch polling."""
+    status: str
+    message: str = ""
+    investigation_id: Optional[str] = None
+    event_bytes: int = 0
+
+
+class ElasticPollStatus(BaseModel):
+    """Stored poller status."""
+    enabled: bool = False
+    query: str = ""
+    interval_seconds: int = 0
+    window_minutes: int = 0
+    last_polled_at: str = ""
+    last_status: str = ""
+    last_error: str = ""
+    investigation_count: int = 0
+
+
 # ─── Simulation ───────────────────────────────────────────────────────
 
 class SimulateRequest(BaseModel):
