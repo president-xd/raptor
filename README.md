@@ -111,21 +111,15 @@ curl -X POST http://localhost:8000/api/v1/investigate \
 
 ## Frontend
 
-The React console is implemented in `frontend/src/components/Dashboard.jsx` and follows the standalone UI reference as a normal Vite application:
+The React console is implemented in `frontend/src/components/Dashboard.jsx` and follows the standalone UI reference as a normal Vite application. Static analyst-demo intelligence lives in `frontend/src/data/raptorDemo.js` so the UI can render fully without requiring backend seed data:
 
 - Persistent left navigation.
-- Top operations bar with API health.
+- Top operations bar with subsystem status.
 - Dense stat cards and investigation summary panels.
-- Investigation tabs for timeline, report, graph, attribution, simulation, and query.
+- Investigation tabs for attack graph, attribution, simulation, query, and forensic report.
 - APT profile library.
 - MITRE ATT&CK matrix view based on observed findings.
 - Threat-feed/status workspace.
-
-The frontend API client is in `frontend/src/api.js` and uses:
-
-```js
-import.meta.env.VITE_API_BASE_URL || '/api/v1'
-```
 
 For local Vite development, `/api` is proxied to `http://127.0.0.1:8000`. For Docker, Nginx proxies `/api` to the backend container.
 
@@ -172,7 +166,6 @@ Mock logs:
 
 - `data/mock/apt29_campaign.json`
 - `data/mock/hafnium_exchange.json`
-- `data/mock/linux_bruteforce.log`
 
 Cached STIX bundle:
 
