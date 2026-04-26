@@ -31,7 +31,7 @@ MODEL_CONTEXT_WINDOWS = {
 # ─── Neo4j ────────────────────────────────────────────────────────────
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "raptor_secret_2024")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "change_me_neo4j_password")
 
 # ─── Weaviate ─────────────────────────────────────────────────────────
 WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://localhost:8080")
@@ -39,14 +39,21 @@ WEAVIATE_GRPC_URL = os.getenv("WEAVIATE_GRPC_URL", "localhost:50051")
 
 # ─── Elasticsearch ────────────────────────────────────────────────────
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
-ELASTIC_INDEX_PREFIX = "raptor-events"
+ELASTIC_INDEX_PREFIX = os.getenv("ELASTIC_INDEX_PREFIX", "raptor-events")
+ELASTIC_POLL_ENABLED = os.getenv("ELASTIC_POLL_ENABLED", "false").lower() == "true"
+ELASTIC_POLL_QUERY = os.getenv("ELASTIC_POLL_QUERY", "*")
+ELASTIC_POLL_INTERVAL_SECONDS = int(os.getenv("ELASTIC_POLL_INTERVAL_SECONDS", "300"))
+ELASTIC_POLL_WINDOW_MINUTES = int(os.getenv("ELASTIC_POLL_WINDOW_MINUTES", "5"))
 
 # ─── Redis ────────────────────────────────────────────────────────────
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_CACHE_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "3600"))
 
 # ─── API ──────────────────────────────────────────────────────────────
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+RAPTOR_API_KEY = os.getenv("RAPTOR_API_KEY", "")
+RAPTOR_AUTH_EXEMPT_HEALTH = os.getenv("RAPTOR_AUTH_EXEMPT_HEALTH", "true").lower() == "true"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
 CORS_ALLOW_ORIGINS = [
   origin.strip()
@@ -73,15 +80,24 @@ MAX_INPUT_TOKENS = 16384  # Increased from 4096 — new models support 128K+ con
 DATA_DIR = PROJECT_ROOT / "data"
 STIX_DIR = DATA_DIR / "stix"
 MOCK_DIR = DATA_DIR / "mock"
+EVIDENCE_DIR = DATA_DIR / "evidence"
+INTEL_DIR = DATA_DIR / "intel"
 DB_PATH = PROJECT_ROOT / "backend" / "raptor.db"
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
 STIX_DIR.mkdir(exist_ok=True)
 MOCK_DIR.mkdir(exist_ok=True)
+EVIDENCE_DIR.mkdir(exist_ok=True)
+INTEL_DIR.mkdir(exist_ok=True)
 
 # ─── ATT&CK STIX Source ──────────────────────────────────────────────
 ATTACK_STIX_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
+CISA_KEV_URL = os.getenv(
+    "CISA_KEV_URL",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+)
+CISA_KEV_CACHE_PATH = INTEL_DIR / "cisa_kev.json"
 
 # ─── System Prompts ──────────────────────────────────────────────────
 
