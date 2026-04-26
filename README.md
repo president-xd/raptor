@@ -35,19 +35,25 @@ Implemented today:
 - Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, and LLM configuration.
 - React SOC console backed by the API for investigation creation, polling, reports, graphs, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
 - Investigation metadata in the backend list API, including case name, source, upload size, host count, top candidate, confidence score, and confidence label.
+- Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, and content type.
+- Append-only SQLite audit logging for investigation creation, report/graph/evidence viewing, natural-language queries, simulations, threat-feed access, and Elasticsearch poller actions.
+- Optional shared API-key authentication with `X-RAPTOR-API-Key` or `Authorization: Bearer`.
+- CISA Known Exploited Vulnerabilities connector with file cache and Redis JSON cache when Redis is reachable.
+- Optional interval-based Elasticsearch poller that queues matching events as investigations.
+- Redis health plus lightweight CISA KEV cache usage.
 - Docker Compose stack for backend, frontend, Neo4j, Weaviate, Elasticsearch, and Redis.
+- Docker Compose ports bind to `127.0.0.1` by default through `LOCAL_BIND_ADDRESS`.
 - Windows and Linux helper scripts for Docker and hybrid local runs.
-- Regression tests for parser behavior, graph scoping/export, and natural-language query safety guards.
+- Regression tests for parser behavior, persistence helpers, graph scoping/export, connector state, and natural-language query safety guards.
 
-Not implemented or only partially implemented:
+Still limited or intentionally basic:
 
-- MISP, OpenCTI, CISA KEV, and threat-feed syncing are not active backend connectors. The former feed mockup was replaced with real subsystem health.
-- Elasticsearch can be queried as an investigation source, but RAPTOR does not continuously ingest from Elasticsearch.
-- Redis is provisioned and health-checked, but it is not currently used as a queue, cache, or pub/sub layer.
-- There is no authentication, authorization, RBAC, audit logging, or multi-user case workflow.
+- MISP and OpenCTI are not active backend connectors.
+- API-key authentication is a basic shared-secret gate, not user identity, authorization, RBAC, or case ownership.
+- Elasticsearch ingest is a simple interval poller, not a streaming pipeline with checkpoints and deduplication.
+- Redis is used as a lightweight cache, not a durable queue, lock service, or worker backend.
 - SQLite is used for MVP job state. It is not a production-grade shared case database.
-- There is no persistent uploaded-file evidence store beyond the normalized results saved in SQLite.
-- The Docker credentials and open service defaults are suitable for local development only.
+- The sample credentials in `.env.example` must be changed before use outside a private local workstation.
 
 ## Architecture
 
@@ -99,7 +105,7 @@ FastAPI backend
 | Graph database | Neo4j 5 community |
 | Vector database | Weaviate 1.27 |
 | Search source | Elasticsearch 8 single-node |
-| Runtime service | Redis 7, currently health/provisioning only |
+| Runtime service | Redis 7, lightweight JSON cache plus health checks |
 | LLM client | OpenAI SDK against OpenRouter-compatible API |
 | Embeddings | `BAAI/bge-large-en-v1.5` through `sentence-transformers` |
 | Reranking | BGE cross-encoder reranker with score fallback |
@@ -138,8 +144,10 @@ FastAPI backend
 |-- scripts/
 |   |-- docker/                    # Full Docker launch helpers
 |   `-- hybrid/                    # Docker infrastructure plus local app helpers
+|-- tests/                         # Top-level offline regression suite
 |-- docker-compose.yml
 |-- .env.example
+|-- commit.sh
 `-- README.md
 ```
 
@@ -156,7 +164,7 @@ FastAPI backend
 | Weaviate HTTP | `http://localhost:8080` | Vector database |
 | Weaviate gRPC | `localhost:50051` | Weaviate v4 client transport |
 | Elasticsearch | `http://localhost:9200` | Optional investigation source |
-| Redis | `localhost:6379` | Provisioned service, health checked |
+| Redis | `localhost:6379` | Lightweight connector cache and health check |
 
 ## Quick Start With Docker
 
@@ -178,7 +186,7 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-2. Edit `.env` and set `OPENROUTER_API_KEY` if you want live LLM calls.
+2. Edit `.env`, replace the `NEO4J_PASSWORD` and `RAPTOR_API_KEY` placeholders, and keep `VITE_RAPTOR_API_KEY` matched to `RAPTOR_API_KEY` for the Docker frontend. Set `OPENROUTER_API_KEY` if you want live LLM calls.
 
 3. Start the stack.
 
@@ -247,6 +255,8 @@ npm install
 npm run dev
 ```
 
+The Vite dev server reads `VITE_*` values from the repository-root `.env`, so set `VITE_RAPTOR_API_KEY` there when backend API-key auth is enabled.
+
 4. Open `http://localhost:3100`.
 
 Hybrid helper scripts are available:
@@ -277,7 +287,7 @@ The main orchestration lives in `backend/main.py`.
 12. If Neo4j is down, the backend still returns an in-memory graph export.
 13. APT attribution is scored from observed TTP overlap against STIX-derived APT profiles.
 14. The report generator creates a markdown analyst report, with deterministic fallback.
-15. SQLite stores status, findings, attack sequence, attribution, graph JSON, and report markdown.
+15. SQLite stores status, findings, attack sequence, attribution, graph JSON, report markdown, evidence metadata, and audit entries.
 
 ## Backend API
 
@@ -287,6 +297,8 @@ Base URL:
 http://localhost:8000/api/v1
 ```
 
+When `RAPTOR_API_KEY` is set, include either `X-RAPTOR-API-Key: <key>` or `Authorization: Bearer <key>` on API requests. `/api/v1/health` can remain unauthenticated when `RAPTOR_AUTH_EXEMPT_HEALTH=true`.
+
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `POST` | `/investigate` | Upload a log file and start a background investigation. |
@@ -295,9 +307,15 @@ http://localhost:8000/api/v1
 | `GET` | `/investigate/{id}/status` | Poll job progress and current phase. |
 | `GET` | `/investigate/{id}/report` | Fetch findings, sequence, anomalies, attribution, and report markdown. |
 | `GET` | `/investigate/{id}/graph` | Fetch graph JSON suitable for graph renderers. |
+| `GET` | `/investigate/{id}/evidence` | List persisted raw evidence metadata for an investigation. |
 | `POST` | `/simulate` | Predict likely next steps for the selected or top attributed APT. |
 | `POST` | `/query` | Ask a natural-language question for a completed investigation. |
 | `GET` | `/apt/profiles` | List STIX-derived APT profiles and mapped technique counts. |
+| `GET` | `/audit` | List recent append-only audit entries, optionally filtered by investigation. |
+| `GET` | `/threat-feeds/cisa-kev` | Fetch/search the cached CISA KEV catalog. |
+| `POST` | `/threat-feeds/cisa-kev/sync` | Force-refresh the CISA KEV cache. |
+| `POST` | `/ingest/elasticsearch/poll` | Poll Elasticsearch once and queue matched events as an investigation. |
+| `GET` | `/ingest/elasticsearch/status` | Return the interval poller state. |
 | `GET` | `/health` | High-level service health. |
 | `GET` | `/health/detailed` | Detailed subsystem health. |
 
@@ -342,7 +360,7 @@ curl -X POST http://localhost:8000/api/v1/investigate/text \
   }'
 ```
 
-The backend searches indices matching `raptor-*` by default.
+The backend searches indices matching `raptor-events*` by default through `ELASTIC_INDEX_PREFIX`.
 
 ### Poll Status
 
@@ -402,7 +420,7 @@ Current frontend capabilities:
 - Forensic report view rendered from backend findings and narrative report markdown.
 - APT library cards loaded from `GET /api/v1/apt/profiles`.
 - MITRE ATT&CK matrix populated from selected investigation findings.
-- Subsystem health page rendered from `GET /api/v1/health/detailed`.
+- Subsystem health page rendered from `GET /api/v1/health/detailed`, with CISA KEV catalog and Elasticsearch poller status panels.
 - Report archive based on completed backend investigations with markdown download from the report API response.
 - Settings page showing runtime API base and backend subsystem status.
 
@@ -421,15 +439,26 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `LLM_TIMEOUT_SECONDS` | `30` | Timeout for LLM requests. |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt connection string. |
 | `NEO4J_USER` | `neo4j` | Neo4j username. |
-| `NEO4J_PASSWORD` | `raptor_secret_2024` | Local development password. Change for real deployments. |
+| `NEO4J_PASSWORD` | `change_me_neo4j_password` | Local Neo4j password placeholder. Change before running shared environments. |
 | `WEAVIATE_URL` | `http://localhost:8080` | Weaviate HTTP endpoint. |
 | `WEAVIATE_GRPC_URL` | `localhost:50051` | Weaviate gRPC endpoint. |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch endpoint for optional query-based investigations. |
-| `REDIS_URL` | `redis://localhost:6379` | Redis health-check endpoint. |
+| `ELASTIC_INDEX_PREFIX` | `raptor-events` | Elasticsearch index prefix searched by query and poller ingestion. |
+| `ELASTIC_POLL_ENABLED` | `false` | Enables the interval poller when set to `true`. |
+| `ELASTIC_POLL_QUERY` | `*` | Query string used by the interval poller. |
+| `ELASTIC_POLL_INTERVAL_SECONDS` | `300` | Poller interval, with a 30 second minimum in the loop. |
+| `ELASTIC_POLL_WINDOW_MINUTES` | `5` | Relative lookback window used by the poller. |
+| `REDIS_URL` | `redis://localhost:6379` | Redis endpoint for health and lightweight JSON cache. |
+| `REDIS_CACHE_TTL_SECONDS` | `3600` | TTL for Redis-cached connector payloads. |
+| `CISA_KEV_URL` | CISA public JSON feed | CISA Known Exploited Vulnerabilities source URL. |
 | `API_HOST` | `0.0.0.0` | Backend bind host. |
 | `API_PORT` | `8000` | Backend port. |
 | `FRONTEND_PORT` | `3100` | Frontend port. |
+| `LOCAL_BIND_ADDRESS` | `127.0.0.1` | Host address Docker Compose publishes service ports on. |
+| `RAPTOR_API_KEY` | `change_me_raptor_api_key` in `.env.example` | Enables shared API-key authentication when non-empty. |
+| `RAPTOR_AUTH_EXEMPT_HEALTH` | `true` | Leaves `/api/v1/health` public when API-key auth is enabled. |
 | `VITE_API_BASE_URL` | `/api/v1` | Optional frontend API base override for local or remote deployments. |
+| `VITE_RAPTOR_API_KEY` | matches `RAPTOR_API_KEY` in `.env.example` | Build-time frontend API key for local Docker use. |
 | `MAX_UPLOAD_BYTES` | `10485760` | Maximum upload or pasted input size. |
 | `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
 | `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
@@ -454,13 +483,21 @@ If the STIX bundle is missing, the backend can download the MITRE Enterprise ATT
 Runtime state:
 
 - `backend/raptor.db` is created locally by the backend and stores investigation job state and results.
+- `data/evidence/{investigation_id}/` stores raw uploaded or ingested evidence bytes.
+- `data/intel/cisa_kev.json` stores the file-cache copy of the CISA KEV catalog.
 - Docker named volumes store Neo4j, Weaviate, Elasticsearch, and Redis data.
 
-Treat runtime databases and uploaded logs as sensitive investigation artifacts.
+Treat runtime databases, cached intelligence, and uploaded logs as sensitive investigation artifacts.
 
 ## Testing And Verification
 
-Backend regression tests:
+Top-level offline regression suite:
+
+```bash
+python -m unittest discover -s tests
+```
+
+Backend-local regression tests:
 
 ```bash
 python -m unittest discover -s backend/tests
@@ -495,10 +532,12 @@ curl http://localhost:8000/api/v1/health/detailed
 ## Security Notes
 
 - Do not commit `.env`; it may contain API keys.
-- Replace default Neo4j credentials before using the stack beyond local development.
-- Restrict exposed Docker ports in shared environments.
+- Replace the `.env.example` placeholder values before using the stack beyond local development.
+- Docker Compose publishes service ports on `127.0.0.1` by default. Keep that binding for local work or place the stack behind a proper network boundary.
 - Tighten `CORS_ALLOW_ORIGINS` for any non-local deployment.
-- The backend does not currently provide authentication or authorization.
+- `RAPTOR_API_KEY` is a shared-secret gate only; it is not user authentication, RBAC, tenancy, or case ownership.
+- `VITE_RAPTOR_API_KEY` is embedded in the browser bundle when set. Use it only for local/shared-secret deployments.
+- Audit logging is append-only at the SQLite table level, but SQLite is still an MVP local database.
 - The graph natural-language query path enforces read-only patterns and investigation scoping, but production deployments should still monitor and restrict generated-query behavior.
 - LLM output is validated and has fallbacks, but attribution and simulation should be treated as analyst-supporting evidence, not automatic truth.
 - Uploaded telemetry can contain credentials, hostnames, usernames, IP addresses, file paths, and other sensitive data.
@@ -508,11 +547,11 @@ curl http://localhost:8000/api/v1/health/detailed
 Likely next engineering steps:
 
 - Add end-to-end browser tests for the live API-backed console.
-- Add authentication, user roles, audit logging, and case ownership.
-- Replace SQLite job state with a production database for multi-user deployments.
-- Add real threat-feed connectors for MISP, OpenCTI, CISA KEV, or other sources.
-- Add a durable evidence store for uploaded files and extracted artifacts.
-- Add queued background workers instead of FastAPI in-process background tasks.
+- Add user authentication, roles, RBAC, and case ownership beyond the shared API-key gate.
+- Replace SQLite job/audit/evidence metadata with a production database for multi-user deployments.
+- Add MISP, OpenCTI, and additional threat-feed connectors.
+- Add streaming Elasticsearch checkpoints, deduplication, and replay controls.
+- Add Redis-backed queued background workers instead of FastAPI in-process background tasks.
 - Add report export to PDF or DOCX.
 - Add frontend tests and API integration tests.
 - Add deployment hardening for credentials, TLS, CORS, and service exposure.
