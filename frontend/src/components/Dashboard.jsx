@@ -93,6 +93,11 @@ const INVESTIGATION_TABS = [
   { id: 'query', label: 'Query' },
 ];
 
+const REPORT_EXPORT_HEALTH = {
+  status: 'healthy',
+  detail: 'Browser Markdown/PDF export available',
+};
+
 export default function Dashboard() {
   const [activePage, setActivePage] = useState('dashboard');
   const [detailTab, setDetailTab] = useState('timeline');
@@ -110,11 +115,16 @@ export default function Dashboard() {
   const [investigations, setInvestigations] = useState([]);
   const [apiHealth, setApiHealth] = useState('checking');
   const [healthSubsystems, setHealthSubsystems] = useState({});
+  const [healthCheckedAt, setHealthCheckedAt] = useState('');
 
   const isComplete = status?.status === 'complete';
   const isProcessing = status && status.status !== 'complete' && status.status !== 'failed';
   const isFailed = status?.status === 'failed';
 
+  const displayHealthSubsystems = useMemo(() => ({
+    ...healthSubsystems,
+    report_export: REPORT_EXPORT_HEALTH,
+  }), [healthSubsystems]);
   const metrics = useMemo(() => buildMetrics(report, graphData, status), [report, graphData, status]);
   const topAttribution = report?.attribution?.[0] || null;
   const highRiskFindings = useMemo(() => {
@@ -131,23 +141,22 @@ export default function Dashboard() {
     }
   };
 
+  const refreshHealth = async () => {
+    try {
+      const resp = await healthAPI.checkDetailed();
+      setApiHealth(resp?.data?.status || 'healthy');
+      setHealthSubsystems(resp?.data?.subsystems || {});
+      setHealthCheckedAt(new Date().toLocaleString());
+    } catch {
+      setApiHealth('offline');
+      setHealthSubsystems({});
+      setHealthCheckedAt(new Date().toLocaleString());
+    }
+  };
+
   useEffect(() => {
-    let alive = true;
-    healthAPI.checkDetailed()
-      .then((resp) => {
-        if (alive) {
-          setApiHealth(resp?.data?.status || 'healthy');
-          setHealthSubsystems(resp?.data?.subsystems || {});
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setApiHealth('offline');
-          setHealthSubsystems({});
-        }
-      });
+    refreshHealth();
     loadInvestigations();
-    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -300,7 +309,8 @@ export default function Dashboard() {
           graphData={graphData}
           topAttribution={topAttribution}
           highRiskFindings={highRiskFindings}
-          healthSubsystems={healthSubsystems}
+          healthSubsystems={displayHealthSubsystems}
+          healthCheckedAt={healthCheckedAt}
           onUpload={handleInvestigationStart}
           onOpenInvestigation={() => setActivePage('investigations')}
         />
@@ -356,7 +366,7 @@ export default function Dashboard() {
     }
 
     if (activePage === 'threat-feeds') {
-      return <ThreatFeedsPage healthSubsystems={healthSubsystems} />;
+      return <ThreatFeedsPage healthSubsystems={displayHealthSubsystems} healthCheckedAt={healthCheckedAt} />;
     }
 
     if (activePage === 'simulation') {
@@ -380,7 +390,14 @@ export default function Dashboard() {
       return <ReportsPage report={report} investigations={investigations} onSelectInvestigation={handleSelectInvestigation} />;
     }
 
-    return <SettingsPage apiHealth={apiHealth} healthSubsystems={healthSubsystems} />;
+    return (
+      <SettingsPage
+        apiHealth={apiHealth}
+        healthSubsystems={displayHealthSubsystems}
+        healthCheckedAt={healthCheckedAt}
+        onRefreshHealth={refreshHealth}
+      />
+    );
   };
 
   return (
@@ -389,7 +406,7 @@ export default function Dashboard() {
       <main className="console-main">
         <TopBar
           apiHealth={apiHealth}
-          healthSubsystems={healthSubsystems}
+          healthSubsystems={displayHealthSubsystems}
           status={status}
           investigationId={investigationId}
           onNewInvestigation={handleNewInvestigation}
@@ -457,6 +474,7 @@ function Sidebar({ activePage, setActivePage, status }) {
 
 function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInvestigation, onOpenUpload }) {
   const healthClass = apiHealth === 'healthy' ? 'online' : apiHealth === 'offline' ? 'offline' : 'pending';
+  const healthLabel = apiHealth === 'healthy' ? 'System healthy' : apiHealth === 'offline' ? 'System offline' : 'System degraded';
   const subsystemPills = Object.entries(healthSubsystems || {}).filter(([name]) => name !== 'api');
 
   return (
@@ -468,7 +486,7 @@ function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInv
       <div className="topbar-actions">
         <div className={`health-pill ${healthClass}`}>
           <span />
-          API {apiHealth}
+          {healthLabel}
         </div>
         {subsystemPills.map(([name, subsystem]) => {
           const cls = subsystem?.status === 'healthy' ? 'online' : subsystem?.status === 'degraded' ? 'offline' : 'pending';
@@ -500,7 +518,7 @@ function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInv
   );
 }
 
-function DashboardHome({ metrics, status, report, graphData, topAttribution, highRiskFindings, healthSubsystems, onUpload, onOpenInvestigation }) {
+function DashboardHome({ metrics, status, report, graphData, topAttribution, highRiskFindings, healthSubsystems, healthCheckedAt, onUpload, onOpenInvestigation }) {
   return (
     <div className="dashboard-grid">
       <section className="hero-strip">
@@ -533,7 +551,7 @@ function DashboardHome({ metrics, status, report, graphData, topAttribution, hig
         </ConsolePanel>
 
         <ConsolePanel title="Threat Feed" icon={Database}>
-          <ThreatFeedMini healthSubsystems={healthSubsystems} />
+          <ThreatFeedMini healthSubsystems={healthSubsystems} healthCheckedAt={healthCheckedAt} />
         </ConsolePanel>
       </div>
 
@@ -541,7 +559,7 @@ function DashboardHome({ metrics, status, report, graphData, topAttribution, hig
         <ConsolePanel title="Attack Surface" icon={Network}>
           {graphData?.nodes?.length ? (
             <div className="graph-preview">
-              <AttackGraph graphData={graphData} />
+              <AttackGraph graphData={graphData} showLabels={false} />
             </div>
           ) : (
             <EmptyState icon={Network} title="No graph yet" text="Run an investigation to build a host, user, and technique graph." />
@@ -673,11 +691,88 @@ function InvestigationPage({
 }
 
 function GraphPage({ graphData, selectedNode, setSelectedNode, embedded = false }) {
+  const [graphSearch, setGraphSearch] = useState('');
+  const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
+  const [riskFilter, setRiskFilter] = useState('all');
+  const [showLabels, setShowLabels] = useState(!embedded);
+
+  const filteredGraphData = useMemo(() => {
+    const nodes = graphData?.nodes || [];
+    const edges = graphData?.edges || [];
+    const query = graphSearch.trim().toLowerCase();
+
+    if (!nodes.length) return graphData;
+
+    const visibleNodes = nodes.filter((node) => {
+      const type = getGraphNodeType(node);
+      const haystack = [
+        node.id,
+        node.label,
+        type,
+        node.metadata?.ip,
+        node.metadata?.tactic,
+        node.metadata?.phase,
+      ].filter(Boolean).join(' ').toLowerCase();
+      const matchesSearch = !query || haystack.includes(query);
+      const matchesType = nodeTypeFilter === 'all' || type === nodeTypeFilter;
+      const matchesRisk =
+        riskFilter === 'all' ||
+        (riskFilter === 'compromised' && isCompromisedHostNode(node)) ||
+        (riskFilter === 'clean' && type === 'host' && !isCompromisedHostNode(node));
+      return matchesSearch && matchesType && matchesRisk;
+    });
+
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
+    const visibleEdges = edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target));
+
+    return {
+      ...graphData,
+      nodes: visibleNodes,
+      edges: visibleEdges,
+    };
+  }, [graphData, graphSearch, nodeTypeFilter, riskFilter]);
+
+  const nodeCount = filteredGraphData?.nodes?.length || 0;
+  const edgeCount = filteredGraphData?.edges?.length || 0;
+
   return (
     <div className={embedded ? 'graph-page embedded' : 'graph-page'}>
       <div className="graph-canvas-card">
+        {graphData?.nodes?.length > 0 && (
+          <div className="graph-toolbar">
+            <label className="search-box">
+              <Search className="w-4 h-4" />
+              <input
+                type="text"
+                value={graphSearch}
+                onChange={(event) => setGraphSearch(event.target.value)}
+                placeholder="Filter host, technique, tactic, IP"
+              />
+            </label>
+            <select value={nodeTypeFilter} onChange={(event) => setNodeTypeFilter(event.target.value)}>
+              <option value="all">All nodes</option>
+              <option value="host">Hosts</option>
+              <option value="user">Users</option>
+              <option value="technique">Techniques</option>
+            </select>
+            <select value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}>
+              <option value="all">All risk</option>
+              <option value="compromised">Compromised hosts</option>
+              <option value="clean">Clean hosts</option>
+            </select>
+            <label className="graph-toggle">
+              <input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />
+              Labels
+            </label>
+            <span className="graph-filter-count">{nodeCount} nodes / {edgeCount} edges</span>
+          </div>
+        )}
         {graphData?.nodes?.length ? (
-          <AttackGraph graphData={graphData} onNodeClick={setSelectedNode} />
+          filteredGraphData?.nodes?.length ? (
+            <AttackGraph graphData={filteredGraphData} onNodeClick={setSelectedNode} showLabels={showLabels} />
+          ) : (
+            <EmptyState icon={Network} title="No matching graph nodes" text="Adjust graph filters to restore nodes and edges." />
+          )
         ) : (
           <EmptyState icon={Network} title="Attack graph unavailable" text="Upload logs and complete analysis to render the graph." />
         )}
@@ -778,33 +873,37 @@ function APTLibraryPage({ profiles, loading }) {
   );
 }
 
-function ThreatFeedsPage({ healthSubsystems = {} }) {
+function ThreatFeedsPage({ healthSubsystems = {}, healthCheckedAt = '' }) {
   const statusFor = (name, fallback = 'available') => {
     const status = healthSubsystems?.[name]?.status;
     if (status === 'healthy') return 'active';
-    if (status === 'degraded') return 'planned';
+    if (status === 'degraded') return 'degraded';
     return fallback;
   };
 
   const feeds = [
-    ['MITRE ATT&CK STIX', 'active', 'Technique and intrusion-set corpus'],
-    ['Sigma Signatures', 'active', 'Local keyword and regex TTP mapping'],
-    ['Weaviate RAG', statusFor('weaviate'), healthSubsystems?.weaviate?.detail || 'Vector retrieval service'],
-    ['Elasticsearch Events', statusFor('elasticsearch'), healthSubsystems?.elasticsearch?.detail || 'Runtime event storage'],
-    ['Redis Queue/Cache', statusFor('redis'), healthSubsystems?.redis?.detail || 'Runtime cache service'],
-    ['MISP/OpenCTI', 'planned', 'Infrastructure and malware enrichment'],
+    { name: 'MITRE ATT&CK STIX', state: 'active', desc: 'Technique and intrusion-set corpus', confidence: 'high', lastPulled: 'local cache' },
+    { name: 'Sigma Signatures', state: 'active', desc: 'Local keyword and regex TTP mapping', confidence: 'medium', lastPulled: 'bundled rules' },
+    { name: 'Weaviate RAG', state: statusFor('weaviate'), desc: healthSubsystems?.weaviate?.detail || 'Vector retrieval service', confidence: healthSubsystems?.weaviate?.status === 'healthy' ? 'high' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
+    { name: 'Elasticsearch Events', state: statusFor('elasticsearch'), desc: healthSubsystems?.elasticsearch?.detail || 'Runtime event storage', confidence: healthSubsystems?.elasticsearch?.status === 'healthy' ? 'high' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
+    { name: 'Redis Queue/Cache', state: statusFor('redis'), desc: healthSubsystems?.redis?.detail || 'Runtime cache service', confidence: healthSubsystems?.redis?.status === 'healthy' ? 'medium' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
+    { name: 'MISP/OpenCTI', state: 'planned', desc: 'Connector not implemented in this build', confidence: 'none', lastPulled: 'never' },
   ];
 
   return (
     <ConsolePanel title="Threat Feeds" icon={Database}>
       <div className="feed-table">
-        {feeds.map(([name, state, desc]) => (
-          <div key={name} className="feed-row">
+        {feeds.map((feed) => (
+          <div key={feed.name} className="feed-row">
             <div>
-              <strong>{name}</strong>
-              <span>{desc}</span>
+              <strong>{feed.name}</strong>
+              <span>{feed.desc}</span>
+              <div className="feed-meta">
+                <span>confidence: {feed.confidence}</span>
+                <span>last checked: {feed.lastPulled}</span>
+              </div>
             </div>
-            <span className={`feed-state ${state}`}>{state}</span>
+            <span className={`feed-state ${feed.state}`}>{feed.state}</span>
           </div>
         ))}
       </div>
@@ -852,6 +951,9 @@ function SimulationPage({ simulation, report, canRunSimulation, simError, simLoa
 }
 
 function ReportsPage({ report, investigations, onSelectInvestigation }) {
+  const [reportTemplate, setReportTemplate] = useState('analyst');
+  const [analystNotes, setAnalystNotes] = useState('');
+
   return (
     <div className="reports-layout">
       <ConsolePanel title="Report Archive" icon={Archive}>
@@ -881,6 +983,24 @@ function ReportsPage({ report, investigations, onSelectInvestigation }) {
         )}
       </ConsolePanel>
       <ConsolePanel title="Selected Report" icon={FileText}>
+        <div className="report-controls">
+          <label>
+            <span>Template</span>
+            <select value={reportTemplate} onChange={(event) => setReportTemplate(event.target.value)}>
+              <option value="analyst">Analyst summary</option>
+              <option value="evidence">Evidence detail</option>
+            </select>
+          </label>
+          <label>
+            <span>Analyst notes</span>
+            <textarea
+              value={analystNotes}
+              onChange={(event) => setAnalystNotes(event.target.value)}
+              placeholder="Add triage notes for handoff..."
+              rows={3}
+            />
+          </label>
+        </div>
         {report && (
           <div className="report-meta">
             <div><span>Investigation</span><strong>{report.investigation_id?.slice(0, 8)}</strong></div>
@@ -889,34 +1009,71 @@ function ReportsPage({ report, investigations, onSelectInvestigation }) {
             <div><span>Created</span><strong>{report.timestamp || '--'}</strong></div>
           </div>
         )}
-        <ReportView report={report?.narrative_report} />
+        <ReportView report={report?.narrative_report} mode={reportTemplate} notes={analystNotes} />
       </ConsolePanel>
     </div>
   );
 }
 
 function InvestigationList({ investigations, onSelectInvestigation }) {
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortMode, setSortMode] = useState('recent');
+  const visibleInvestigations = investigations
+    ? investigations
+    .filter((item) => statusFilter === 'all' || item.status === statusFilter)
+    .slice()
+    .sort((a, b) => {
+      if (sortMode === 'severity') return investigationSeverityScore(b) - investigationSeverityScore(a);
+      if (sortMode === 'progress') return (b.progress || 0) - (a.progress || 0);
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    })
+    : [];
+
   if (!investigations || investigations.length === 0) return null;
 
   return (
     <div style={{ marginTop: '14px' }}>
-      <div className="section-eyebrow" style={{ marginBottom: '8px' }}>Recent Investigations</div>
+      <div className="investigation-list-header">
+        <div className="section-eyebrow">Recent Investigations</div>
+        <div className="history-controls">
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All status</option>
+            <option value="queued">Queued</option>
+            <option value="processing">Processing</option>
+            <option value="complete">Complete</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+            <option value="recent">Newest</option>
+            <option value="severity">Severity</option>
+            <option value="progress">Progress</option>
+          </select>
+        </div>
+      </div>
       <div className="feed-table">
-        {investigations.slice(0, 8).map((item) => (
+        {visibleInvestigations.slice(0, 12).map((item) => (
           <button
             key={item.investigation_id}
             type="button"
-            className="feed-row"
+            className="feed-row investigation-row"
             onClick={() => onSelectInvestigation(item.investigation_id)}
             style={{ textAlign: 'left', width: '100%', cursor: 'pointer' }}
           >
             <div>
               <strong>{item.investigation_id.slice(0, 8)}</strong>
               <span>{item.current_phase || item.status}</span>
+              <div className="feed-meta">
+                <span>{item.event_count || 0} events</span>
+                <span>{item.technique_count || 0} techniques</span>
+                <span>owner: unassigned</span>
+              </div>
             </div>
-            <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
-              {item.status}
-            </span>
+            <div className="row-actions">
+              <span className={`severity-pill ${investigationSeverity(item).toLowerCase()}`}>{investigationSeverity(item)}</span>
+              <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
+                {item.status}
+              </span>
+            </div>
           </button>
         ))}
       </div>
@@ -990,7 +1147,7 @@ function MitreNavigatorPage({ investigationId, findings }) {
   );
 }
 
-function SettingsPage({ apiHealth, healthSubsystems }) {
+function SettingsPage({ apiHealth, healthSubsystems, healthCheckedAt, onRefreshHealth }) {
   const [settings, setSettings] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('raptor:settings') || '{}');
@@ -1006,6 +1163,7 @@ function SettingsPage({ apiHealth, healthSubsystems }) {
 
   const rows = [
     ['API health', apiHealth],
+    ['Last health check', healthCheckedAt || 'not checked'],
     ['Frontend mode', import.meta.env.MODE],
     ['API base', import.meta.env.VITE_API_BASE_URL || '/api/v1'],
     ['Graph renderer', 'Sigma.js'],
@@ -1047,6 +1205,37 @@ function SettingsPage({ apiHealth, healthSubsystems }) {
           />
         </label>
         <label>
+          <span>API endpoint</span>
+          <input
+            type="text"
+            value={settings.apiEndpoint || (import.meta.env.VITE_API_BASE_URL || '/api/v1')}
+            onChange={(event) => updateSetting('apiEndpoint', event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Model provider</span>
+          <select value={settings.modelProvider || 'openrouter'} onChange={(event) => updateSetting('modelProvider', event.target.value)}>
+            <option value="openrouter">OpenRouter</option>
+            <option value="local">Local provider</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        </label>
+        <label>
+          <span>Graph labels</span>
+          <select value={settings.graphLabels || 'on-demand'} onChange={(event) => updateSetting('graphLabels', event.target.value)}>
+            <option value="on-demand">On demand</option>
+            <option value="always">Always show</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </label>
+        <label>
+          <span>Default report</span>
+          <select value={settings.reportFormat || 'analyst'} onChange={(event) => updateSetting('reportFormat', event.target.value)}>
+            <option value="analyst">Analyst summary</option>
+            <option value="evidence">Evidence detail</option>
+          </select>
+        </label>
+        <label>
           <span>Show degraded warnings</span>
           <input
             type="checkbox"
@@ -1054,6 +1243,10 @@ function SettingsPage({ apiHealth, healthSubsystems }) {
             onChange={(event) => updateSetting('showDegradedWarnings', event.target.checked)}
           />
         </label>
+        <button type="button" className="secondary-button settings-action" onClick={onRefreshHealth}>
+          <Activity className="w-4 h-4" />
+          Run Health Check
+        </button>
       </div>
       <div className="settings-list">
         {[...rows, ...subsystemRows].map(([label, value]) => (
@@ -1096,6 +1289,7 @@ function ConsolePanel({ title, icon: Icon, children }) {
 
 function InvestigationSummary({ status, report, topAttribution }) {
   const progress = status?.progress || 0;
+  const attributionDisplay = getAttributionDisplay(topAttribution);
   return (
     <div className="summary-stack">
       <div className="summary-row">
@@ -1112,7 +1306,7 @@ function InvestigationSummary({ status, report, topAttribution }) {
       <div className="summary-grid">
         <div><span>Events</span><strong>{report?.event_count || '--'}</strong></div>
         <div><span>Techniques</span><strong>{report?.technique_count || '--'}</strong></div>
-        <div><span>Top actor</span><strong>{topAttribution?.apt_name || '--'}</strong></div>
+        <div><span>Attribution</span><strong>{attributionDisplay.actorLabel}</strong></div>
       </div>
     </div>
   );
@@ -1137,7 +1331,7 @@ function ProcessingView({ status, investigationId }) {
   );
 }
 
-function ThreatFeedMini({ healthSubsystems = {} }) {
+function ThreatFeedMini({ healthSubsystems = {}, healthCheckedAt = '' }) {
   const weaviate = healthSubsystems?.weaviate?.status || 'unknown';
   const elastic = healthSubsystems?.elasticsearch?.status || 'unknown';
   const redis = healthSubsystems?.redis?.status || 'unknown';
@@ -1147,6 +1341,7 @@ function ThreatFeedMini({ healthSubsystems = {} }) {
       <FeedMiniRow tone={elastic === 'healthy' ? 'success' : 'warning'} title="Elasticsearch" value={elastic} />
       <FeedMiniRow tone={redis === 'healthy' ? 'success' : 'warning'} title="Redis cache" value={redis} />
       <FeedMiniRow tone="success" title="STIX validation" value="Canonical ATT&CK IDs" />
+      <FeedMiniRow tone="success" title="Last health check" value={healthCheckedAt || 'not checked'} />
     </div>
   );
 }
@@ -1194,12 +1389,100 @@ function LoadingRows() {
   );
 }
 
+function getGraphNodeType(node) {
+  const labelList = node?.metadata?.labels || node?.labels || [];
+  if (node?.node_type) return String(node.node_type).toLowerCase();
+  if (labelList.includes('Host')) return 'host';
+  if (labelList.includes('User')) return 'user';
+  if (labelList.includes('Technique')) return 'technique';
+  return '';
+}
+
+function isCompromisedHostNode(node) {
+  if (getGraphNodeType(node) !== 'host') return false;
+  const metadata = node?.metadata || node?.props || {};
+  return Boolean(
+    metadata.compromised ||
+    node?.compromised ||
+    node?.props?.compromised ||
+    String(node?.color || '').toLowerCase() === '#e11d48' ||
+    String(node?.color || '').toLowerCase() === '#dc3545'
+  );
+}
+
+function getCompromisedHostCount(graphData) {
+  const nodes = graphData?.nodes || [];
+  const edges = graphData?.edges || [];
+  const hostIds = new Set(nodes.filter((node) => getGraphNodeType(node) === 'host').map((node) => node.id));
+  const compromised = new Set(
+    nodes
+      .filter(isCompromisedHostNode)
+      .map((node) => node.id)
+  );
+
+  edges.forEach((edge) => {
+    const edgeType = String(edge.edge_type || edge.rel_type || '').toLowerCase();
+    if (edgeType.includes('lateral') && hostIds.has(edge.target)) {
+      compromised.add(edge.target);
+    }
+  });
+
+  return compromised.size;
+}
+
+function getAttributionDisplay(top) {
+  if (!top) {
+    return {
+      value: '--',
+      sub: 'pending attribution',
+      tone: 'success',
+      actorLabel: '--',
+      reliable: false,
+    };
+  }
+
+  const score = Number(top.confidence_score || 0);
+  const percent = `${Math.round(score * 100)}%`;
+  const label = String(top.confidence_label || 'UNKNOWN').toUpperCase();
+  const reliable = ['HIGH', 'MEDIUM'].includes(label) && score >= 0.5;
+  const lowConfidence = label === 'LOW' || score >= 0.3;
+
+  if (reliable) {
+    return {
+      value: percent,
+      sub: `${top.apt_name || 'Unknown actor'} ${label}`,
+      tone: 'success',
+      actorLabel: top.apt_name || '--',
+      reliable,
+    };
+  }
+
+  return {
+    value: lowConfidence ? 'LOW CONF' : 'UNKNOWN',
+    sub: `${top.apt_name || 'Unknown actor'} ${percent} tentative`,
+    tone: 'warning',
+    actorLabel: 'Unconfirmed',
+    reliable: false,
+  };
+}
+
+function investigationSeverity(item) {
+  if (item.status === 'failed') return 'High';
+  if ((item.technique_count || 0) >= 5) return 'High';
+  if ((item.technique_count || 0) >= 2 || item.status === 'processing') return 'Medium';
+  return 'Low';
+}
+
+function investigationSeverityScore(item) {
+  return { High: 3, Medium: 2, Low: 1 }[investigationSeverity(item)] || 0;
+}
+
 function buildMetrics(report, graphData, status) {
   const nodes = graphData?.nodes || [];
-  const hosts = nodes.filter((node) => node.node_type === 'host');
-  const compromisedHosts = hosts.filter((node) => node.metadata?.compromised).length;
+  const hosts = nodes.filter((node) => getGraphNodeType(node) === 'host');
+  const compromisedHosts = getCompromisedHostCount(graphData);
   const top = report?.attribution?.[0];
-  const confidence = top ? `${Math.round((top.confidence_score || 0) * 100)}%` : '--';
+  const attributionDisplay = getAttributionDisplay(top);
 
   return [
     {
@@ -1224,10 +1507,10 @@ function buildMetrics(report, graphData, status) {
       icon: Activity,
     },
     {
-      label: 'Top Confidence',
-      value: confidence,
-      sub: top?.apt_name || 'pending attribution',
-      tone: 'success',
+      label: 'Attribution Confidence',
+      value: attributionDisplay.value,
+      sub: attributionDisplay.sub,
+      tone: attributionDisplay.tone,
       icon: BarChart3,
     },
   ];
