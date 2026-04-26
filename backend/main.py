@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -71,6 +71,9 @@ def init_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS investigations (
             id TEXT PRIMARY KEY,
+            name TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            input_bytes INTEGER DEFAULT 0,
             status TEXT DEFAULT 'queued',
             progress INTEGER DEFAULT 0,
             current_phase TEXT DEFAULT '',
@@ -87,6 +90,18 @@ def init_db():
             completed_at TEXT
         )
     """)
+    existing_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(investigations)").fetchall()
+    }
+    migrations = {
+        "name": "ALTER TABLE investigations ADD COLUMN name TEXT DEFAULT ''",
+        "source": "ALTER TABLE investigations ADD COLUMN source TEXT DEFAULT ''",
+        "input_bytes": "ALTER TABLE investigations ADD COLUMN input_bytes INTEGER DEFAULT 0",
+    }
+    for column, statement in migrations.items():
+        if column not in existing_columns:
+            conn.execute(statement)
     conn.commit()
     conn.close()
 
@@ -110,11 +125,21 @@ def db_update(inv_id: str, **kwargs):
     conn.close()
 
 
-def db_create(inv_id: str):
+def db_create(inv_id: str, metadata: Optional[dict] = None, input_bytes: int = 0):
+    metadata = metadata or {}
+    name = str(metadata.get("case_name") or "").strip()
+    if not name:
+        filename = str(metadata.get("filename") or "").strip()
+        if filename:
+            name = filename
+    source = str(metadata.get("source") or "file").strip()
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(
-        "INSERT INTO investigations (id, status, created_at) VALUES (?, 'queued', ?)",
-        (inv_id, datetime.utcnow().isoformat())
+        """
+        INSERT INTO investigations (id, name, source, input_bytes, status, created_at)
+        VALUES (?, ?, ?, ?, 'queued', ?)
+        """,
+        (inv_id, name, source, input_bytes, datetime.utcnow().isoformat())
     )
     conn.commit()
     conn.close()
@@ -137,7 +162,7 @@ def start_investigation_from_content(
         )
 
     investigation_id = str(uuid.uuid4())
-    db_create(investigation_id)
+    db_create(investigation_id, metadata, byte_count)
     background_tasks.add_task(run_investigation, investigation_id, log_content, metadata or {})
 
     logger.info(f"Investigation {investigation_id} started ({byte_count} bytes)")
@@ -201,8 +226,9 @@ def db_list(limit: int = 25) -> list[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT id, status, progress, current_phase, error,
-               event_count, technique_count, created_at, completed_at
+        SELECT id, name, source, input_bytes, status, progress, current_phase, error,
+               event_count, technique_count, created_at, completed_at,
+               attribution_json, graph_json
         FROM investigations
         ORDER BY datetime(created_at) DESC
         LIMIT ?
@@ -210,7 +236,36 @@ def db_list(limit: int = 25) -> list[dict]:
         (limit,),
     ).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [_summarize_investigation_row(dict(row)) for row in rows]
+
+
+def _summarize_investigation_row(row: dict) -> dict:
+    """Add frontend-ready summary fields without requiring extra database columns."""
+    attribution = []
+    try:
+        attribution = json.loads(row.get("attribution_json") or "[]")
+    except Exception:
+        attribution = []
+
+    top = attribution[0] if attribution else {}
+    row["top_candidate"] = top.get("apt_name", "") if isinstance(top, dict) else ""
+    row["confidence_score"] = float(top.get("confidence_score", 0.0) or 0.0) if isinstance(top, dict) else 0.0
+    row["confidence_label"] = top.get("confidence_label", "") if isinstance(top, dict) else ""
+
+    host_count = 0
+    try:
+        graph = json.loads(row.get("graph_json") or "{}")
+        host_count = sum(1 for node in graph.get("nodes", []) if node.get("node_type") == "host")
+    except Exception:
+        host_count = 0
+    row["host_count"] = host_count
+
+    row["name"] = row.get("name") or f"Investigation {row.get('id', '')[:8]}"
+    row["source"] = row.get("source") or "unknown"
+    row["input_bytes"] = row.get("input_bytes") or 0
+    row.pop("attribution_json", None)
+    row.pop("graph_json", None)
+    return row
 
 
 # ─── Background Investigation Pipeline ──────────────────────────────
@@ -380,7 +435,11 @@ def run_investigation(investigation_id: str, log_content: str, metadata: Optiona
 # ─── API Endpoints ───────────────────────────────────────────────────
 
 @app.post("/api/v1/investigate", response_model=InvestigateResponse)
-async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def investigate(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    case_name: Optional[str] = Form(None),
+):
     """
     Upload a log file and start an investigation.
     POST /api/v1/investigate
@@ -396,7 +455,15 @@ async def investigate(background_tasks: BackgroundTasks, file: UploadFile = File
         )
 
     log_content = content.decode('utf-8', errors='replace')
-    return start_investigation_from_content(background_tasks, log_content, {"source": "file"})
+    return start_investigation_from_content(
+        background_tasks,
+        log_content,
+        {
+            "source": "file",
+            "filename": file.filename,
+            "case_name": case_name or file.filename or "",
+        },
+    )
 
 
 @app.post("/api/v1/investigate/text", response_model=InvestigateResponse)
@@ -418,6 +485,7 @@ async def investigate_text(background_tasks: BackgroundTasks, request: Investiga
         log_content,
         {
             "source": request.source,
+            "case_name": request.case_name,
             "elastic_query": request.elastic_query,
             "time_range_start": request.time_range_start,
             "time_range_end": request.time_range_end,
@@ -435,11 +503,18 @@ async def list_investigations(limit: int = 25):
     items = [
         InvestigationListItem(
             investigation_id=row.get("id", ""),
+            name=row.get("name") or "",
+            source=row.get("source") or "",
             status=row.get("status", "queued"),
             progress=row.get("progress", 0) or 0,
             current_phase=row.get("current_phase") or "",
             event_count=row.get("event_count") or 0,
             technique_count=row.get("technique_count") or 0,
+            host_count=row.get("host_count") or 0,
+            input_bytes=row.get("input_bytes") or 0,
+            top_candidate=row.get("top_candidate") or "",
+            confidence_score=row.get("confidence_score") or 0.0,
+            confidence_label=row.get("confidence_label") or "",
             created_at=row.get("created_at") or "",
             completed_at=row.get("completed_at"),
             error=row.get("error"),
@@ -461,6 +536,7 @@ async def get_status(investigation_id: str):
 
     return InvestigationStatus(
         investigation_id=investigation_id,
+        name=record.get("name") or "",
         status=record["status"],
         progress=record["progress"],
         current_phase=record["current_phase"] or "",
@@ -493,6 +569,7 @@ async def get_report(investigation_id: str):
 
     return InvestigationReport(
         investigation_id=investigation_id,
+        name=record.get("name") or "",
         status=record["status"],
         findings=findings,
         attack_sequence=attack_seq,
