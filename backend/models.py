@@ -19,6 +19,7 @@ class InvestigateRequest(BaseModel):
 
 class InvestigateTextRequest(BaseModel):
     """Request body for text/query based investigations."""
+    case_name: str = ""
     log_content: str = ""
     source: str = "paste"
     elastic_query: Optional[str] = None
@@ -38,6 +39,7 @@ class InvestigateResponse(BaseModel):
 class InvestigationStatus(BaseModel):
     """Response for GET /api/v1/investigate/{id}/status"""
     investigation_id: str
+    name: str = ""
     status: str  # queued | processing | complete | failed
     progress: int = 0  # 0-100
     current_phase: str = ""
@@ -47,11 +49,18 @@ class InvestigationStatus(BaseModel):
 class InvestigationListItem(BaseModel):
     """Summary row for investigation listing endpoint."""
     investigation_id: str
+    name: str = ""
+    source: str = ""
     status: str
     progress: int
     current_phase: str = ""
     event_count: int = 0
     technique_count: int = 0
+    host_count: int = 0
+    input_bytes: int = 0
+    top_candidate: str = ""
+    confidence_score: float = 0.0
+    confidence_label: str = ""
     created_at: str = ""
     completed_at: Optional[str] = None
     error: Optional[str] = None
@@ -60,6 +69,7 @@ class InvestigationListItem(BaseModel):
 class InvestigationReport(BaseModel):
     """Response for GET /api/v1/investigate/{id}/report"""
     investigation_id: str
+    name: str = ""
     status: str
     findings: List[Finding] = Field(default_factory=list)
     attack_sequence: List[str] = Field(default_factory=list)
