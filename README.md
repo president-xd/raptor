@@ -1,46 +1,172 @@
-# RAPTOR
+# 🦅 RAPTOR
 
-Retrieval-Augmented Persistent Threat Orchestration and Reasoning.
+Retrieval-Augmented Persistent Threat Orchestration and Reasoning
 
-RAPTOR is a forensic and predictive APT analysis system. It accepts security logs, normalizes events, maps suspicious activity to MITRE ATT&CK techniques, builds an attack graph, scores likely APT attribution, generates an analyst report, and predicts likely next attacker steps.
+RAPTOR is an MVP cybersecurity investigation platform for turning security telemetry into ATT&CK-mapped findings, attack graphs, attribution candidates, analyst reports, and next-step adversary predictions. It combines a FastAPI backend, local Sigma-style detections, MITRE ATT&CK STIX data, optional RAG over Weaviate, Neo4j graph persistence, OpenRouter-compatible LLM calls, and a React/Vite SOC console.
+
+This repository is best understood as two pieces:
+
+- A working backend investigation API that can ingest logs, run the analysis pipeline, persist job state in SQLite, and expose reports, graphs, attribution, simulation, and natural-language query endpoints.
+- A polished standalone frontend console that demonstrates the intended analyst experience using deterministic demo data from `frontend/src/data/raptorDemo.js`. The frontend currently has API proxies configured, but it does not fetch live backend investigation data yet.
 
 ## Current Status
 
-This repository is an MVP implementation with a fully wired FastAPI backend and React/Vite analyst console.
+RAPTOR is a functional MVP, not a production SIEM, case-management system, or fully integrated enterprise product.
 
-Implemented:
+Implemented today:
 
-- Multi-format log parsing for JSON, XML Windows events, CEF, and generic logs.
-- Local Sigma-style ATT&CK technique matching.
-- OpenRouter-backed LLM analysis with deterministic Sigma fallback when the LLM provider is unavailable.
-- STIX validation against the cached MITRE Enterprise ATT&CK bundle.
-- APT attribution using Jaccard similarity plus confidence penalties and bonuses.
-- Neo4j graph writing when Neo4j is available, with in-memory graph export fallback.
-- Investigation-scoped graph persistence and investigation-safe graph query execution.
-- Detailed subsystem health telemetry (`/api/v1/health/detailed`) for API/UI degraded-mode visibility.
-- Simulation confidence gate (simulation blocked for LOW/UNKNOWN attribution confidence).
-- Upload guardrails (empty-file rejection and maximum upload size enforcement).
-- React analyst console styled as a dense SOC workspace.
-- Docker Compose for Neo4j, Weaviate, Elasticsearch, Redis, backend, and frontend.
+- Multi-format log ingestion for JSON, newline JSON, XML Windows events, CEF, and generic text logs.
+- File-upload investigations through `POST /api/v1/investigate`.
+- Pasted-log and Elasticsearch-query investigations through `POST /api/v1/investigate/text`.
+- Normalized event schema with timestamps, hosts, IPs, event type, raw evidence, Sigma matches, and preliminary IoC score.
+- Local Sigma-style detection signatures mapped to MITRE ATT&CK technique IDs.
+- RAG-oriented analysis pipeline that retrieves ATT&CK and threat-report context from Weaviate when available.
+- OpenRouter-compatible LLM analysis with fallback model support.
+- Deterministic local fallback analysis when the LLM, embeddings, retrieval, or report generation path cannot complete.
+- MITRE ATT&CK STIX validation for technique IDs.
+- APT profile loading from the cached Enterprise ATT&CK STIX bundle.
+- APT attribution using Jaccard overlap plus confidence penalties and bonuses.
+- Neo4j attack graph writing when Neo4j is reachable.
+- In-memory graph export fallback when Neo4j is unavailable.
+- Investigation-scoped graph data and guarded read-only natural-language graph queries.
+- Predictive simulation endpoint gated by attribution confidence.
+- Natural-language query endpoint that routes questions to graph, RAG, or simulation-style handlers.
+- Markdown analyst report generation with deterministic fallback.
+- Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, and LLM configuration.
+- React SOC console with dashboard, investigations, attack graph, attribution, simulation, intelligence query, forensic report, APT library, MITRE matrix, threat feeds, reports, and settings views.
+- Docker Compose stack for backend, frontend, Neo4j, Weaviate, Elasticsearch, and Redis.
+- Windows and Linux helper scripts for Docker and hybrid local runs.
+- Regression tests for parser behavior, graph scoping/export, and natural-language query safety guards.
 
-Partially implemented / future work:
+Not implemented or only partially implemented:
 
-- Elasticsearch and Redis are provisioned but not yet central to the runtime pipeline.
-- MISP/OpenCTI enrichment is represented in the UI/docs as planned work, not active ingestion.
-- Full case management workflows (compare/reopen/delete/rerun) are still evolving.
+- The current frontend does not call the backend API. It is a high-fidelity demo console, not a live case UI.
+- MISP, OpenCTI, CISA KEV, and threat-feed syncing are represented in the UI demo only. There are no active external feed connectors in the backend.
+- Elasticsearch can be queried as an investigation source, but RAPTOR does not continuously ingest from Elasticsearch.
+- Redis is provisioned and health-checked, but it is not currently used as a queue, cache, or pub/sub layer.
+- There is no authentication, authorization, RBAC, audit logging, or multi-user case workflow.
+- SQLite is used for MVP job state. It is not a production-grade shared case database.
+- There is no persistent uploaded-file evidence store beyond the normalized results saved in SQLite.
+- The Docker credentials and open service defaults are suitable for local development only.
 
-## Ports
+## Architecture
 
-| Service | URL |
+```text
+Analyst / API client
+        |
+        | upload logs, paste logs, or submit Elasticsearch query
+        v
+FastAPI backend
+        |
+        | parse and normalize
+        v
+RaptorEvent schema
+        |
+        | Sigma-style ATT&CK matching
+        v
+Analysis pipeline
+        |
+        | optional retrieval from Weaviate
+        | optional OpenRouter LLM reasoning
+        | deterministic fallback when unavailable
+        v
+Validated findings
+        |
+        | STIX validation, attribution scoring, graph building, report generation
+        v
+SQLite job state + optional Neo4j graph
+        |
+        v
+API responses for status, report, graph, simulation, and query
+```
+
+The React console is served separately and currently uses local demo data:
+
+```text
+React/Vite frontend
+        |
+        v
+frontend/src/data/raptorDemo.js
+        |
+        v
+Standalone SOC dashboard experience
+```
+
+## Tech Stack
+
+| Area | Technology |
 |---|---|
-| Frontend console | http://localhost:3100 |
-| API docs | http://localhost:8000/docs |
-| API health | http://localhost:8000/api/v1/health |
-| Neo4j browser | http://localhost:7474 |
-| Weaviate | http://localhost:8080 |
-| Elasticsearch | http://localhost:9200 |
+| Backend API | FastAPI, Pydantic, Uvicorn |
+| Job state | SQLite |
+| Graph database | Neo4j 5 community |
+| Vector database | Weaviate 1.27 |
+| Search source | Elasticsearch 8 single-node |
+| Runtime service | Redis 7, currently health/provisioning only |
+| LLM client | OpenAI SDK against OpenRouter-compatible API |
+| Embeddings | `BAAI/bge-large-en-v1.5` through `sentence-transformers` |
+| Reranking | BGE cross-encoder reranker with score fallback |
+| Threat framework | MITRE Enterprise ATT&CK STIX |
+| Frontend | React 18, Vite 5, Tailwind CSS, lucide-react |
+| Frontend serving | Vite in development, Nginx in Docker |
+| Deployment | Docker Compose plus optional local hybrid scripts |
 
-## Quick Start: Docker
+## Repository Layout
+
+```text
+.
+|-- backend/
+|   |-- main.py                    # FastAPI app and investigation orchestration
+|   |-- config.py                  # Environment configuration and LLM prompts
+|   |-- models.py                  # API request/response models
+|   |-- schema.py                  # Core RAPTOR data models
+|   |-- ingestion/                 # Log parsing, normalization, Sigma matching
+|   |-- rag/                       # Retrieval, indexing, embeddings, reranking, LLM analysis
+|   |-- attribution/               # STIX profile loading, Jaccard scoring, confidence logic
+|   |-- graph/                     # Neo4j client, graph builder, provenance helpers
+|   |-- nlq/                       # Natural-language query routing and Cypher safeguards
+|   |-- simulation/                # Next-step prediction
+|   |-- report/                    # Analyst report generation
+|   `-- tests/                     # Regression tests
+|-- data/
+|   |-- mock/                      # Example investigation logs
+|   `-- stix/                      # Cached MITRE Enterprise ATT&CK bundle
+|-- frontend/
+|   |-- src/components/Dashboard.jsx
+|   |-- src/data/raptorDemo.js     # Current frontend demo data source
+|   |-- src/index.css              # Dark SOC console design system
+|   |-- vite.config.js
+|   |-- nginx.conf
+|   `-- Dockerfile
+|-- scripts/
+|   |-- docker/                    # Full Docker launch helpers
+|   `-- hybrid/                    # Docker infrastructure plus local app helpers
+|-- docker-compose.yml
+|-- .env.example
+`-- README.md
+```
+
+## Runtime Services
+
+| Service | Default URL | Purpose |
+|---|---|---|
+| Frontend console | `http://localhost:3100` | React SOC dashboard demo |
+| Backend API docs | `http://localhost:8000/docs` | Interactive OpenAPI documentation |
+| Backend health | `http://localhost:8000/api/v1/health` | High-level service health |
+| Detailed health | `http://localhost:8000/api/v1/health/detailed` | Subsystem health |
+| Neo4j browser | `http://localhost:7474` | Graph database UI |
+| Neo4j Bolt | `bolt://localhost:7687` | Backend graph connection |
+| Weaviate HTTP | `http://localhost:8080` | Vector database |
+| Weaviate gRPC | `localhost:50051` | Weaviate v4 client transport |
+| Elasticsearch | `http://localhost:9200` | Optional investigation source |
+| Redis | `localhost:6379` | Provisioned service, health checked |
+
+## Quick Start With Docker
+
+Prerequisites:
+
+- Docker Desktop or Docker Engine with Compose support.
+- Enough disk and memory for Neo4j, Weaviate, Elasticsearch, Redis, backend, and frontend containers.
+- Optional OpenRouter API key for LLM-powered reasoning. Without a key, investigations can still complete through deterministic fallback logic.
 
 1. Copy the environment template.
 
@@ -48,7 +174,13 @@ Partially implemented / future work:
 cp .env.example .env
 ```
 
-2. Edit `.env` and add `OPENROUTER_API_KEY` if you want LLM-powered reports and reasoning. Without a working key, RAPTOR still completes investigations using local Sigma fallback analysis.
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+2. Edit `.env` and set `OPENROUTER_API_KEY` if you want live LLM calls.
 
 3. Start the stack.
 
@@ -56,26 +188,60 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-4. Open the console.
+4. Open the frontend and API docs.
 
 ```text
-http://localhost:3100
+Frontend: http://localhost:3100
+API docs: http://localhost:8000/docs
 ```
 
-The Docker frontend uses Nginx and proxies `/api/*` to the backend service, so the React app can keep using relative API paths.
+5. Check backend health.
 
-## Quick Start: Hybrid Local
+```bash
+curl http://localhost:8000/api/v1/health/detailed
+```
 
-Run infrastructure in Docker, backend and frontend locally.
+Helper scripts are also available:
+
+```powershell
+.\scripts\docker\install_windows.ps1
+```
+
+```bash
+bash scripts/docker/install_linux.sh
+```
+
+## Hybrid Local Development
+
+Hybrid mode runs the infrastructure in Docker while running backend and frontend directly on the host.
+
+1. Start infrastructure.
 
 ```bash
 docker compose up -d neo4j weaviate elasticsearch redis
+```
+
+2. Start the backend.
+
+```bash
 cd backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-In another terminal:
+On Windows PowerShell:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+3. Start the frontend.
 
 ```bash
 cd frontend
@@ -83,117 +249,277 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3100`.
+4. Open `http://localhost:3100`.
 
-## API
+Hybrid helper scripts are available:
 
-Base URL: `http://localhost:8000/api/v1`
+```powershell
+.\scripts\hybrid\install_windows.ps1
+```
+
+```bash
+bash scripts/hybrid/install_linux.sh
+```
+
+## Backend Pipeline
+
+The main orchestration lives in `backend/main.py`.
+
+1. The API receives uploaded logs, pasted logs, or Elasticsearch results.
+2. `LogParser` parses JSON, XML Windows events, CEF, or generic text into raw dictionaries.
+3. `LogNormalizer` converts parsed dictionaries into `RaptorEvent` models.
+4. `SigmaMatcher` enriches events with local ATT&CK technique matches and IoC scores.
+5. The RAG pipeline builds retrieval queries from events and Sigma matches.
+6. `HybridRetriever` searches Weaviate `Technique` and `ThreatReport` collections when available.
+7. Reranking reduces retrieved context before the LLM prompt is assembled.
+8. OpenRouter LLM analysis produces structured findings when configured and reachable.
+9. If the LLM path fails, deterministic Sigma fallback findings are generated.
+10. Findings are validated against MITRE ATT&CK STIX.
+11. `GraphBuilder` writes investigation-scoped nodes and edges to Neo4j when available.
+12. If Neo4j is down, the backend still returns an in-memory graph export.
+13. APT attribution is scored from observed TTP overlap against STIX-derived APT profiles.
+14. The report generator creates a markdown analyst report, with deterministic fallback.
+15. SQLite stores status, findings, attack sequence, attribution, graph JSON, and report markdown.
+
+## Backend API
+
+Base URL:
+
+```text
+http://localhost:8000/api/v1
+```
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/investigate` | Upload a log file and start analysis. |
-| `GET` | `/investigations` | List recent investigations and statuses. |
-| `GET` | `/investigate/{id}/status` | Poll job status and progress. |
-| `GET` | `/investigate/{id}/report` | Fetch findings, attribution, sequence, and report markdown. |
-| `GET` | `/investigate/{id}/graph` | Fetch Sigma.js-compatible graph JSON. |
-| `POST` | `/simulate` | Predict likely next steps for the top attributed actor (requires MEDIUM/HIGH confidence). |
-| `POST` | `/query` | Ask natural language questions for a completed investigation (read-only scoped Cypher). |
-| `GET` | `/apt/profiles` | List APT profiles loaded from the cached STIX bundle. |
-| `GET` | `/health` | Health check. |
-| `GET` | `/health/detailed` | Detailed subsystem health (API, SQLite, Neo4j, Weaviate, LLM config). |
+| `POST` | `/investigate` | Upload a log file and start a background investigation. |
+| `POST` | `/investigate/text` | Start an investigation from pasted logs or an Elasticsearch query. |
+| `GET` | `/investigations` | List recent investigation jobs from SQLite. |
+| `GET` | `/investigate/{id}/status` | Poll job progress and current phase. |
+| `GET` | `/investigate/{id}/report` | Fetch findings, sequence, anomalies, attribution, and report markdown. |
+| `GET` | `/investigate/{id}/graph` | Fetch graph JSON suitable for graph renderers. |
+| `POST` | `/simulate` | Predict likely next steps for the selected or top attributed APT. |
+| `POST` | `/query` | Ask a natural-language question for a completed investigation. |
+| `GET` | `/apt/profiles` | List STIX-derived APT profiles and mapped technique counts. |
+| `GET` | `/health` | High-level service health. |
+| `GET` | `/health/detailed` | Detailed subsystem health. |
 
-Example:
+### Upload A Log File
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/investigate \
   -F "file=@data/mock/apt29_campaign.json"
 ```
 
-## Frontend
+Example response:
 
-The React console is implemented in `frontend/src/components/Dashboard.jsx` and follows the standalone UI reference as a normal Vite application. Static analyst-demo intelligence lives in `frontend/src/data/raptorDemo.js` so the UI can render fully without requiring backend seed data:
+```json
+{
+  "investigation_id": "2f6d4a6b-bc9f-49e7-9c61-5d6d5e4a44d8",
+  "status": "queued",
+  "message": "Investigation started. 12345 bytes of logs received."
+}
+```
 
-- Persistent left navigation.
-- Top operations bar with subsystem status.
-- Dense stat cards and investigation summary panels.
-- Investigation tabs for attack graph, attribution, simulation, query, and forensic report.
-- APT profile library.
-- MITRE ATT&CK matrix view based on observed findings.
-- Threat-feed/status workspace.
+### Start From Pasted Logs
 
-For local Vite development, `/api` is proxied to `http://127.0.0.1:8000`. For Docker, Nginx proxies `/api` to the backend container.
+```bash
+curl -X POST http://localhost:8000/api/v1/investigate/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "paste",
+    "log_content": "[{\"timestamp\":\"2026-04-25T10:00:00Z\",\"host\":\"WKSTN-01\",\"event_type\":\"process\",\"raw\":\"powershell.exe -enc SQBFAFgA\"}]"
+  }'
+```
 
-## Backend Pipeline
+### Start From Elasticsearch
 
-The main orchestration is in `backend/main.py`.
+```bash
+curl -X POST http://localhost:8000/api/v1/investigate/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "elasticsearch",
+    "elastic_query": "powershell OR mimikatz",
+    "time_range_start": "now-24h",
+    "time_range_end": "now"
+  }'
+```
 
-Pipeline stages:
+The backend searches indices matching `raptor-*` by default.
 
-1. Parse and normalize uploaded logs.
-2. Match local Sigma-style detection signatures.
-3. Retrieve RAG context when Weaviate is available.
-4. Call the LLM through OpenRouter.
-5. Fall back to local Sigma findings if the LLM fails or returns empty findings.
-6. Validate technique IDs against MITRE ATT&CK STIX.
-7. Build Neo4j graph or in-memory graph export.
-8. Score APT attribution.
-9. Generate LLM report or deterministic fallback report.
+### Poll Status
+
+```bash
+curl http://localhost:8000/api/v1/investigate/<investigation_id>/status
+```
+
+### Fetch Report
+
+```bash
+curl http://localhost:8000/api/v1/investigate/<investigation_id>/report
+```
+
+### Fetch Graph
+
+```bash
+curl http://localhost:8000/api/v1/investigate/<investigation_id>/graph
+```
+
+### Run Simulation
+
+```bash
+curl -X POST http://localhost:8000/api/v1/simulate \
+  -H "Content-Type: application/json" \
+  -d '{"investigation_id":"<investigation_id>"}'
+```
+
+Simulation is intentionally blocked when attribution confidence is `LOW` or `UNKNOWN`.
+
+### Ask A Natural-Language Question
+
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "investigation_id": "<investigation_id>",
+    "question": "Which compromised hosts laterally moved toward the domain controller?"
+  }'
+```
+
+Graph questions are restricted to read-only, investigation-scoped Cypher. RAG and simulation-style questions use retrieval context when available.
+
+## Frontend Console
+
+The frontend lives in `frontend/src/components/Dashboard.jsx` with styling in `frontend/src/index.css`.
+
+Current frontend capabilities:
+
+- Fixed full-viewport analyst shell with sidebar, top header, global search, status indicators, and toast messages.
+- Mission dashboard with KPI cards, recent investigations, live alert feed, kill-chain coverage, and mini attack map.
+- Investigation list with filters and a local "new investigation" composer.
+- Investigation detail workspace with tabs for attack graph, APT attribution, simulation, intelligence query, and forensic report.
+- Interactive demo attack graph with selectable nodes and side-panel details.
+- APT attribution view with confidence ranking, score breakdown, and false-flag advisory.
+- Simulation view with predicted next adversary actions, likely tools, rationale, and detection guidance.
+- Local intelligence query demo with canned analyst responses.
+- Forensic report view with kill-chain coverage, TTP timeline, and evidence sidebar.
+- APT library cards with region filtering and actor detail modal.
+- MITRE ATT&CK matrix heat-map style view.
+- Threat feed rows with local sync status updates.
+- Report archive with local preview/download actions.
+- Settings panel with toggles, model selectors, and retrieval parameters.
+
+Important frontend limitation:
+
+The UI currently reads from `frontend/src/data/raptorDemo.js`. It is a complete UI/UX implementation and demo shell, but it is not yet connected to the backend endpoints for real investigations. The Vite and Nginx `/api` proxy configuration is in place for future integration.
 
 ## Configuration
 
-Copy `.env.example` to `.env`.
+Copy `.env.example` to `.env` before running Docker or the backend locally.
 
-Important variables:
-
-| Variable | Default | Notes |
+| Variable | Default | Purpose |
 |---|---|---|
-| `OPENROUTER_API_KEY` | empty | Required for LLM calls. Fallback analysis works without it. |
-| `LLM_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Primary OpenRouter model. |
-| `LLM_FALLBACK_MODEL` | `qwen/qwen3-coder:free` | Fallback OpenRouter model. |
-| `LLM_TIMEOUT_SECONDS` | `30` | Hard timeout for OpenRouter requests. |
-| `NEO4J_URI` | `bolt://localhost:7687` | Use `bolt://neo4j:7687` inside Docker. |
-| `WEAVIATE_URL` | `http://localhost:8080` | Use `http://weaviate:8080` inside Docker. |
-| `RAG_AUTO_INDEX` | `true` | Runs one-time Weaviate bootstrap indexing when required collections are missing. |
-| `RAPTOR_ALLOW_TEST_EMBEDDINGS` | `false` | Enables deterministic test embeddings when `sentence-transformers` is unavailable (non-production only). |
-| `API_PORT` | `8000` | Backend API port. |
-| `FRONTEND_PORT` | `3100` | Frontend console port. |
-| `MAX_UPLOAD_BYTES` | `10485760` | Upload size limit enforced by `/investigate`. |
-| `CORS_ALLOW_ORIGINS` | `http://localhost:3100,http://127.0.0.1:3100` | Allowed browser origins. |
+| `OPENROUTER_API_KEY` | empty | Enables live LLM calls. Fallback analysis works without it. |
+| `OPENROUTER_BASE_URL` | configured in `backend/config.py` | OpenRouter-compatible API base URL. |
+| `LLM_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Primary model for analysis and generation. |
+| `LLM_FALLBACK_MODEL` | `qwen/qwen3-coder:free` | Secondary model if the primary call fails. |
+| `LLM_TIMEOUT_SECONDS` | `30` | Timeout for LLM requests. |
+| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt connection string. |
+| `NEO4J_USER` | `neo4j` | Neo4j username. |
+| `NEO4J_PASSWORD` | `raptor_secret_2024` | Local development password. Change for real deployments. |
+| `WEAVIATE_URL` | `http://localhost:8080` | Weaviate HTTP endpoint. |
+| `WEAVIATE_GRPC_URL` | `localhost:50051` | Weaviate gRPC endpoint. |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch endpoint for optional query-based investigations. |
+| `REDIS_URL` | `redis://localhost:6379` | Redis health-check endpoint. |
+| `API_HOST` | `0.0.0.0` | Backend bind host. |
+| `API_PORT` | `8000` | Backend port. |
+| `FRONTEND_PORT` | `3100` | Frontend port. |
+| `MAX_UPLOAD_BYTES` | `10485760` | Maximum upload or pasted input size. |
+| `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
+| `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
+| `RAG_AUTO_INDEX` | `true` | Attempts one-time Weaviate indexing if required collections are missing. |
+| `RAPTOR_ALLOW_TEST_EMBEDDINGS` | `false` | Enables deterministic non-semantic embeddings for test-only fallback. |
+
+Docker Compose overrides service URLs inside the backend container so it can reach `neo4j`, `weaviate`, `elasticsearch`, and `redis` by service name.
 
 ## Data
 
-Mock logs:
+Included mock investigations:
 
 - `data/mock/apt29_campaign.json`
 - `data/mock/hafnium_exchange.json`
 
-Cached STIX bundle:
+Included or generated knowledge data:
 
 - `data/stix/enterprise-attack.json`
 
-The number of APT profiles depends on the cached STIX bundle. The current local bundle loads 164 intrusion-set profiles with at least two mapped techniques.
+If the STIX bundle is missing, the backend can download the MITRE Enterprise ATT&CK bundle during profile loading or indexing.
 
-## Verification
+Runtime state:
 
-Useful checks:
+- `backend/raptor.db` is created locally by the backend and stores investigation job state and results.
+- Docker named volumes store Neo4j, Weaviate, Elasticsearch, and Redis data.
+
+Treat runtime databases and uploaded logs as sensitive investigation artifacts.
+
+## Testing And Verification
+
+Backend regression tests:
 
 ```bash
-cd frontend
-npm run build
+python -m unittest discover -s backend/tests
 ```
+
+Backend syntax check:
 
 ```bash
 python -m compileall -q backend
 ```
 
+Frontend build:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Docker Compose validation:
+
 ```bash
 docker compose config --quiet
+```
+
+Health check after startup:
+
+```bash
+curl http://localhost:8000/api/v1/health/detailed
 ```
 
 ## Security Notes
 
 - Do not commit `.env`; it may contain API keys.
-- Restrict `CORS_ALLOW_ORIGINS` and credentials policy appropriately before production deployment.
-- Neo4j and Weaviate use development-friendly defaults in `docker-compose.yml`.
-- Uploaded logs can contain sensitive data. Treat `backend/raptor.db` and generated logs as sensitive artifacts.
-- The graph NLQ path enforces read-only query patterns and investigation scoping, but should still be monitored in production.
+- Replace default Neo4j credentials before using the stack beyond local development.
+- Restrict exposed Docker ports in shared environments.
+- Tighten `CORS_ALLOW_ORIGINS` for any non-local deployment.
+- The backend does not currently provide authentication or authorization.
+- The graph natural-language query path enforces read-only patterns and investigation scoping, but production deployments should still monitor and restrict generated-query behavior.
+- LLM output is validated and has fallbacks, but attribution and simulation should be treated as analyst-supporting evidence, not automatic truth.
+- Uploaded telemetry can contain credentials, hostnames, usernames, IP addresses, file paths, and other sensitive data.
+
+## Roadmap
+
+Likely next engineering steps:
+
+- Connect the React console to the live backend API for real investigation creation, polling, reports, graphs, simulation, and query.
+- Add authentication, user roles, audit logging, and case ownership.
+- Replace SQLite job state with a production database for multi-user deployments.
+- Add real threat-feed connectors for MISP, OpenCTI, CISA KEV, or other sources.
+- Add a durable evidence store for uploaded files and extracted artifacts.
+- Add queued background workers instead of FastAPI in-process background tasks.
+- Add report export to PDF or DOCX.
+- Add frontend tests and API integration tests.
+- Add deployment hardening for credentials, TLS, CORS, and service exposure.
+
+## License
+
+No license file is currently included in this repository. Treat the code as private unless a license is added.
