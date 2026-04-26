@@ -4,10 +4,10 @@ Retrieval-Augmented Persistent Threat Orchestration and Reasoning
 
 RAPTOR is an MVP cybersecurity investigation platform for turning security telemetry into ATT&CK-mapped findings, attack graphs, attribution candidates, analyst reports, and next-step adversary predictions. It combines a FastAPI backend, local Sigma-style detections, MITRE ATT&CK STIX data, optional RAG over Weaviate, Neo4j graph persistence, OpenRouter-compatible LLM calls, and a React/Vite SOC console.
 
-This repository is best understood as two pieces:
+This repository is now wired as one live application:
 
-- A working backend investigation API that can ingest logs, run the analysis pipeline, persist job state in SQLite, and expose reports, graphs, attribution, simulation, and natural-language query endpoints.
-- A polished standalone frontend console that demonstrates the intended analyst experience using deterministic demo data from `frontend/src/data/raptorDemo.js`. The frontend currently has API proxies configured, but it does not fetch live backend investigation data yet.
+- The backend investigation API ingests logs, runs the analysis pipeline, persists job state in SQLite, and exposes reports, graphs, attribution, simulation, APT profiles, health, and natural-language query endpoints.
+- The React console calls the backend through `frontend/src/api/raptorApi.js`. The investigation queue, new-ingestion workflow, report preview/download, graph view, attribution view, simulation, intelligence query, APT library, MITRE view, and subsystem health screens are API-backed rather than fabricated local data.
 
 ## Current Status
 
@@ -33,15 +33,15 @@ Implemented today:
 - Natural-language query endpoint that routes questions to graph, RAG, or simulation-style handlers.
 - Markdown analyst report generation with deterministic fallback.
 - Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, and LLM configuration.
-- React SOC console with dashboard, investigations, attack graph, attribution, simulation, intelligence query, forensic report, APT library, MITRE matrix, threat feeds, reports, and settings views.
+- React SOC console backed by the API for investigation creation, polling, reports, graphs, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
+- Investigation metadata in the backend list API, including case name, source, upload size, host count, top candidate, confidence score, and confidence label.
 - Docker Compose stack for backend, frontend, Neo4j, Weaviate, Elasticsearch, and Redis.
 - Windows and Linux helper scripts for Docker and hybrid local runs.
 - Regression tests for parser behavior, graph scoping/export, and natural-language query safety guards.
 
 Not implemented or only partially implemented:
 
-- The current frontend does not call the backend API. It is a high-fidelity demo console, not a live case UI.
-- MISP, OpenCTI, CISA KEV, and threat-feed syncing are represented in the UI demo only. There are no active external feed connectors in the backend.
+- MISP, OpenCTI, CISA KEV, and threat-feed syncing are not active backend connectors. The former feed mockup was replaced with real subsystem health.
 - Elasticsearch can be queried as an investigation source, but RAPTOR does not continuously ingest from Elasticsearch.
 - Redis is provisioned and health-checked, but it is not currently used as a queue, cache, or pub/sub layer.
 - There is no authentication, authorization, RBAC, audit logging, or multi-user case workflow.
@@ -80,16 +80,14 @@ SQLite job state + optional Neo4j graph
 API responses for status, report, graph, simulation, and query
 ```
 
-The React console is served separately and currently uses local demo data:
+The React console is served separately and calls the backend API:
 
 ```text
 React/Vite frontend
         |
+        | /api/v1 via Vite proxy or Nginx proxy
         v
-frontend/src/data/raptorDemo.js
-        |
-        v
-Standalone SOC dashboard experience
+FastAPI backend
 ```
 
 ## Tech Stack
@@ -131,8 +129,8 @@ Standalone SOC dashboard experience
 |   |-- mock/                      # Example investigation logs
 |   `-- stix/                      # Cached MITRE Enterprise ATT&CK bundle
 |-- frontend/
+|   |-- src/api/raptorApi.js       # Frontend API client
 |   |-- src/components/Dashboard.jsx
-|   |-- src/data/raptorDemo.js     # Current frontend demo data source
 |   |-- src/index.css              # Dark SOC console design system
 |   |-- vite.config.js
 |   |-- nginx.conf
@@ -149,7 +147,7 @@ Standalone SOC dashboard experience
 
 | Service | Default URL | Purpose |
 |---|---|---|
-| Frontend console | `http://localhost:3100` | React SOC dashboard demo |
+| Frontend console | `http://localhost:3100` | React SOC dashboard |
 | Backend API docs | `http://localhost:8000/docs` | Interactive OpenAPI documentation |
 | Backend health | `http://localhost:8000/api/v1/health` | High-level service health |
 | Detailed health | `http://localhost:8000/api/v1/health/detailed` | Subsystem health |
@@ -389,28 +387,26 @@ Graph questions are restricted to read-only, investigation-scoped Cypher. RAG an
 
 ## Frontend Console
 
-The frontend lives in `frontend/src/components/Dashboard.jsx` with styling in `frontend/src/index.css`.
+The frontend lives in `frontend/src/components/Dashboard.jsx`, calls the API through `frontend/src/api/raptorApi.js`, and uses styling from `frontend/src/index.css`.
 
 Current frontend capabilities:
 
 - Fixed full-viewport analyst shell with sidebar, top header, global search, status indicators, and toast messages.
-- Mission dashboard with KPI cards, recent investigations, live alert feed, kill-chain coverage, and mini attack map.
-- Investigation list with filters and a local "new investigation" composer.
+- Mission dashboard with KPI cards, recent backend investigations, operational feed, kill-chain coverage, and live graph preview.
+- Investigation list with filters and a real new-investigation composer for file upload, pasted logs, and Elasticsearch queries.
 - Investigation detail workspace with tabs for attack graph, APT attribution, simulation, intelligence query, and forensic report.
-- Interactive demo attack graph with selectable nodes and side-panel details.
-- APT attribution view with confidence ranking, score breakdown, and false-flag advisory.
-- Simulation view with predicted next adversary actions, likely tools, rationale, and detection guidance.
-- Local intelligence query demo with canned analyst responses.
-- Forensic report view with kill-chain coverage, TTP timeline, and evidence sidebar.
-- APT library cards with region filtering and actor detail modal.
-- MITRE ATT&CK matrix heat-map style view.
-- Threat feed rows with local sync status updates.
-- Report archive with local preview/download actions.
-- Settings panel with toggles, model selectors, and retrieval parameters.
+- Interactive backend attack graph with selectable nodes and side-panel metadata.
+- APT attribution view rendered from `GET /api/v1/investigate/{id}/report`.
+- Simulation view that calls `POST /api/v1/simulate` and displays API errors when attribution confidence is too low.
+- Intelligence query chat that calls `POST /api/v1/query`; there are no canned assistant responses.
+- Forensic report view rendered from backend findings and narrative report markdown.
+- APT library cards loaded from `GET /api/v1/apt/profiles`.
+- MITRE ATT&CK matrix populated from selected investigation findings.
+- Subsystem health page rendered from `GET /api/v1/health/detailed`.
+- Report archive based on completed backend investigations with markdown download from the report API response.
+- Settings page showing runtime API base and backend subsystem status.
 
-Important frontend limitation:
-
-The UI currently reads from `frontend/src/data/raptorDemo.js`. It is a complete UI/UX implementation and demo shell, but it is not yet connected to the backend endpoints for real investigations. The Vite and Nginx `/api` proxy configuration is in place for future integration.
+The UI intentionally shows empty, loading, degraded, and error states when backend data or connectors are unavailable. It no longer imports or renders fabricated investigation data.
 
 ## Configuration
 
@@ -433,6 +429,7 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `API_HOST` | `0.0.0.0` | Backend bind host. |
 | `API_PORT` | `8000` | Backend port. |
 | `FRONTEND_PORT` | `3100` | Frontend port. |
+| `VITE_API_BASE_URL` | `/api/v1` | Optional frontend API base override for local or remote deployments. |
 | `MAX_UPLOAD_BYTES` | `10485760` | Maximum upload or pasted input size. |
 | `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
 | `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
@@ -510,7 +507,7 @@ curl http://localhost:8000/api/v1/health/detailed
 
 Likely next engineering steps:
 
-- Connect the React console to the live backend API for real investigation creation, polling, reports, graphs, simulation, and query.
+- Add end-to-end browser tests for the live API-backed console.
 - Add authentication, user roles, audit logging, and case ownership.
 - Replace SQLite job state with a production database for multi-user deployments.
 - Add real threat-feed connectors for MISP, OpenCTI, CISA KEV, or other sources.
