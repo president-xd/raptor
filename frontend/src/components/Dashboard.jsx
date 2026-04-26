@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
   Archive,
+  ArrowRight,
   BarChart3,
   Bell,
   BookOpen,
@@ -10,40 +11,58 @@ import {
   ChevronRight,
   CircleDot,
   Clock,
+  Cpu,
   Database,
   Download,
+  ExternalLink,
+  Eye,
+  FileDown,
   FileText,
   Gauge,
+  Globe,
   Home,
   Layers3,
   Library,
-  Loader2,
+  Lock,
   MessageSquare,
   Network,
   Play,
+  Plus,
+  RadioTower,
+  RefreshCcw,
   Search,
+  Send,
+  Server,
   Settings,
   Shield,
   ShieldAlert,
   SlidersHorizontal,
+  Target,
   UploadCloud,
+  Users,
   X,
   Zap,
 } from 'lucide-react';
-import { aptAPI, healthAPI, investigateAPI, simulateAPI } from '../api';
-import FileUpload from './FileUpload';
-import AttackGraph from './AttackGraph';
-import Timeline from './Timeline';
-import ReportView from './ReportView';
-import Attribution from './Attribution';
-import QueryBar from './QueryBar';
-import NodeDetail from './NodeDetail';
-import Simulation from './Simulation';
+import {
+  aptAttribution,
+  aptLibrary,
+  forensicEvents,
+  graphEdges,
+  graphNodes,
+  investigations as initialInvestigations,
+  killChainCoverage,
+  liveAlerts,
+  mitreMatrix,
+  pipelineServices,
+  reports as reportArchive,
+  simulationPredictions,
+  threatFeeds,
+  timelineStages,
+} from '../data/raptorDemo';
 
-const LAST_INVESTIGATION_KEY = 'raptor:lastInvestigationId';
-
-const NAV_SECTIONS = [
+const navGroups = [
   {
+    label: 'Operations',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: Home },
       { id: 'investigations', label: 'Investigations', icon: Archive, badge: 'live' },
@@ -53,15 +72,15 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    section: 'Threat Intel',
+    label: 'Threat Intel',
     items: [
-      { id: 'threat-feeds', label: 'Threat Feeds', icon: Database, dot: 'green' },
+      { id: 'threat-feeds', label: 'Threat Feeds', icon: Database, pulse: true },
       { id: 'simulation', label: 'Simulation', icon: Play },
-      { id: 'mitre-navigator', label: 'MITRE ATT&CK', icon: Layers3 },
+      { id: 'mitre', label: 'MITRE ATT&CK', icon: Layers3 },
     ],
   },
   {
-    section: 'System',
+    label: 'System',
     items: [
       { id: 'reports', label: 'Reports', icon: FileText },
       { id: 'settings', label: 'Settings', icon: Settings },
@@ -69,363 +88,138 @@ const NAV_SECTIONS = [
   },
 ];
 
-const PHASES = [
-  'initial-access',
-  'execution',
-  'persistence',
-  'privilege-esc',
-  'defense-evasion',
-  'credential-access',
-  'discovery',
-  'lateral-movement',
-  'collection',
-  'c2',
-  'exfiltration',
-  'impact',
-];
-
-const INVESTIGATION_TABS = [
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'report', label: 'Forensic Report' },
-  { id: 'graph', label: 'Attack Graph' },
-  { id: 'attribution', label: 'APT Attribution' },
-  { id: 'simulation', label: 'Simulation' },
-  { id: 'query', label: 'Query' },
-];
-
-const REPORT_EXPORT_HEALTH = {
-  status: 'healthy',
-  detail: 'Browser Markdown/PDF export available',
+const pageTitles = {
+  dashboard: 'Mission Dashboard',
+  investigations: 'Investigations',
+  'attack-graph': 'Investigation Detail',
+  'apt-library': 'APT Library',
+  query: 'Intelligence Query',
+  'threat-feeds': 'Threat Feeds',
+  simulation: 'Simulation',
+  mitre: 'MITRE ATT&CK Matrix',
+  reports: 'Reports',
+  settings: 'Settings',
 };
+
+const detailTabs = [
+  { id: 'graph', label: 'Attack Graph', icon: Network },
+  { id: 'attribution', label: 'APT Attribution', icon: Target },
+  { id: 'simulation', label: 'Simulation', icon: Zap },
+  { id: 'query', label: 'Intelligence Query', icon: MessageSquare },
+  { id: 'report', label: 'Forensic Report', icon: FileText },
+];
 
 export default function Dashboard() {
   const [activePage, setActivePage] = useState('dashboard');
-  const [detailTab, setDetailTab] = useState('timeline');
-  const [investigationId, setInvestigationId] = useState(() => localStorage.getItem(LAST_INVESTIGATION_KEY));
-  const [status, setStatus] = useState(null);
-  const [report, setReport] = useState(null);
-  const [graphData, setGraphData] = useState(null);
-  const [simulation, setSimulation] = useState(null);
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [polling, setPolling] = useState(Boolean(investigationId));
-  const [simLoading, setSimLoading] = useState(false);
-  const [simError, setSimError] = useState('');
-  const [aptProfiles, setAptProfiles] = useState([]);
-  const [profilesLoading, setProfilesLoading] = useState(false);
-  const [investigations, setInvestigations] = useState([]);
-  const [apiHealth, setApiHealth] = useState('checking');
-  const [healthSubsystems, setHealthSubsystems] = useState({});
-  const [healthCheckedAt, setHealthCheckedAt] = useState('');
+  const [detailTab, setDetailTab] = useState('graph');
+  const [selectedInvestigationId, setSelectedInvestigationId] = useState(initialInvestigations[0].id);
+  const [investigations, setInvestigations] = useState(initialInvestigations);
+  const [search, setSearch] = useState('');
+  const [toast, setToast] = useState('');
 
-  const isComplete = status?.status === 'complete';
-  const isProcessing = status && status.status !== 'complete' && status.status !== 'failed';
-  const isFailed = status?.status === 'failed';
+  const selectedInvestigation = useMemo(
+    () => investigations.find((item) => item.id === selectedInvestigationId) || investigations[0],
+    [investigations, selectedInvestigationId]
+  );
 
-  const displayHealthSubsystems = useMemo(() => ({
-    ...healthSubsystems,
-    report_export: REPORT_EXPORT_HEALTH,
-  }), [healthSubsystems]);
-  const metrics = useMemo(() => buildMetrics(report, graphData, status), [report, graphData, status]);
-  const topAttribution = report?.attribution?.[0] || null;
-  const highRiskFindings = useMemo(() => {
-    return (report?.findings || []).filter((finding) => finding.confidence === 'high').slice(0, 5);
-  }, [report]);
-  const canRunSimulation = ['HIGH', 'MEDIUM'].includes((topAttribution?.confidence_label || '').toUpperCase());
-
-  const loadInvestigations = async () => {
-    try {
-      const resp = await investigateAPI.list(25);
-      setInvestigations(resp.data.investigations || []);
-    } catch (err) {
-      console.error('Investigation list load failed:', err);
-    }
+  const openInvestigation = (id, tab = 'graph') => {
+    setSelectedInvestigationId(id);
+    setDetailTab(tab);
+    setActivePage('attack-graph');
   };
 
-  const refreshHealth = async () => {
-    try {
-      const resp = await healthAPI.checkDetailed();
-      setApiHealth(resp?.data?.status || 'healthy');
-      setHealthSubsystems(resp?.data?.subsystems || {});
-      setHealthCheckedAt(new Date().toLocaleString());
-    } catch {
-      setApiHealth('offline');
-      setHealthSubsystems({});
-      setHealthCheckedAt(new Date().toLocaleString());
-    }
+  const showToast = (message) => {
+    setToast(message);
+    window.clearTimeout(showToast.timer);
+    showToast.timer = window.setTimeout(() => setToast(''), 2200);
   };
 
-  useEffect(() => {
-    refreshHealth();
-    loadInvestigations();
-  }, []);
-
-  useEffect(() => {
-    if (!investigationId) return;
-    localStorage.setItem(LAST_INVESTIGATION_KEY, investigationId);
-
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const statusResp = await investigateAPI.getStatus(investigationId);
-        if (cancelled) return;
-        setStatus(statusResp.data);
-        if (statusResp.data.status === 'complete') {
-          const [reportResp, graphResp] = await Promise.all([
-            investigateAPI.getReport(investigationId),
-            investigateAPI.getGraph(investigationId),
-          ]);
-          if (!cancelled) {
-            setReport(reportResp.data);
-            setGraphData(graphResp.data);
-            setPolling(false);
-            loadInvestigations();
-          }
-        } else if (statusResp.data.status === 'failed') {
-          setPolling(false);
-          loadInvestigations();
-        }
-      } catch {
-        if (!cancelled) {
-          setStatus(null);
-          setPolling(false);
-        }
-      }
+  const addInvestigation = (name) => {
+    const next = {
+      id: `INV-2026-0426-${String(investigations.length + 1).padStart(3, '0')}`,
+      name: name || 'New Uploaded Investigation',
+      severity: 'Medium',
+      candidate: 'Pending',
+      hosts: 0,
+      ttps: 0,
+      volume: 'queued',
+      duration: '--',
+      status: 'Queued',
+      date: 'Apr 26, 2026 10:05',
+      confidence: 0,
+      owner: 'Analyst-01',
     };
-    load();
-    return () => { cancelled = true; };
-  }, [investigationId]);
-
-  useEffect(() => {
-    if (!investigationId || !polling) return;
-    const interval = setInterval(async () => {
-      try {
-        const resp = await investigateAPI.getStatus(investigationId);
-        setStatus(resp.data);
-
-        if (resp.data.status === 'complete') {
-          setPolling(false);
-          const [reportResp, graphResp] = await Promise.all([
-            investigateAPI.getReport(investigationId),
-            investigateAPI.getGraph(investigationId),
-          ]);
-          setReport(reportResp.data);
-          setGraphData(graphResp.data);
-          loadInvestigations();
-          setActivePage('investigations');
-          setDetailTab('timeline');
-        } else if (resp.data.status === 'failed') {
-          setPolling(false);
-          loadInvestigations();
-          setActivePage('investigations');
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [investigationId, polling]);
-
-  useEffect(() => {
-    if (activePage !== 'apt-library' || aptProfiles.length > 0 || profilesLoading) return;
-    setProfilesLoading(true);
-    aptAPI.getProfiles()
-      .then((resp) => setAptProfiles(resp.data.profiles || []))
-      .catch((err) => console.error('APT profile load failed:', err))
-      .finally(() => setProfilesLoading(false));
-  }, [activePage, aptProfiles.length, profilesLoading]);
-
-  const handleInvestigationStart = (id) => {
-    setInvestigationId(id);
-    localStorage.setItem(LAST_INVESTIGATION_KEY, id);
-    setPolling(true);
-    setSimError('');
-    setStatus({
-      investigation_id: id,
-      status: 'queued',
-      progress: 0,
-      current_phase: 'Queued for analysis',
-    });
-    setReport(null);
-    setGraphData(null);
-    setSimulation(null);
-    setSelectedNode(null);
+    setInvestigations((current) => [next, ...current]);
+    setSelectedInvestigationId(next.id);
     setActivePage('investigations');
-    setDetailTab('timeline');
-    loadInvestigations();
+    showToast('Investigation queued for orchestration');
   };
 
-  const handleNewInvestigation = () => {
-    localStorage.removeItem(LAST_INVESTIGATION_KEY);
-    setInvestigationId(null);
-    setPolling(false);
-    setStatus(null);
-    setReport(null);
-    setGraphData(null);
-    setSimulation(null);
-    setSimError('');
-    setSelectedNode(null);
-    setActivePage('dashboard');
-  };
-
-  const handleSelectInvestigation = (id) => {
-    if (!id) return;
-    setInvestigationId(id);
-    localStorage.setItem(LAST_INVESTIGATION_KEY, id);
-    setPolling(true);
-    setStatus(null);
-    setReport(null);
-    setGraphData(null);
-    setSimulation(null);
-    setSimError('');
-    setSelectedNode(null);
-    setActivePage('investigations');
-    setDetailTab('timeline');
-  };
-
-  const handleRunSimulation = async () => {
-    if (!investigationId || !report || !canRunSimulation) return;
-    setSimLoading(true);
-    setSimError('');
-    try {
-      const resp = await simulateAPI.predict(investigationId);
-      setSimulation(resp.data);
-      setActivePage('simulation');
-    } catch (err) {
-      console.error('Simulation error:', err);
-      setSimError(err?.response?.data?.detail || 'Simulation unavailable for this investigation.');
-    } finally {
-      setSimLoading(false);
-    }
-  };
-
-  const renderPage = () => {
-    if (activePage === 'dashboard') {
-      return (
-        <DashboardHome
-          metrics={metrics}
-          status={status}
-          report={report}
-          graphData={graphData}
-          topAttribution={topAttribution}
-          highRiskFindings={highRiskFindings}
-          healthSubsystems={displayHealthSubsystems}
-          healthCheckedAt={healthCheckedAt}
-          onUpload={handleInvestigationStart}
-          onOpenInvestigation={() => setActivePage('investigations')}
-        />
-      );
-    }
-
-    if (activePage === 'investigations') {
-      return (
-        <InvestigationPage
-          investigationId={investigationId}
-          investigations={investigations}
-          status={status}
-          report={report}
-          graphData={graphData}
-          simulation={simulation}
-          canRunSimulation={canRunSimulation}
-          simError={simError}
-          detailTab={detailTab}
-          setDetailTab={setDetailTab}
-          selectedNode={selectedNode}
-          setSelectedNode={setSelectedNode}
-          isProcessing={isProcessing}
-          isFailed={isFailed}
-          onUpload={handleInvestigationStart}
-          onSelectInvestigation={handleSelectInvestigation}
-          onRunSimulation={handleRunSimulation}
-          simLoading={simLoading}
-          onReset={handleNewInvestigation}
-        />
-      );
-    }
-
-    if (activePage === 'attack-graph') {
-      return (
-        <GraphPage graphData={graphData} selectedNode={selectedNode} setSelectedNode={setSelectedNode} />
-      );
-    }
-
-    if (activePage === 'apt-library') {
-      return <APTLibraryPage profiles={aptProfiles} loading={profilesLoading} />;
-    }
-
-    if (activePage === 'query') {
-      return (
-        <ConsolePanel title="Intelligence Query" icon={MessageSquare}>
-          {investigationId ? (
-            <QueryBar investigationId={investigationId} />
-          ) : (
-            <EmptyState icon={MessageSquare} title="No active investigation" text="Start an investigation before asking context-aware questions." />
-          )}
-        </ConsolePanel>
-      );
-    }
-
-    if (activePage === 'threat-feeds') {
-      return <ThreatFeedsPage healthSubsystems={displayHealthSubsystems} healthCheckedAt={healthCheckedAt} />;
-    }
-
-    if (activePage === 'simulation') {
-      return (
-        <SimulationPage
-          simulation={simulation}
-          report={report}
-          canRunSimulation={canRunSimulation}
-          simError={simError}
-          simLoading={simLoading}
-          onRunSimulation={handleRunSimulation}
-        />
-      );
-    }
-
-    if (activePage === 'mitre-navigator') {
-      return <MitreNavigatorPage investigationId={investigationId} findings={report?.findings || []} />;
-    }
-
-    if (activePage === 'reports') {
-      return <ReportsPage report={report} investigations={investigations} onSelectInvestigation={handleSelectInvestigation} />;
-    }
-
-    return (
-      <SettingsPage
-        apiHealth={apiHealth}
-        healthSubsystems={displayHealthSubsystems}
-        healthCheckedAt={healthCheckedAt}
-        onRefreshHealth={refreshHealth}
-      />
-    );
+  const navigate = (pageId) => {
+    setActivePage(pageId);
+    if (pageId === 'attack-graph') setDetailTab('graph');
+    if (pageId === 'simulation') setDetailTab('simulation');
+    if (pageId === 'query') setDetailTab('query');
   };
 
   return (
-    <div className="raptor-console">
-      <Sidebar activePage={activePage} setActivePage={setActivePage} status={status} />
-      <main className="console-main">
-        <TopBar
-          apiHealth={apiHealth}
-          healthSubsystems={displayHealthSubsystems}
-          status={status}
-          investigationId={investigationId}
-          onNewInvestigation={handleNewInvestigation}
-          onOpenUpload={() => setActivePage('investigations')}
+    <div className="raptor-shell">
+      <Sidebar activePage={activePage} onNavigate={navigate} />
+      <main className="raptor-main">
+        <TopHeader
+          title={pageTitles[activePage]}
+          search={search}
+          setSearch={setSearch}
+          onNavigate={navigate}
+          onOpenInvestigation={openInvestigation}
+          onNewInvestigation={() => navigate('investigations')}
         />
-        <div className="console-content page-enter">
-          {renderPage()}
-        </div>
+        <section className="raptor-content" aria-live="polite">
+          {activePage === 'dashboard' && (
+            <DashboardPage investigations={investigations} onOpenInvestigation={openInvestigation} />
+          )}
+          {activePage === 'investigations' && (
+            <InvestigationsPage
+              investigations={investigations}
+              onOpenInvestigation={openInvestigation}
+              onAddInvestigation={addInvestigation}
+            />
+          )}
+          {activePage === 'attack-graph' && (
+            <InvestigationDetailPage
+              investigation={selectedInvestigation}
+              activeTab={detailTab}
+              setActiveTab={setDetailTab}
+            />
+          )}
+          {activePage === 'apt-library' && <AptLibraryPage />}
+          {activePage === 'query' && <QueryWorkspacePage investigation={selectedInvestigation} />}
+          {activePage === 'threat-feeds' && <ThreatFeedsPage showToast={showToast} />}
+          {activePage === 'simulation' && <StandaloneSimulationPage investigation={selectedInvestigation} />}
+          {activePage === 'mitre' && <MitrePage />}
+          {activePage === 'reports' && <ReportsPage showToast={showToast} />}
+          {activePage === 'settings' && <SettingsPage showToast={showToast} />}
+        </section>
       </main>
+      {search.trim() && (
+        <GlobalSearchResults
+          query={search}
+          investigations={investigations}
+          onOpenInvestigation={openInvestigation}
+          onClose={() => setSearch('')}
+        />
+      )}
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
-function Sidebar({ activePage, setActivePage, status }) {
+function Sidebar({ activePage, onNavigate }) {
   return (
-    <aside className="console-sidebar">
+    <aside className="sidebar" aria-label="Primary navigation">
       <div className="brand-lockup">
         <div className="brand-mark">
-          <Shield className="w-5 h-5" />
+          <Shield size={19} />
         </div>
         <div>
           <div className="brand-title">RAPTOR</div>
@@ -433,24 +227,24 @@ function Sidebar({ activePage, setActivePage, status }) {
         </div>
       </div>
 
-      <nav className="nav-sections">
-        {NAV_SECTIONS.map((section, index) => (
-          <div key={index} className="nav-section">
-            {section.section && <div className="nav-section-label">{section.section}</div>}
-            {section.items.map((item) => {
+      <nav className="nav-groups">
+        {navGroups.map((group) => (
+          <div className="nav-group" key={group.label}>
+            <div className="nav-label">{group.label}</div>
+            {group.items.map((item) => {
               const Icon = item.icon;
               const active = activePage === item.id;
               return (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActivePage(item.id)}
                   className={`nav-item ${active ? 'active' : ''}`}
+                  onClick={() => onNavigate(item.id)}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon size={16} />
                   <span>{item.label}</span>
-                  {item.badge && status?.status && <span className="nav-badge">{status.status}</span>}
-                  {item.dot && <span className={`nav-dot ${item.dot}`} />}
+                  {item.badge && <span className="nav-badge">{item.badge}</span>}
+                  {item.pulse && <span className="nav-pulse" />}
                 </button>
               );
             })}
@@ -458,59 +252,54 @@ function Sidebar({ activePage, setActivePage, status }) {
         ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <div className="mini-status">
-          <CircleDot className="w-3.5 h-3.5 text-[var(--success)]" />
-          <span>ATT&CK STIX loaded</span>
+      <div className="sidebar-bottom">
+        <div className="pipeline-card">
+          <div className="sidebar-heading">Pipeline Status</div>
+          {pipelineServices.map((service) => (
+            <div className="pipeline-row" key={service.name} title={service.detail}>
+              <span className={`status-dot ${service.status}`} />
+              <span>{service.name}</span>
+            </div>
+          ))}
         </div>
-        <div className="mini-status muted">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Analyst console</span>
+        <div className="profile-pill">
+          <div className="avatar">SA</div>
+          <div>
+            <strong>Analyst-01</strong>
+            <span>SOC Tier-2</span>
+          </div>
         </div>
       </div>
     </aside>
   );
 }
 
-function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInvestigation, onOpenUpload }) {
-  const healthClass = apiHealth === 'healthy' ? 'online' : apiHealth === 'offline' ? 'offline' : 'pending';
-  const healthLabel = apiHealth === 'healthy' ? 'System healthy' : apiHealth === 'offline' ? 'System offline' : 'System degraded';
-  const subsystemPills = Object.entries(healthSubsystems || {}).filter(([name]) => name !== 'api');
-
+function TopHeader({ title, search, setSearch, onNewInvestigation }) {
   return (
-    <header className="console-topbar">
-      <div>
-        <div className="topbar-kicker">Retrieval-Augmented Persistent Threat Orchestration</div>
-        <div className="topbar-title">Investigation Operations</div>
+    <header className="top-header">
+      <div className="top-title">
+        <span>Retrieval-Augmented Persistent Threat Orchestration</span>
+        <strong>{title}</strong>
       </div>
-      <div className="topbar-actions">
-        <div className={`health-pill ${healthClass}`}>
-          <span />
-          {healthLabel}
+      <label className="global-search">
+        <Search size={16} />
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search investigations, TTPs, actors, hosts..."
+        />
+      </label>
+      <div className="top-actions">
+        <div className="nominal-badge">
+          <span className="status-dot online" />
+          All Systems Nominal
         </div>
-        {subsystemPills.map(([name, subsystem]) => {
-          const cls = subsystem?.status === 'healthy' ? 'online' : subsystem?.status === 'degraded' ? 'offline' : 'pending';
-          return (
-            <div key={name} className={`health-pill ${cls}`} title={subsystem?.detail || ''}>
-              <span />
-              {name}
-            </div>
-          );
-        })}
-        {investigationId && (
-          <div className="investigation-chip">
-            <span>{status?.status || 'loaded'}</span>
-            <code>{investigationId.slice(0, 8)}</code>
-          </div>
-        )}
-        <button type="button" className="icon-button" title="Notifications">
-          <Bell className="w-4 h-4" />
+        <button className="icon-button" type="button" title="Notifications">
+          <Bell size={17} />
+          <span className="notification-dot" />
         </button>
-        <button type="button" className="secondary-button" onClick={onOpenUpload}>
-          <UploadCloud className="w-4 h-4" />
-          Upload Logs
-        </button>
-        <button type="button" className="primary-button" onClick={onNewInvestigation}>
+        <button className="primary-button" type="button" onClick={onNewInvestigation}>
+          <Plus size={16} />
           New Investigation
         </button>
       </div>
@@ -518,1000 +307,1099 @@ function TopBar({ apiHealth, healthSubsystems, status, investigationId, onNewInv
   );
 }
 
-function DashboardHome({ metrics, status, report, graphData, topAttribution, highRiskFindings, healthSubsystems, healthCheckedAt, onUpload, onOpenInvestigation }) {
-  return (
-    <div className="dashboard-grid">
-      <section className="hero-strip">
-        <div>
-          <div className="section-eyebrow">Live SOC Workspace</div>
-          <h1>APT analysis command center</h1>
-          <p>Upload logs, map TTPs, score attribution, visualize movement, and generate analyst-ready reporting.</p>
-        </div>
-        <div className="hero-actions">
-          <button type="button" className="secondary-button" onClick={onOpenInvestigation}>
-            Open Investigation
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </section>
+function GlobalSearchResults({ query, investigations, onOpenInvestigation, onClose }) {
+  const lowered = query.toLowerCase();
+  const matchingInvestigations = investigations.filter((item) =>
+    [item.id, item.name, item.candidate, item.severity].some((value) => String(value).toLowerCase().includes(lowered))
+  );
+  const matchingTtps = forensicEvents.filter((item) =>
+    [item.id, item.title, item.host, item.phase].some((value) => String(value).toLowerCase().includes(lowered))
+  );
+  const matchingActors = aptLibrary.filter((item) =>
+    [item.name, item.region, item.sponsor, ...item.aliases].some((value) => value.toLowerCase().includes(lowered))
+  );
 
+  return (
+    <div className="search-popover">
+      <div className="search-popover-header">
+        <span>Search results</span>
+        <button type="button" className="ghost-icon" onClick={onClose} title="Close search">
+          <X size={15} />
+        </button>
+      </div>
+      {matchingInvestigations.slice(0, 3).map((item) => (
+        <button key={item.id} type="button" className="search-result" onClick={() => onOpenInvestigation(item.id)}>
+          <Archive size={15} />
+          <span>
+            <strong>{item.name}</strong>
+            <small>{item.id} - {item.candidate}</small>
+          </span>
+        </button>
+      ))}
+      {matchingTtps.slice(0, 3).map((item) => (
+        <div key={item.id} className="search-result static">
+          <Layers3 size={15} />
+          <span>
+            <strong>{item.id} {item.title}</strong>
+            <small>{item.phase} - {item.host}</small>
+          </span>
+        </div>
+      ))}
+      {matchingActors.slice(0, 3).map((item) => (
+        <div key={item.name} className="search-result static">
+          <Shield size={15} />
+          <span>
+            <strong>{item.name}</strong>
+            <small>{item.region} - {item.aliases.slice(0, 2).join(', ')}</small>
+          </span>
+        </div>
+      ))}
+      {!matchingInvestigations.length && !matchingTtps.length && !matchingActors.length && (
+        <div className="search-empty">No matching RAPTOR objects found.</div>
+      )}
+    </div>
+  );
+}
+
+function DashboardPage({ investigations, onOpenInvestigation }) {
+  const metrics = [
+    { label: 'Active Investigations', value: '4', hint: '+2 in last 24h', tone: 'accent', icon: Archive },
+    { label: 'Hosts Compromised', value: '11', hint: '3 crown-jewel adjacent', tone: 'danger', icon: ShieldAlert },
+    { label: 'TTPs Detected', value: '28', hint: '14 in active case', tone: 'warning', icon: Activity },
+    { label: 'Avg Attribution Confidence', value: '74%', hint: 'APT29 top candidate', tone: 'success', icon: BarChart3 },
+  ];
+
+  return (
+    <div className="dashboard-layout page-panel">
       <div className="metric-grid">
         {metrics.map((metric) => (
-          <StatCard key={metric.label} {...metric} />
+          <MetricCard key={metric.label} {...metric} />
         ))}
       </div>
 
-      <div className="dashboard-columns">
-        <ConsolePanel title="Current Investigation" icon={Gauge}>
-          {status ? (
-            <InvestigationSummary status={status} report={report} topAttribution={topAttribution} />
-          ) : (
-            <FileUpload onInvestigationStart={onUpload} compact />
-          )}
-        </ConsolePanel>
-
-        <ConsolePanel title="Threat Feed" icon={Database}>
-          <ThreatFeedMini healthSubsystems={healthSubsystems} healthCheckedAt={healthCheckedAt} />
-        </ConsolePanel>
-      </div>
-
-      <div className="dashboard-columns wide-left">
-        <ConsolePanel title="Attack Surface" icon={Network}>
-          {graphData?.nodes?.length ? (
-            <div className="graph-preview">
-              <AttackGraph graphData={graphData} showLabels={false} />
-            </div>
-          ) : (
-            <EmptyState icon={Network} title="No graph yet" text="Run an investigation to build a host, user, and technique graph." />
-          )}
-        </ConsolePanel>
-
-        <ConsolePanel title="Priority Findings" icon={ShieldAlert}>
-          {highRiskFindings.length ? (
-            <div className="finding-stack">
-              {highRiskFindings.map((finding) => (
-                <FindingRow key={finding.technique_id} finding={finding} />
-              ))}
-            </div>
-          ) : (
-            <EmptyState icon={ShieldAlert} title="No high-confidence findings" text="High-risk TTPs will surface here after analysis." />
-          )}
-        </ConsolePanel>
-      </div>
-    </div>
-  );
-}
-
-function InvestigationPage({
-  investigationId,
-  investigations,
-  status,
-  report,
-  graphData,
-  simulation,
-  canRunSimulation,
-  simError,
-  detailTab,
-  setDetailTab,
-  selectedNode,
-  setSelectedNode,
-  isProcessing,
-  isFailed,
-  onUpload,
-  onSelectInvestigation,
-  onRunSimulation,
-  simLoading,
-  onReset,
-}) {
-  if (!investigationId) {
-    return (
-      <ConsolePanel title="Start Investigation" icon={UploadCloud}>
-        <FileUpload onInvestigationStart={onUpload} />
-        <InvestigationList investigations={investigations} onSelectInvestigation={onSelectInvestigation} />
-      </ConsolePanel>
-    );
-  }
-
-  if (isProcessing) {
-    return (
-      <ConsolePanel title="Investigation Processing" icon={Loader2}>
-        <ProcessingView status={status} investigationId={investigationId} />
-      </ConsolePanel>
-    );
-  }
-
-  if (isFailed) {
-    return (
-      <ConsolePanel title="Investigation Failed" icon={AlertCircle}>
-        <div className="failure-box">
-          <AlertCircle className="w-10 h-10" />
-          <div>
-            <h3>Pipeline stopped</h3>
-            <p>{status?.error || 'The investigation failed before results were produced.'}</p>
-          </div>
-          <button type="button" className="primary-button" onClick={onReset}>Try Again</button>
-        </div>
-      </ConsolePanel>
-    );
-  }
-
-  return (
-    <div className="detail-layout">
-      <ConsolePanel title={report ? `Investigation ${investigationId.slice(0, 8)}` : 'Investigation'} icon={Archive}>
-        <div className="detail-header">
-          <div>
-            <div className="section-eyebrow">Case Summary</div>
-            <h2>{report?.attribution?.[0]?.apt_name || 'Unknown Actor'} activity assessment</h2>
-          </div>
-          <button
-            type="button"
-            className="danger-button"
-            onClick={onRunSimulation}
-            disabled={simLoading || !report || !canRunSimulation}
-            title={!canRunSimulation ? 'Simulation requires MEDIUM or HIGH attribution confidence' : ''}
-          >
-            {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            Simulate Next Steps
-          </button>
-        </div>
-
-        {!canRunSimulation && report && (
-          <div className="upload-error" style={{ marginBottom: '12px' }}>
-            <AlertCircle className="w-4 h-4" />
-            <span>Simulation disabled: attribution confidence is too low (requires MEDIUM or HIGH).</span>
-          </div>
-        )}
-
-        {simError && (
-          <div className="upload-error" style={{ marginBottom: '12px' }}>
-            <AlertCircle className="w-4 h-4" />
-            <span>{simError}</span>
-          </div>
-        )}
-
-        <div className="tab-strip">
-          {INVESTIGATION_TABS.map((tab) => (
-            <button key={tab.id} type="button" className={detailTab === tab.id ? 'active' : ''} onClick={() => setDetailTab(tab.id)}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="detail-body">
-          {detailTab === 'timeline' && <Timeline findings={report?.findings} attackSequence={report?.attack_sequence} />}
-          {detailTab === 'report' && <ReportView report={report?.narrative_report} />}
-          {detailTab === 'graph' && <GraphPage graphData={graphData} selectedNode={selectedNode} setSelectedNode={setSelectedNode} embedded />}
-          {detailTab === 'attribution' && <Attribution attributionResults={report?.attribution} />}
-          {detailTab === 'simulation' && <Simulation predictions={simulation?.predictions} aptGroup={simulation?.apt_group} confidence={simulation?.confidence} />}
-          {detailTab === 'query' && <QueryBar investigationId={investigationId} />}
-        </div>
-      </ConsolePanel>
-    </div>
-  );
-}
-
-function GraphPage({ graphData, selectedNode, setSelectedNode, embedded = false }) {
-  const [graphSearch, setGraphSearch] = useState('');
-  const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
-  const [riskFilter, setRiskFilter] = useState('all');
-  const [showLabels, setShowLabels] = useState(!embedded);
-
-  const filteredGraphData = useMemo(() => {
-    const nodes = graphData?.nodes || [];
-    const edges = graphData?.edges || [];
-    const query = graphSearch.trim().toLowerCase();
-
-    if (!nodes.length) return graphData;
-
-    const visibleNodes = nodes.filter((node) => {
-      const type = getGraphNodeType(node);
-      const haystack = [
-        node.id,
-        node.label,
-        type,
-        node.metadata?.ip,
-        node.metadata?.tactic,
-        node.metadata?.phase,
-      ].filter(Boolean).join(' ').toLowerCase();
-      const matchesSearch = !query || haystack.includes(query);
-      const matchesType = nodeTypeFilter === 'all' || type === nodeTypeFilter;
-      const matchesRisk =
-        riskFilter === 'all' ||
-        (riskFilter === 'compromised' && isCompromisedHostNode(node)) ||
-        (riskFilter === 'clean' && type === 'host' && !isCompromisedHostNode(node));
-      return matchesSearch && matchesType && matchesRisk;
-    });
-
-    const visibleIds = new Set(visibleNodes.map((node) => node.id));
-    const visibleEdges = edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target));
-
-    return {
-      ...graphData,
-      nodes: visibleNodes,
-      edges: visibleEdges,
-    };
-  }, [graphData, graphSearch, nodeTypeFilter, riskFilter]);
-
-  const nodeCount = filteredGraphData?.nodes?.length || 0;
-  const edgeCount = filteredGraphData?.edges?.length || 0;
-
-  return (
-    <div className={embedded ? 'graph-page embedded' : 'graph-page'}>
-      <div className="graph-canvas-card">
-        {graphData?.nodes?.length > 0 && (
-          <div className="graph-toolbar">
-            <label className="search-box">
-              <Search className="w-4 h-4" />
-              <input
-                type="text"
-                value={graphSearch}
-                onChange={(event) => setGraphSearch(event.target.value)}
-                placeholder="Filter host, technique, tactic, IP"
-              />
-            </label>
-            <select value={nodeTypeFilter} onChange={(event) => setNodeTypeFilter(event.target.value)}>
-              <option value="all">All nodes</option>
-              <option value="host">Hosts</option>
-              <option value="user">Users</option>
-              <option value="technique">Techniques</option>
-            </select>
-            <select value={riskFilter} onChange={(event) => setRiskFilter(event.target.value)}>
-              <option value="all">All risk</option>
-              <option value="compromised">Compromised hosts</option>
-              <option value="clean">Clean hosts</option>
-            </select>
-            <label className="graph-toggle">
-              <input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />
-              Labels
-            </label>
-            <span className="graph-filter-count">{nodeCount} nodes / {edgeCount} edges</span>
-          </div>
-        )}
-        {graphData?.nodes?.length ? (
-          filteredGraphData?.nodes?.length ? (
-            <AttackGraph graphData={filteredGraphData} onNodeClick={setSelectedNode} showLabels={showLabels} />
-          ) : (
-            <EmptyState icon={Network} title="No matching graph nodes" text="Adjust graph filters to restore nodes and edges." />
-          )
-        ) : (
-          <EmptyState icon={Network} title="Attack graph unavailable" text="Upload logs and complete analysis to render the graph." />
-        )}
-      </div>
-      {selectedNode && (
-        <div className="node-side-panel">
-          <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function APTLibraryPage({ profiles, loading }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const normalizedSearch = searchTerm.trim().toLowerCase();
-  const filtered = normalizedSearch
-    ? profiles.filter((profile) => {
-        const haystack = [
-          profile.name,
-          profile.nation_state,
-          ...(profile.aliases || []),
-          ...(profile.techniques || []),
-        ].join(' ').toLowerCase();
-        return haystack.includes(normalizedSearch);
-      })
-    : profiles;
-
-  return (
-    <ConsolePanel title="APT Library" icon={BookOpen}>
-      <div className="library-toolbar">
-        <label className="search-box">
-          <Search className="w-4 h-4" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search group, alias, country, or technique"
+      <div className="dashboard-main-grid">
+        <Panel className="span-8" title="Recent Investigations" icon={Gauge} action={<span className="panel-chip">live cases</span>}>
+          <InvestigationTable
+            investigations={investigations.slice(0, 4)}
+            compact
+            onOpenInvestigation={onOpenInvestigation}
           />
-        </label>
-        <div className="count-pill">{filtered.length || '--'} / {profiles.length || '--'} groups</div>
-      </div>
-      {loading ? (
-        <LoadingRows />
-      ) : (
-        <div className="apt-grid">
-          {filtered.map((profile) => (
-            <article key={profile.name} className="apt-card">
-              <div className="apt-card-header">
-                <h3>{profile.name}</h3>
-                <span>{profile.technique_count} TTPs</span>
-              </div>
-              {profile.nation_state && <p>{profile.nation_state}</p>}
-              <p>{profile.aliases?.slice(0, 3).join(', ') || 'No aliases listed'}</p>
-              <div className="ttp-strip">
-                {(profile.techniques || []).slice(0, 5).map((ttp) => <code key={ttp}>{ttp}</code>)}
-              </div>
-              <button type="button" className="secondary-button card-action" onClick={() => setSelectedProfile(profile)}>
-                View Profile
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
+        </Panel>
 
-      {selectedProfile && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setSelectedProfile(null)}>
-          <div className="detail-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <div className="detail-modal-header">
-              <div>
-                <div className="section-eyebrow">Intrusion Set</div>
-                <h2>{selectedProfile.name}</h2>
-              </div>
-              <button type="button" className="icon-button" onClick={() => setSelectedProfile(null)} title="Close">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="summary-grid">
-              <div><span>Aliases</span><strong>{selectedProfile.aliases?.length || 0}</strong></div>
-              <div><span>Techniques</span><strong>{selectedProfile.technique_count}</strong></div>
-              <div><span>Nation</span><strong>{selectedProfile.nation_state || 'Unknown'}</strong></div>
-            </div>
-            <div className="modal-section">
-              <span>Aliases</span>
-              <p>{selectedProfile.aliases?.join(', ') || 'No aliases listed.'}</p>
-            </div>
-            <div className="modal-section">
-              <span>Technique Coverage</span>
-              <div className="ttp-strip dense">
-                {(selectedProfile.techniques || []).map((ttp) => <code key={ttp}>{ttp}</code>)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </ConsolePanel>
-  );
-}
-
-function ThreatFeedsPage({ healthSubsystems = {}, healthCheckedAt = '' }) {
-  const statusFor = (name, fallback = 'available') => {
-    const status = healthSubsystems?.[name]?.status;
-    if (status === 'healthy') return 'active';
-    if (status === 'degraded') return 'degraded';
-    return fallback;
-  };
-
-  const feeds = [
-    { name: 'MITRE ATT&CK STIX', state: 'active', desc: 'Technique and intrusion-set corpus', confidence: 'high', lastPulled: 'local cache' },
-    { name: 'Sigma Signatures', state: 'active', desc: 'Local keyword and regex TTP mapping', confidence: 'medium', lastPulled: 'bundled rules' },
-    { name: 'Weaviate RAG', state: statusFor('weaviate'), desc: healthSubsystems?.weaviate?.detail || 'Vector retrieval service', confidence: healthSubsystems?.weaviate?.status === 'healthy' ? 'high' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
-    { name: 'Elasticsearch Events', state: statusFor('elasticsearch'), desc: healthSubsystems?.elasticsearch?.detail || 'Runtime event storage', confidence: healthSubsystems?.elasticsearch?.status === 'healthy' ? 'high' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
-    { name: 'Redis Queue/Cache', state: statusFor('redis'), desc: healthSubsystems?.redis?.detail || 'Runtime cache service', confidence: healthSubsystems?.redis?.status === 'healthy' ? 'medium' : 'unavailable', lastPulled: healthCheckedAt || 'not checked' },
-    { name: 'MISP/OpenCTI', state: 'planned', desc: 'Connector not implemented in this build', confidence: 'none', lastPulled: 'never' },
-  ];
-
-  return (
-    <ConsolePanel title="Threat Feeds" icon={Database}>
-      <div className="feed-table">
-        {feeds.map((feed) => (
-          <div key={feed.name} className="feed-row">
-            <div>
-              <strong>{feed.name}</strong>
-              <span>{feed.desc}</span>
-              <div className="feed-meta">
-                <span>confidence: {feed.confidence}</span>
-                <span>last checked: {feed.lastPulled}</span>
-              </div>
-            </div>
-            <span className={`feed-state ${feed.state}`}>{feed.state}</span>
-          </div>
-        ))}
-      </div>
-    </ConsolePanel>
-  );
-}
-
-function SimulationPage({ simulation, report, canRunSimulation, simError, simLoading, onRunSimulation }) {
-  return (
-    <ConsolePanel title="Simulation" icon={Zap}>
-      <div className="detail-header">
-        <div>
-          <div className="section-eyebrow">Predictive Layer</div>
-          <h2>Likely next attacker actions</h2>
-        </div>
-        <button
-          type="button"
-          className="danger-button"
-          onClick={onRunSimulation}
-          disabled={!report || simLoading || !canRunSimulation}
-          title={!canRunSimulation ? 'Simulation requires MEDIUM or HIGH attribution confidence' : ''}
-        >
-          {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          Run Simulation
-        </button>
-      </div>
-
-      {!canRunSimulation && report && (
-        <div className="upload-error" style={{ marginBottom: '12px' }}>
-          <AlertCircle className="w-4 h-4" />
-          <span>Simulation is disabled for LOW/UNKNOWN attribution confidence.</span>
-        </div>
-      )}
-
-      {simError && (
-        <div className="upload-error" style={{ marginBottom: '12px' }}>
-          <AlertCircle className="w-4 h-4" />
-          <span>{simError}</span>
-        </div>
-      )}
-
-      <Simulation predictions={simulation?.predictions} aptGroup={simulation?.apt_group} confidence={simulation?.confidence} />
-    </ConsolePanel>
-  );
-}
-
-function ReportsPage({ report, investigations, onSelectInvestigation }) {
-  const [reportTemplate, setReportTemplate] = useState('analyst');
-  const [analystNotes, setAnalystNotes] = useState('');
-
-  return (
-    <div className="reports-layout">
-      <ConsolePanel title="Report Archive" icon={Archive}>
-        {investigations && investigations.length ? (
-          <div className="feed-table">
-            {investigations.map((item) => (
-              <button
-                key={item.investigation_id}
-                type="button"
-                className="feed-row"
-                onClick={() => onSelectInvestigation(item.investigation_id)}
-                style={{ textAlign: 'left', width: '100%', cursor: 'pointer' }}
-              >
+        <Panel className="span-4" title="Live Alert Feed" icon={RadioTower}>
+          <div className="alert-feed">
+            {liveAlerts.map((alert) => (
+              <div className={`alert-item ${alert.type}`} key={`${alert.time}-${alert.title}`}>
+                <span className="alert-dot" />
                 <div>
-                  <strong>{item.investigation_id.slice(0, 8)}</strong>
-                  <span>{item.event_count || 0} events, {item.technique_count || 0} techniques</span>
-                  <span>{item.completed_at || item.created_at}</span>
+                  <strong>{alert.title}</strong>
+                  <p>{alert.detail}</p>
                 </div>
-                <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
-                  {item.status}
-                </span>
-              </button>
+                <time>{alert.time}</time>
+              </div>
             ))}
           </div>
-        ) : (
-          <EmptyState icon={Archive} title="No saved reports" text="Completed investigations will appear in the report archive." />
-        )}
-      </ConsolePanel>
-      <ConsolePanel title="Selected Report" icon={FileText}>
-        <div className="report-controls">
-          <label>
-            <span>Template</span>
-            <select value={reportTemplate} onChange={(event) => setReportTemplate(event.target.value)}>
-              <option value="analyst">Analyst summary</option>
-              <option value="evidence">Evidence detail</option>
-            </select>
-          </label>
-          <label>
-            <span>Analyst notes</span>
-            <textarea
-              value={analystNotes}
-              onChange={(event) => setAnalystNotes(event.target.value)}
-              placeholder="Add triage notes for handoff..."
-              rows={3}
-            />
-          </label>
-        </div>
-        {report && (
-          <div className="report-meta">
-            <div><span>Investigation</span><strong>{report.investigation_id?.slice(0, 8)}</strong></div>
-            <div><span>Status</span><strong>{report.status}</strong></div>
-            <div><span>Techniques</span><strong>{report.technique_count}</strong></div>
-            <div><span>Created</span><strong>{report.timestamp || '--'}</strong></div>
-          </div>
-        )}
-        <ReportView report={report?.narrative_report} mode={reportTemplate} notes={analystNotes} />
-      </ConsolePanel>
-    </div>
-  );
-}
+        </Panel>
 
-function InvestigationList({ investigations, onSelectInvestigation }) {
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [sortMode, setSortMode] = useState('recent');
-  const visibleInvestigations = investigations
-    ? investigations
-    .filter((item) => statusFilter === 'all' || item.status === statusFilter)
-    .slice()
-    .sort((a, b) => {
-      if (sortMode === 'severity') return investigationSeverityScore(b) - investigationSeverityScore(a);
-      if (sortMode === 'progress') return (b.progress || 0) - (a.progress || 0);
-      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
-    })
-    : [];
+        <Panel className="span-8" title="Active Attack Graph Preview" icon={Network}>
+          <MiniAttackMap onOpen={() => onOpenInvestigation(investigations[0].id)} />
+        </Panel>
 
-  if (!investigations || investigations.length === 0) return null;
-
-  return (
-    <div style={{ marginTop: '14px' }}>
-      <div className="investigation-list-header">
-        <div className="section-eyebrow">Recent Investigations</div>
-        <div className="history-controls">
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">All status</option>
-            <option value="queued">Queued</option>
-            <option value="processing">Processing</option>
-            <option value="complete">Complete</option>
-            <option value="failed">Failed</option>
-          </select>
-          <select value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
-            <option value="recent">Newest</option>
-            <option value="severity">Severity</option>
-            <option value="progress">Progress</option>
-          </select>
-        </div>
-      </div>
-      <div className="feed-table">
-        {visibleInvestigations.slice(0, 12).map((item) => (
-          <button
-            key={item.investigation_id}
-            type="button"
-            className="feed-row investigation-row"
-            onClick={() => onSelectInvestigation(item.investigation_id)}
-            style={{ textAlign: 'left', width: '100%', cursor: 'pointer' }}
-          >
-            <div>
-              <strong>{item.investigation_id.slice(0, 8)}</strong>
-              <span>{item.current_phase || item.status}</span>
-              <div className="feed-meta">
-                <span>{item.event_count || 0} events</span>
-                <span>{item.technique_count || 0} techniques</span>
-                <span>owner: unassigned</span>
-              </div>
-            </div>
-            <div className="row-actions">
-              <span className={`severity-pill ${investigationSeverity(item).toLowerCase()}`}>{investigationSeverity(item)}</span>
-              <span className={`feed-state ${item.status === 'complete' ? 'active' : item.status === 'failed' ? 'planned' : 'available'}`}>
-                {item.status}
-              </span>
-            </div>
-          </button>
-        ))}
+        <Panel className="span-4" title="Kill Chain Coverage" icon={Layers3}>
+          <CoverageBars />
+        </Panel>
       </div>
     </div>
   );
 }
 
-function MitreNavigatorPage({ investigationId, findings }) {
-  const byPhase = new Map();
-  findings.forEach((finding) => {
-    const phase = finding.kill_chain_phase || 'unknown';
-    if (!byPhase.has(phase)) byPhase.set(phase, []);
-    byPhase.get(phase).push(finding);
-  });
-
-  const exportLayer = () => {
-    const techniques = findings.map((finding) => ({
-      techniqueID: finding.technique_id,
-      score: finding.confidence === 'high' ? 100 : finding.confidence === 'medium' ? 70 : 40,
-      comment: finding.evidence_summary || '',
-      enabled: true,
-      metadata: [
-        { name: 'phase', value: finding.kill_chain_phase || 'unknown' },
-        { name: 'confidence', value: finding.confidence || 'low' },
-      ],
-    }));
-    const layer = {
-      name: `RAPTOR ${investigationId || 'investigation'} coverage`,
-      versions: { attack: 'enterprise', navigator: '4.9.0', layer: '4.5' },
-      domain: 'enterprise-attack',
-      description: 'Observed techniques exported from RAPTOR findings.',
-      techniques,
-    };
-    const blob = new Blob([JSON.stringify(layer, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `raptor-navigator-${investigationId || 'layer'}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  };
-
+function MetricCard({ label, value, hint, tone, icon: Icon }) {
   return (
-    <ConsolePanel title="MITRE ATT&CK" icon={Layers3}>
-      <div className="navigator-toolbar">
-        <div>
-          <div className="section-eyebrow">Navigator Layer</div>
-          <p>{findings.length} observed techniques mapped by tactic phase.</p>
-        </div>
-        <button type="button" className="secondary-button" onClick={exportLayer} disabled={!findings.length}>
-          <Download className="w-4 h-4" />
-          Export Layer
-        </button>
-      </div>
-      <div className="mitre-grid">
-        {PHASES.map((phase) => {
-          const phaseFindings = byPhase.get(phase) || [];
-          return (
-            <div key={phase} className={`mitre-cell ${phaseFindings.length ? 'observed' : ''}`}>
-              <div className="mitre-phase">{phase}</div>
-              {phaseFindings.slice(0, 4).map((finding) => (
-                <code key={finding.technique_id}>{finding.technique_id}</code>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-    </ConsolePanel>
-  );
-}
-
-function SettingsPage({ apiHealth, healthSubsystems, healthCheckedAt, onRefreshHealth }) {
-  const [settings, setSettings] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('raptor:settings') || '{}');
-    } catch {
-      return {};
-    }
-  });
-  const updateSetting = (key, value) => {
-    const next = { ...settings, [key]: value };
-    setSettings(next);
-    localStorage.setItem('raptor:settings', JSON.stringify(next));
-  };
-
-  const rows = [
-    ['API health', apiHealth],
-    ['Last health check', healthCheckedAt || 'not checked'],
-    ['Frontend mode', import.meta.env.MODE],
-    ['API base', import.meta.env.VITE_API_BASE_URL || '/api/v1'],
-    ['Graph renderer', 'Sigma.js'],
-    ['Report export', 'Markdown and PDF'],
-  ];
-
-  const subsystemRows = Object.entries(healthSubsystems || {}).map(([name, data]) => [
-    `Subsystem ${name}`,
-    `${data?.status || 'unknown'}${data?.detail ? ` (${data.detail})` : ''}`,
-  ]);
-
-  return (
-    <ConsolePanel title="Settings" icon={SlidersHorizontal}>
-      <div className="settings-controls">
-        <label>
-          <span>LLM mode</span>
-          <select value={settings.llmMode || 'auto'} onChange={(event) => updateSetting('llmMode', event.target.value)}>
-            <option value="auto">Auto</option>
-            <option value="local">Local fallback</option>
-          </select>
-        </label>
-        <label>
-          <span>RAG auto-index</span>
-          <input
-            type="checkbox"
-            checked={settings.ragAutoIndex !== false}
-            onChange={(event) => updateSetting('ragAutoIndex', event.target.checked)}
-          />
-        </label>
-        <label>
-          <span>Attribution threshold</span>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="5"
-            value={settings.attributionThreshold || 50}
-            onChange={(event) => updateSetting('attributionThreshold', Number(event.target.value))}
-          />
-        </label>
-        <label>
-          <span>API endpoint</span>
-          <input
-            type="text"
-            value={settings.apiEndpoint || (import.meta.env.VITE_API_BASE_URL || '/api/v1')}
-            onChange={(event) => updateSetting('apiEndpoint', event.target.value)}
-          />
-        </label>
-        <label>
-          <span>Model provider</span>
-          <select value={settings.modelProvider || 'openrouter'} onChange={(event) => updateSetting('modelProvider', event.target.value)}>
-            <option value="openrouter">OpenRouter</option>
-            <option value="local">Local provider</option>
-            <option value="disabled">Disabled</option>
-          </select>
-        </label>
-        <label>
-          <span>Graph labels</span>
-          <select value={settings.graphLabels || 'on-demand'} onChange={(event) => updateSetting('graphLabels', event.target.value)}>
-            <option value="on-demand">On demand</option>
-            <option value="always">Always show</option>
-            <option value="hidden">Hidden</option>
-          </select>
-        </label>
-        <label>
-          <span>Default report</span>
-          <select value={settings.reportFormat || 'analyst'} onChange={(event) => updateSetting('reportFormat', event.target.value)}>
-            <option value="analyst">Analyst summary</option>
-            <option value="evidence">Evidence detail</option>
-          </select>
-        </label>
-        <label>
-          <span>Show degraded warnings</span>
-          <input
-            type="checkbox"
-            checked={settings.showDegradedWarnings !== false}
-            onChange={(event) => updateSetting('showDegradedWarnings', event.target.checked)}
-          />
-        </label>
-        <button type="button" className="secondary-button settings-action" onClick={onRefreshHealth}>
-          <Activity className="w-4 h-4" />
-          Run Health Check
-        </button>
-      </div>
-      <div className="settings-list">
-        {[...rows, ...subsystemRows].map(([label, value]) => (
-          <div key={label} className="setting-row">
-            <span>{label}</span>
-            <code>{value}</code>
-          </div>
-        ))}
-      </div>
-    </ConsolePanel>
-  );
-}
-
-function StatCard({ label, value, sub, tone, icon: Icon }) {
-  return (
-    <article className={`stat-card ${tone || ''}`}>
+    <article className={`metric-card ${tone}`}>
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
-        <small>{sub}</small>
+        <small>{hint}</small>
       </div>
-      <div className="stat-icon">
-        <Icon className="w-5 h-5" />
+      <div className="metric-icon">
+        <Icon size={22} />
       </div>
     </article>
   );
 }
 
-function ConsolePanel({ title, icon: Icon, children }) {
+function MiniAttackMap({ onOpen }) {
   return (
-    <section className="console-panel">
-      <div className="panel-title">
-        <Icon className="w-4 h-4" />
-        <span>{title}</span>
+    <button type="button" className="mini-graph" onClick={onOpen}>
+      <svg viewBox="0 0 920 230" aria-hidden="true">
+        <defs>
+          <marker id="mini-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 z" />
+          </marker>
+        </defs>
+        <path className="mini-edge danger" d="M80 110 C190 30 245 36 330 96" markerEnd="url(#mini-arrow)" />
+        <path className="mini-edge warning" d="M330 96 C450 130 460 145 560 126" markerEnd="url(#mini-arrow)" />
+        <path className="mini-edge danger" d="M560 126 C675 88 710 82 806 116" markerEnd="url(#mini-arrow)" />
+        <g className="mini-node external" transform="translate(80 110)">
+          <circle r="28" />
+          <text y="48">C2</text>
+        </g>
+        <g className="mini-node compromised" transform="translate(330 96)">
+          <circle r="36" />
+          <text y="56">WKSTN-HR-01</text>
+        </g>
+        <g className="mini-node compromised" transform="translate(560 126)">
+          <circle r="34" />
+          <text y="54">FS-FIN-02</text>
+        </g>
+        <g className="mini-node dc" transform="translate(806 116)">
+          <circle r="40" />
+          <text y="62">DC-01</text>
+        </g>
+      </svg>
+      <span>Open investigation detail</span>
+    </button>
+  );
+}
+
+function CoverageBars() {
+  return (
+    <div className="coverage-list">
+      {killChainCoverage.map((item) => (
+        <div className="coverage-row" key={item.phase}>
+          <div>
+            <span>{item.phase}</span>
+            <strong>{item.score}%</strong>
+          </div>
+          <div className="coverage-track">
+            <span className={item.color} style={{ width: `${item.score}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InvestigationsPage({ investigations, onOpenInvestigation, onAddInvestigation }) {
+  const [filter, setFilter] = useState('All');
+  const [showComposer, setShowComposer] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const filters = ['All', 'Complete', 'Processing', 'Queued', 'Failed'];
+  const visible = investigations.filter((item) => filter === 'All' || item.status === filter);
+
+  const submit = (event) => {
+    event.preventDefault();
+    onAddInvestigation(draftName);
+    setDraftName('');
+    setShowComposer(false);
+  };
+
+  return (
+    <div className="page-panel list-page">
+      <div className="action-bar">
+        <div className="segmented-control" aria-label="Investigation filters">
+          {filters.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={filter === item ? 'active' : ''}
+              onClick={() => setFilter(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="primary-button" onClick={() => setShowComposer((value) => !value)}>
+          <Plus size={16} />
+          New Investigation
+        </button>
+      </div>
+
+      {showComposer && (
+        <form className="composer-panel" onSubmit={submit}>
+          <div className="composer-icon">
+            <UploadCloud size={22} />
+          </div>
+          <label>
+            <span>Case name</span>
+            <input
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              placeholder="Describe the suspicious activity..."
+            />
+          </label>
+          <button type="submit" className="danger-button">
+            <ShieldAlert size={16} />
+            Run Ingestion
+          </button>
+        </form>
+      )}
+
+      <Panel title="Investigation Queue" icon={Archive} className="fill-panel">
+        <InvestigationTable investigations={visible} onOpenInvestigation={onOpenInvestigation} />
+      </Panel>
+    </div>
+  );
+}
+
+function InvestigationTable({ investigations, onOpenInvestigation, compact = false }) {
+  return (
+    <div className={`table-wrap ${compact ? 'compact' : ''}`}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Severity</th>
+            <th>Attribution</th>
+            <th>Hosts/TTPs</th>
+            <th>Volume</th>
+            <th>Duration</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Confidence</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {investigations.map((item) => (
+            <tr key={item.id}>
+              <td><code>{item.id.replace('INV-2026-', '')}</code></td>
+              <td>
+                <strong>{item.name}</strong>
+                <small>{item.owner}</small>
+              </td>
+              <td><SeverityPill severity={item.severity} /></td>
+              <td>{item.candidate}</td>
+              <td>{item.hosts}/{item.ttps}</td>
+              <td>{item.volume}</td>
+              <td>{item.duration}</td>
+              <td><StatusPill status={item.status} /></td>
+              <td>{item.date}</td>
+              <td>
+                <div className="confidence-cell">
+                  <span>{item.confidence}%</span>
+                  <div className="progress-track"><i style={{ width: `${item.confidence}%` }} /></div>
+                </div>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  className="row-link"
+                  onClick={() => onOpenInvestigation(item.id)}
+                  disabled={item.status === 'Failed'}
+                >
+                  Open
+                  <ArrowRight size={14} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function InvestigationDetailPage({ investigation, activeTab, setActiveTab }) {
+  return (
+    <div className="detail-shell page-panel">
+      <div className="detail-header">
+        <div>
+          <div className="eyebrow">Case {investigation.id}</div>
+          <h1>{investigation.name}</h1>
+          <div className="case-meta">
+            <SeverityPill severity={investigation.severity} />
+            <StatusPill status={investigation.status} />
+            <span>Top candidate: {investigation.candidate}</span>
+            <span>{investigation.confidence}% attribution confidence</span>
+          </div>
+        </div>
+        <div className="detail-actions">
+          <button type="button" className="secondary-button">
+            <Download size={16} />
+            Export PDF
+          </button>
+          <button type="button" className="danger-button">
+            <ShieldAlert size={16} />
+            Contain Hosts
+          </button>
+        </div>
+      </div>
+
+      <div className="detail-tabs" role="tablist" aria-label="Investigation detail tabs">
+        {detailTabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={activeTab === tab.id ? 'active' : ''}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <Icon size={16} />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="detail-content">
+        {activeTab === 'graph' && <AttackGraphTab />}
+        {activeTab === 'attribution' && <AttributionTab />}
+        {activeTab === 'simulation' && <SimulationTab />}
+        {activeTab === 'query' && <QueryWorkspacePage investigation={investigation} embedded />}
+        {activeTab === 'report' && <ForensicReportTab />}
+      </div>
+    </div>
+  );
+}
+
+function AttackGraphTab() {
+  const [selectedNode, setSelectedNode] = useState(graphNodes[1]);
+  const nodesById = useMemo(() => Object.fromEntries(graphNodes.map((node) => [node.id, node])), []);
+
+  return (
+    <div className="graph-tab">
+      <div className="graph-workspace">
+        <div className="graph-toolbar">
+          <div className="toolbar-group">
+            <button type="button" className="tool-button active" title="Investigate selected path">
+              <Target size={16} />
+            </button>
+            <button type="button" className="tool-button" title="Show compromised hosts">
+              <ShieldAlert size={16} />
+            </button>
+            <button type="button" className="tool-button" title="Fit graph">
+              <Gauge size={16} />
+            </button>
+          </div>
+          <div className="graph-legend">
+            <span><i className="legend-dot compromised" />Compromised</span>
+            <span><i className="legend-dot dc" />Domain Controller</span>
+            <span><i className="legend-dot clean" />Clean</span>
+            <span><i className="legend-dot external" />External</span>
+          </div>
+        </div>
+
+        <div className="graph-canvas">
+          <svg viewBox="0 0 1040 430" role="img" aria-label="APT attack graph">
+            <defs>
+              <marker id="graph-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+                <path d="M0,0 L9,4.5 L0,9 z" />
+              </marker>
+            </defs>
+            {graphEdges.map((edge, index) => {
+              const source = nodesById[edge.source];
+              const target = nodesById[edge.target];
+              const id = `edge-${index}`;
+              const midX = (source.x + target.x) / 2;
+              const midY = (source.y + target.y) / 2;
+              const curve = edge.type === 'discovery' ? 70 : edge.type === 'credential' ? -42 : 0;
+              const path = `M${source.x},${source.y} Q${midX},${midY + curve} ${target.x},${target.y}`;
+              return (
+                <g className={`graph-edge ${edge.type}`} key={id}>
+                  <path id={id} d={path} markerEnd="url(#graph-arrow)" />
+                  <circle r="4" className="edge-particle">
+                    <animateMotion dur={`${3 + (index % 3)}s`} repeatCount="indefinite">
+                      <mpath href={`#${id}`} />
+                    </animateMotion>
+                  </circle>
+                  <text x={midX} y={midY + curve / 2 - 8}>{edge.label}</text>
+                </g>
+              );
+            })}
+            {graphNodes.map((node) => (
+              <g
+                key={node.id}
+                className={`graph-node ${node.status} ${selectedNode?.id === node.id ? 'selected' : ''}`}
+                transform={`translate(${node.x} ${node.y})`}
+                role="button"
+                tabIndex="0"
+                onClick={() => setSelectedNode(node)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') setSelectedNode(node);
+                }}
+              >
+                <circle className="node-halo" r={node.kind === 'dc' ? 46 : 39} />
+                <circle className="node-core" r={node.kind === 'dc' ? 28 : 24} />
+                <text className="node-label" y={node.kind === 'dc' ? 50 : 46}>{node.label}</text>
+                <text className="node-subtitle" y={node.kind === 'dc' ? 67 : 63}>{node.subtitle}</text>
+              </g>
+            ))}
+          </svg>
+        </div>
+
+        <AttackTimeline />
+      </div>
+      <NodeSidePanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+    </div>
+  );
+}
+
+function AttackTimeline() {
+  return (
+    <div className="attack-timeline" aria-label="Attack event timeline">
+      {timelineStages.map((stage, index) => (
+        <div className={`timeline-step ${stage.tone}`} key={stage.label}>
+          <div className="timeline-index">{index + 1}</div>
+          <div>
+            <strong>{stage.label}</strong>
+            <span>{stage.time} - {stage.ttp}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NodeSidePanel({ node, onClose }) {
+  if (!node) {
+    return (
+      <aside className="node-panel empty">
+        <Network size={28} />
+        <strong>Select a graph node</strong>
+        <span>Node metadata, TTPs, timestamps, and event context will appear here.</span>
+      </aside>
+    );
+  }
+
+  const iconMap = { host: Server, user: Users, external: Globe, dc: Lock, cloud: Database };
+  const Icon = iconMap[node.kind] || Cpu;
+
+  return (
+    <aside className="node-panel">
+      <div className="node-panel-header">
+        <div className={`node-panel-icon ${node.status}`}>
+          <Icon size={20} />
+        </div>
+        <div>
+          <span>{node.kind}</span>
+          <h2>{node.label}</h2>
+        </div>
+        <button type="button" className="ghost-icon" onClick={onClose} title="Close node detail">
+          <X size={16} />
+        </button>
+      </div>
+      <p className="node-summary">{node.detail}</p>
+      <div className="detail-list">
+        <Row label="IP / Scope" value={node.ip} />
+        {node.user && <Row label="Primary User" value={node.user} />}
+        <Row label="First Seen" value={node.firstSeen} />
+        <Row label="Last Seen" value={node.lastSeen} />
+        <Row label="Related Events" value={String(node.events)} />
+      </div>
+      <div className="ttp-stack">
+        <span>Observed TTPs</span>
+        <div>
+          {node.ttps.map((ttp) => (
+            <code key={ttp}>{ttp}</code>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function AttributionTab() {
+  const top = aptAttribution[0];
+  return (
+    <div className="attribution-layout">
+      <div className="warning-banner">
+        <AlertCircle size={18} />
+        <div>
+          <strong>False Flag Advisory</strong>
+          <span>Overlap between APT29 and APT41 tradecraft is present. Sequence timing and cloud token behavior favor APT29.</span>
+        </div>
+      </div>
+      <Panel className="attribution-hero" title="Competitive Attribution" icon={Target}>
+        <div className="gauge-row">
+          <div className="confidence-gauge" style={{ '--score': `${top.score}%` }}>
+            <span>{top.score}%</span>
+            <small>{top.name}</small>
+          </div>
+          <div className="formula-card">
+            <div className="formula-line">
+              <span>Base</span>
+              <b>42</b>
+              <span>+</span>
+              <span>IoC</span>
+              <b>14</b>
+              <span>+</span>
+              <span>Infra</span>
+              <b>11</b>
+              <span>+</span>
+              <span>Sequence</span>
+              <b>18</b>
+              <span>-</span>
+              <span>False Flag</span>
+              <b>11</b>
+              <span>=</span>
+              <strong>74%</strong>
+            </div>
+            <p>Jaccard similarity, infrastructure co-location, and attack sequence agreement weighted by deception penalties.</p>
+          </div>
+        </div>
+      </Panel>
+      <Panel title="Candidate Ranking" icon={BarChart3}>
+        <div className="ranking-list">
+          {aptAttribution.map((actor, index) => (
+            <div className="ranking-row" key={actor.name}>
+              <div className="rank-number">{index + 1}</div>
+              <div>
+                <strong>{actor.name}</strong>
+                <span>{actor.sponsor}</span>
+              </div>
+              <div className="ranking-score">
+                <span>{actor.score}%</span>
+                <div className="progress-track"><i style={{ width: `${actor.score}%` }} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Jaccard Similarity Breakdown" icon={Activity}>
+        <div className="similarity-grid">
+          {aptAttribution.map((actor) => (
+            <div className="similarity-card" key={actor.name}>
+              <strong>{actor.name}</strong>
+              <Row label="Jaccard" value={actor.jaccard.toFixed(2)} />
+              <Row label="IoC Match" value={actor.ioc.toFixed(2)} />
+              <Row label="Infrastructure" value={actor.infra.toFixed(2)} />
+              <Row label="Sequence" value={actor.sequence.toFixed(2)} />
+              <div className="ttp-stack inline">
+                {actor.ttps.map((ttp) => <code key={ttp}>{ttp}</code>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SimulationTab() {
+  return (
+    <div className="simulation-list">
+      {simulationPredictions.map((prediction, index) => (
+        <article className={`prediction-card ${prediction.risk}`} key={prediction.technique}>
+          <div className="prediction-number">{index + 1}</div>
+          <div className="prediction-body">
+            <div className="prediction-header">
+              <div>
+                <code>{prediction.technique}</code>
+                <h3>{prediction.title}</h3>
+              </div>
+              <span className={`risk-pill ${prediction.risk}`}>{prediction.risk}</span>
+            </div>
+            <div className="prediction-probability">
+              <span>{prediction.probability}% forecast probability</span>
+              <div className="progress-track"><i style={{ width: `${prediction.probability}%` }} /></div>
+            </div>
+            <p>{prediction.rationale}</p>
+            <div className="tool-strip">
+              {prediction.tools.map((tool) => <code key={tool}>{tool}</code>)}
+            </div>
+            <div className="detection-block">
+              <Shield size={15} />
+              <span>{prediction.detection}</span>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function QueryWorkspacePage({ investigation, embedded = false }) {
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text:
+        'Context loaded for INV-2026-0426-APT29. I can reason over graph paths, evidence, attribution scores, and next-step simulations.',
+    },
+  ]);
+  const suggestions = [
+    'What would APT29 do next?',
+    'Which host should I contain first?',
+    'Explain the false flag advisory.',
+    'Show all lateral movement paths.',
+  ];
+
+  const send = (text = input) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const answer = buildAssistantAnswer(trimmed);
+    setMessages((current) => [
+      ...current,
+      { role: 'analyst', text: trimmed },
+      { role: 'assistant', text: answer },
+    ]);
+    setInput('');
+  };
+
+  return (
+    <div className={`query-page ${embedded ? 'embedded' : 'page-panel'}`}>
+      <Panel title="Investigation Context Chat" icon={MessageSquare} className="chat-panel">
+        <div className="chat-context">
+          <span>Loaded case</span>
+          <strong>{investigation.id}</strong>
+          <small>{investigation.name}</small>
+        </div>
+        <div className="chat-history">
+          {messages.map((message, index) => (
+            <div className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
+              <div className="message-avatar">{message.role === 'assistant' ? 'AI' : 'SA'}</div>
+              <p>{message.text}</p>
+            </div>
+          ))}
+        </div>
+        <div className="suggestion-row">
+          {suggestions.map((suggestion) => (
+            <button key={suggestion} type="button" onClick={() => send(suggestion)}>
+              {suggestion}
+            </button>
+          ))}
+        </div>
+        <form
+          className="query-input"
+          onSubmit={(event) => {
+            event.preventDefault();
+            send();
+          }}
+        >
+          <input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Ask about attribution, evidence, paths, or containment..."
+          />
+          <button type="submit" className="primary-button" disabled={!input.trim()}>
+            <Send size={16} />
+          </button>
+        </form>
+      </Panel>
+    </div>
+  );
+}
+
+function buildAssistantAnswer(question) {
+  const lower = question.toLowerCase();
+  if (lower.includes('next')) {
+    return 'The highest-probability next step is Kerberoasting (T1558.003) against finance service accounts. Evidence: SPN enumeration, DC adjacency, and APT29 sequence similarity at 0.72.';
+  }
+  if (lower.includes('contain') || lower.includes('first')) {
+    return 'Contain WKSTN-HR-01 and FS-FIN-02 first. WKSTN-HR-01 is the entry point, while FS-FIN-02 is staging exfiltration and has the most active data-access edges.';
+  }
+  if (lower.includes('false flag')) {
+    return 'APT41 overlap comes from shared SMB movement and web tooling patterns. The penalty is applied because infrastructure and cloud token behavior align more strongly with APT29 than APT41.';
+  }
+  if (lower.includes('lateral')) {
+    return 'Observed lateral path: WKSTN-HR-01 -> FS-FIN-02 via SMB/Admin Shares, then FS-FIN-02 -> JMP-ADMIN-04 using WMI discovery, and finally JMP-ADMIN-04 -> DC-01 through Kerberos abuse.';
+  }
+  return 'The case evidence points to a high-confidence APT29-style cloud pivot with token replay, SMB movement, domain discovery, and cloud-storage exfiltration. I would prioritize containment of compromised hosts and password reset for maria.chen.';
+}
+
+function ForensicReportTab() {
+  const [selectedEvent, setSelectedEvent] = useState(forensicEvents[0]);
+  return (
+    <div className="forensic-layout">
+      <Panel title="Kill Chain Coverage" icon={Layers3}>
+        <div className="killchain-boxes">
+          {killChainCoverage.map((item) => (
+            <button
+              key={item.phase}
+              type="button"
+              className={`killchain-box ${item.score > 80 ? 'hot' : item.score > 60 ? 'warm' : 'cool'}`}
+            >
+              <span>{item.phase}</span>
+              <strong>{item.score}%</strong>
+            </button>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Event Timeline" icon={Clock} className="forensic-events">
+        {forensicEvents.map((event) => (
+          <button
+            type="button"
+            key={event.id}
+            className={`forensic-card ${selectedEvent.id === event.id ? 'active' : ''}`}
+            onClick={() => setSelectedEvent(event)}
+          >
+            <code>{event.id}</code>
+            <div>
+              <strong>{event.title}</strong>
+              <span>{event.timestamp} - {event.host}</span>
+              <p>{event.evidence}</p>
+            </div>
+            <ChevronRight size={17} />
+          </button>
+        ))}
+      </Panel>
+      <EvidencePanel event={selectedEvent} />
+    </div>
+  );
+}
+
+function EvidencePanel({ event }) {
+  return (
+    <aside className="evidence-panel">
+      <div className="evidence-header">
+        <span>Evidence Detail</span>
+        <h2>{event.id}</h2>
+      </div>
+      <div className="detail-list">
+        <Row label="Technique" value={event.title} />
+        <Row label="Phase" value={event.phase} />
+        <Row label="Event ID" value={event.eventId} />
+        <Row label="Timestamp" value={event.timestamp} />
+        <Row label="Host" value={event.host} />
+        <Row label="Hash" value={event.hash} />
+        <Row label="Registry" value={event.registry} />
+      </div>
+      <div className="evidence-summary">
+        <strong>Evidence Summary</strong>
+        <p>{event.evidence}</p>
+      </div>
+      <a href={event.mitre} target="_blank" rel="noreferrer" className="secondary-button mitre-link">
+        <ExternalLink size={15} />
+        Open MITRE ATT&CK
+      </a>
+    </aside>
+  );
+}
+
+function AptLibraryPage() {
+  const [region, setRegion] = useState('All');
+  const [selectedActor, setSelectedActor] = useState(null);
+  const regions = ['All', 'Russia', 'China', 'North Korea', 'Iran', 'Criminal'];
+  const actors = aptLibrary.filter((actor) => region === 'All' || actor.region === region);
+
+  return (
+    <div className="page-panel library-page">
+      <div className="action-bar">
+        <div className="segmented-control">
+          {regions.map((item) => (
+            <button
+              type="button"
+              key={item}
+              className={region === item ? 'active' : ''}
+              onClick={() => setRegion(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <span className="panel-chip">{actors.length} actors</span>
+      </div>
+      <div className="apt-grid">
+        {actors.map((actor) => (
+          <button
+            type="button"
+            className={`apt-card region-${slug(actor.region)}`}
+            key={actor.name}
+            onClick={() => setSelectedActor(actor)}
+          >
+            <div className="apt-card-top">
+              <span>{actor.region}</span>
+              <b>Active</b>
+            </div>
+            <h2>{actor.name}</h2>
+            <p>{actor.sponsor}</p>
+            <div className="apt-card-meta">
+              <span>{actor.active}</span>
+              <span>{actor.ttps.length} known TTPs</span>
+            </div>
+            <div className="ttp-stack inline">
+              {actor.ttps.slice(0, 4).map((ttp) => <code key={ttp}>{ttp}</code>)}
+            </div>
+          </button>
+        ))}
+      </div>
+      {selectedActor && <ActorModal actor={selectedActor} onClose={() => setSelectedActor(null)} />}
+    </div>
+  );
+}
+
+function ActorModal({ actor, onClose }) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="actor-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <span>{actor.region} threat actor</span>
+            <h2>{actor.name}</h2>
+          </div>
+          <button type="button" className="ghost-icon" onClick={onClose} title="Close actor details">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="modal-grid">
+          <Row label="Sponsor" value={actor.sponsor} />
+          <Row label="Active" value={actor.active} />
+          <Row label="Aliases" value={actor.aliases.join(', ')} />
+          <Row label="Primary Sectors" value={actor.sectors.join(', ')} />
+        </div>
+        <div className="modal-section">
+          <span>Tactical workflow</span>
+          <p>{actor.workflow}</p>
+        </div>
+        <div className="modal-section">
+          <span>Known TTPs</span>
+          <div className="ttp-stack inline">
+            {actor.ttps.map((ttp) => <code key={ttp}>{ttp}</code>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MitrePage() {
+  const [selected, setSelected] = useState(mitreMatrix[0].techniques[0]);
+
+  return (
+    <div className="page-panel mitre-page">
+      <div className="matrix-grid">
+        {mitreMatrix.map((column) => (
+          <section className="matrix-column" key={column.tactic}>
+            <h2>{column.tactic}</h2>
+            {column.techniques.map((technique) => (
+              <button
+                key={`${column.tactic}-${technique.id}`}
+                type="button"
+                className={`matrix-cell ${technique.detected ? 'detected' : ''} ${selected.id === technique.id ? 'active' : ''}`}
+                onClick={() => setSelected({ ...technique, tactic: column.tactic })}
+              >
+                <code>{technique.id}</code>
+                <span>{technique.name}</span>
+              </button>
+            ))}
+          </section>
+        ))}
+      </div>
+      <aside className="matrix-detail">
+        <span>Technique Detail</span>
+        <h2>{selected.id}</h2>
+        <p>{selected.name}</p>
+        <div className={`matrix-state ${selected.detected ? 'detected' : ''}`}>
+          {selected.detected ? 'Detected in current investigation' : 'Not observed in current investigation'}
+        </div>
+        <button type="button" className="secondary-button">
+          <Download size={15} />
+          Export Navigator Layer
+        </button>
+      </aside>
+    </div>
+  );
+}
+
+function ThreatFeedsPage({ showToast }) {
+  const [feeds, setFeeds] = useState(threatFeeds);
+  const syncFeed = (id) => {
+    setFeeds((current) => current.map((feed) => (
+      feed.id === id ? { ...feed, last: 'just now', status: 'Connected' } : feed
+    )));
+    showToast('Threat feed synchronized');
+  };
+
+  return (
+    <div className="page-panel feeds-page">
+      <Panel title="Connected Threat Intelligence Sources" icon={Database} className="fill-panel">
+        <div className="feed-list">
+          {feeds.map((feed) => (
+            <div className="feed-row" key={feed.id}>
+              <div className="feed-name">
+                <span className="status-dot online" />
+                <div>
+                  <strong>{feed.name}</strong>
+                  <small>{feed.records} records - last updated {feed.last}</small>
+                </div>
+              </div>
+              <span className="feed-status">{feed.status}</span>
+              <button type="button" className="secondary-button" onClick={() => syncFeed(feed.id)}>
+                <RefreshCcw size={15} />
+                Sync Now
+              </button>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function StandaloneSimulationPage({ investigation }) {
+  return (
+    <div className="page-panel">
+      <Panel title={`LLM Forecast For ${investigation.id}`} icon={Play}>
+        <SimulationTab />
+      </Panel>
+    </div>
+  );
+}
+
+function ReportsPage({ showToast }) {
+  const [selectedReport, setSelectedReport] = useState(reportArchive[0]);
+
+  return (
+    <div className="page-panel reports-page">
+      <Panel title="Generated Reports" icon={FileText}>
+        <div className="report-list">
+          {reportArchive.map((report) => (
+            <div className={`report-row ${selectedReport.id === report.id ? 'active' : ''}`} key={report.id}>
+              <div>
+                <strong>{report.title}</strong>
+                <small>{report.id} - {report.type} - {report.date}</small>
+              </div>
+              <span className="feed-status">{report.status}</span>
+              <button type="button" className="secondary-button" onClick={() => setSelectedReport(report)}>
+                <Eye size={15} />
+                Preview
+              </button>
+              <button type="button" className="primary-button" onClick={() => showToast(`${report.id} download prepared`)}>
+                <FileDown size={15} />
+                Download
+              </button>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="Report Preview" icon={BookOpen}>
+        <div className="report-preview">
+          <div className="report-cover">
+            <ShieldAlert size={34} />
+            <span>RAPTOR Forensic Report</span>
+            <h2>{selectedReport.title}</h2>
+            <small>{selectedReport.date} - Prepared for SOC Tier-2</small>
+          </div>
+          <div className="report-snippet">
+            <h3>Executive Summary</h3>
+            <p>
+              RAPTOR attributes the observed intrusion to APT29 with 74% confidence. The campaign used phishing,
+              token replay, SMB lateral movement, and cloud-storage exfiltration against finance data.
+            </p>
+            <h3>Immediate Actions</h3>
+            <ul>
+              <li>Contain WKSTN-HR-01 and FS-FIN-02.</li>
+              <li>Revoke active sessions for maria.chen.</li>
+              <li>Monitor Kerberos service-ticket bursts on DC-01.</li>
+            </ul>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function SettingsPage({ showToast }) {
+  const [settings, setSettings] = useState({
+    rag: true,
+    reranker: true,
+    batchWindow: 15,
+    retrievalK: 12,
+    primaryModel: 'claude-4-5-sonnet',
+    fallbackModel: 'gpt-5.2',
+    graphParticles: true,
+  });
+
+  const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+
+  return (
+    <div className="page-panel settings-page">
+      <Panel title="RAG And Inference Controls" icon={SlidersHorizontal}>
+        <div className="settings-grid">
+          <ToggleRow label="RAG Augmentation" detail="Inject graph and evidence context into analyst answers." checked={settings.rag} onChange={(value) => update('rag', value)} />
+          <ToggleRow label="Reranker" detail="Re-score retrieved evidence before LLM synthesis." checked={settings.reranker} onChange={(value) => update('reranker', value)} />
+          <ToggleRow label="Graph Particle Flow" detail="Animate directional attack edges in graph views." checked={settings.graphParticles} onChange={(value) => update('graphParticles', value)} />
+          <label className="setting-field">
+            <span>RAG Batch Window</span>
+            <input type="number" min="5" max="60" value={settings.batchWindow} onChange={(event) => update('batchWindow', Number(event.target.value))} />
+          </label>
+          <label className="setting-field">
+            <span>Retrieval K-value</span>
+            <input type="range" min="4" max="24" value={settings.retrievalK} onChange={(event) => update('retrievalK', Number(event.target.value))} />
+            <strong>{settings.retrievalK}</strong>
+          </label>
+          <label className="setting-field">
+            <span>Primary LLM</span>
+            <select value={settings.primaryModel} onChange={(event) => update('primaryModel', event.target.value)}>
+              <option value="claude-4-5-sonnet">Claude-4.5 Sonnet</option>
+              <option value="gpt-5.2">GPT-5.2</option>
+              <option value="local-mistral">Local Mistral</option>
+            </select>
+          </label>
+          <label className="setting-field">
+            <span>Fallback LLM</span>
+            <select value={settings.fallbackModel} onChange={(event) => update('fallbackModel', event.target.value)}>
+              <option value="gpt-5.2">GPT-5.2</option>
+              <option value="claude-4-5-sonnet">Claude-4.5 Sonnet</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+        </div>
+        <div className="settings-actions">
+          <button type="button" className="primary-button" onClick={() => showToast('Settings saved')}>
+            <CheckCircle2 size={16} />
+            Save Settings
+          </button>
+          <button type="button" className="secondary-button" onClick={() => showToast('Health check completed')}>
+            <Activity size={16} />
+            Run Health Check
+          </button>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ToggleRow({ label, detail, checked, onChange }) {
+  return (
+    <label className="toggle-row">
+      <span>
+        <strong>{label}</strong>
+        <small>{detail}</small>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <i />
+    </label>
+  );
+}
+
+function Panel({ title, icon: Icon, action, children, className = '' }) {
+  return (
+    <section className={`panel ${className}`}>
+      <div className="panel-header">
+        <div>
+          <Icon size={16} />
+          <span>{title}</span>
+        </div>
+        {action}
       </div>
       {children}
     </section>
   );
 }
 
-function InvestigationSummary({ status, report, topAttribution }) {
-  const progress = status?.progress || 0;
-  const attributionDisplay = getAttributionDisplay(topAttribution);
+function Row({ label, value }) {
   return (
-    <div className="summary-stack">
-      <div className="summary-row">
-        <span>Status</span>
-        <strong>{status?.status || 'unknown'}</strong>
-      </div>
-      <div className="summary-row">
-        <span>Current phase</span>
-        <strong>{status?.current_phase || 'Idle'}</strong>
-      </div>
-      <div className="thin-progress">
-        <span style={{ width: `${progress}%` }} />
-      </div>
-      <div className="summary-grid">
-        <div><span>Events</span><strong>{report?.event_count || '--'}</strong></div>
-        <div><span>Techniques</span><strong>{report?.technique_count || '--'}</strong></div>
-        <div><span>Attribution</span><strong>{attributionDisplay.actorLabel}</strong></div>
-      </div>
+    <div className="detail-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
 
-function ProcessingView({ status, investigationId }) {
-  return (
-    <div className="processing-view">
-      <div className="processing-ring">
-        <Loader2 className="w-10 h-10 animate-spin" />
-        <span>{status?.progress || 0}%</span>
-      </div>
-      <div>
-        <h2>{status?.current_phase || 'Processing investigation'}</h2>
-        <p>RAPTOR is parsing logs, mapping ATT&CK techniques, building graph context, and scoring attribution.</p>
-        <code>{investigationId}</code>
-      </div>
-      <div className="thin-progress">
-        <span style={{ width: `${status?.progress || 0}%` }} />
-      </div>
-    </div>
-  );
+function SeverityPill({ severity }) {
+  return <span className={`severity-pill ${severity.toLowerCase()}`}>{severity}</span>;
 }
 
-function ThreatFeedMini({ healthSubsystems = {}, healthCheckedAt = '' }) {
-  const weaviate = healthSubsystems?.weaviate?.status || 'unknown';
-  const elastic = healthSubsystems?.elasticsearch?.status || 'unknown';
-  const redis = healthSubsystems?.redis?.status || 'unknown';
-  return (
-    <div className="feed-mini">
-      <FeedMiniRow tone={weaviate === 'healthy' ? 'success' : 'warning'} title="RAG retrieval" value={weaviate} />
-      <FeedMiniRow tone={elastic === 'healthy' ? 'success' : 'warning'} title="Elasticsearch" value={elastic} />
-      <FeedMiniRow tone={redis === 'healthy' ? 'success' : 'warning'} title="Redis cache" value={redis} />
-      <FeedMiniRow tone="success" title="STIX validation" value="Canonical ATT&CK IDs" />
-      <FeedMiniRow tone="success" title="Last health check" value={healthCheckedAt || 'not checked'} />
-    </div>
-  );
+function StatusPill({ status }) {
+  return <span className={`status-pill ${status.toLowerCase()}`}>{status}</span>;
 }
 
-function FeedMiniRow({ tone, title, value }) {
-  return (
-    <div className={`feed-mini-row ${tone}`}>
-      <span />
-      <div>
-        <strong>{title}</strong>
-        <small>{value}</small>
-      </div>
-    </div>
-  );
-}
-
-function FindingRow({ finding }) {
-  return (
-    <div className="finding-row">
-      <code>{finding.technique_id}</code>
-      <div>
-        <strong>{finding.technique_name}</strong>
-        <span>{finding.evidence_summary}</span>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon, title, text }) {
-  return (
-    <div className="empty-state">
-      <Icon className="w-8 h-8" />
-      <strong>{title}</strong>
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function LoadingRows() {
-  return (
-    <div className="loading-rows">
-      <Loader2 className="w-5 h-5 animate-spin" />
-      Loading profiles...
-    </div>
-  );
-}
-
-function getGraphNodeType(node) {
-  const labelList = node?.metadata?.labels || node?.labels || [];
-  if (node?.node_type) return String(node.node_type).toLowerCase();
-  if (labelList.includes('Host')) return 'host';
-  if (labelList.includes('User')) return 'user';
-  if (labelList.includes('Technique')) return 'technique';
-  return '';
-}
-
-function isCompromisedHostNode(node) {
-  if (getGraphNodeType(node) !== 'host') return false;
-  const metadata = node?.metadata || node?.props || {};
-  return Boolean(
-    metadata.compromised ||
-    node?.compromised ||
-    node?.props?.compromised ||
-    String(node?.color || '').toLowerCase() === '#e11d48' ||
-    String(node?.color || '').toLowerCase() === '#dc3545'
-  );
-}
-
-function getCompromisedHostCount(graphData) {
-  const nodes = graphData?.nodes || [];
-  const edges = graphData?.edges || [];
-  const hostIds = new Set(nodes.filter((node) => getGraphNodeType(node) === 'host').map((node) => node.id));
-  const compromised = new Set(
-    nodes
-      .filter(isCompromisedHostNode)
-      .map((node) => node.id)
-  );
-
-  edges.forEach((edge) => {
-    const edgeType = String(edge.edge_type || edge.rel_type || '').toLowerCase();
-    if (edgeType.includes('lateral') && hostIds.has(edge.target)) {
-      compromised.add(edge.target);
-    }
-  });
-
-  return compromised.size;
-}
-
-function getAttributionDisplay(top) {
-  if (!top) {
-    return {
-      value: '--',
-      sub: 'pending attribution',
-      tone: 'success',
-      actorLabel: '--',
-      reliable: false,
-    };
-  }
-
-  const score = Number(top.confidence_score || 0);
-  const percent = `${Math.round(score * 100)}%`;
-  const label = String(top.confidence_label || 'UNKNOWN').toUpperCase();
-  const reliable = ['HIGH', 'MEDIUM'].includes(label) && score >= 0.5;
-  const lowConfidence = label === 'LOW' || score >= 0.3;
-
-  if (reliable) {
-    return {
-      value: percent,
-      sub: `${top.apt_name || 'Unknown actor'} ${label}`,
-      tone: 'success',
-      actorLabel: top.apt_name || '--',
-      reliable,
-    };
-  }
-
-  return {
-    value: lowConfidence ? 'LOW CONF' : 'UNKNOWN',
-    sub: `${top.apt_name || 'Unknown actor'} ${percent} tentative`,
-    tone: 'warning',
-    actorLabel: 'Unconfirmed',
-    reliable: false,
-  };
-}
-
-function investigationSeverity(item) {
-  if (item.status === 'failed') return 'High';
-  if ((item.technique_count || 0) >= 5) return 'High';
-  if ((item.technique_count || 0) >= 2 || item.status === 'processing') return 'Medium';
-  return 'Low';
-}
-
-function investigationSeverityScore(item) {
-  return { High: 3, Medium: 2, Low: 1 }[investigationSeverity(item)] || 0;
-}
-
-function buildMetrics(report, graphData, status) {
-  const nodes = graphData?.nodes || [];
-  const hosts = nodes.filter((node) => getGraphNodeType(node) === 'host');
-  const compromisedHosts = getCompromisedHostCount(graphData);
-  const top = report?.attribution?.[0];
-  const attributionDisplay = getAttributionDisplay(top);
-
-  return [
-    {
-      label: 'Active Investigations',
-      value: status ? '1' : '0',
-      sub: status?.status || 'no active case',
-      tone: 'accent',
-      icon: Archive,
-    },
-    {
-      label: 'Hosts Compromised',
-      value: hosts.length ? String(compromisedHosts) : '--',
-      sub: hosts.length ? `${hosts.length} hosts observed` : 'waiting for graph',
-      tone: 'danger',
-      icon: ShieldAlert,
-    },
-    {
-      label: 'Techniques Observed',
-      value: report?.technique_count || '--',
-      sub: `${report?.findings?.length || 0} findings`,
-      tone: 'warning',
-      icon: Activity,
-    },
-    {
-      label: 'Attribution Confidence',
-      value: attributionDisplay.value,
-      sub: attributionDisplay.sub,
-      tone: attributionDisplay.tone,
-      icon: BarChart3,
-    },
-  ];
+function slug(value) {
+  return value.toLowerCase().replace(/\s+/g, '-');
 }
