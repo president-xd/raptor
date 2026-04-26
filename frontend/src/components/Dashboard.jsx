@@ -47,12 +47,15 @@ import {
   API_BASE,
   askInvestigationQuestion,
   getDetailedHealth,
+  getElasticsearchPollStatus,
   getInvestigationGraph,
   getInvestigationReport,
+  listCisaKev,
   listAptProfiles,
   listInvestigations,
   runSimulation,
   startTextInvestigation,
+  syncCisaKev,
   uploadInvestigation,
 } from '../api/raptorApi';
 
@@ -1672,6 +1675,40 @@ function MitrePage({ report }) {
 
 function ThreatFeedsPage({ health, error, onRefresh }) {
   const rows = healthRows(health, error);
+  const [kev, setKev] = useState(null);
+  const [kevError, setKevError] = useState('');
+  const [kevLoading, setKevLoading] = useState(false);
+  const [elasticStatus, setElasticStatus] = useState(null);
+  const [elasticError, setElasticError] = useState('');
+
+  const loadKev = async (refresh = false) => {
+    setKevLoading(true);
+    setKevError('');
+    try {
+      const response = refresh ? await syncCisaKev() : await listCisaKev({ limit: 8 });
+      setKev(response);
+    } catch (loadError) {
+      setKevError(loadError.message || 'CISA KEV connector failed');
+    } finally {
+      setKevLoading(false);
+    }
+  };
+
+  const loadElasticStatus = async () => {
+    setElasticError('');
+    try {
+      const response = await getElasticsearchPollStatus();
+      setElasticStatus(response);
+    } catch (loadError) {
+      setElasticError(loadError.message || 'Elasticsearch poller status failed');
+    }
+  };
+
+  useEffect(() => {
+    loadKev(false);
+    loadElasticStatus();
+  }, []);
+
   return (
     <div className="page-panel feeds-page">
       <Panel
@@ -1701,8 +1738,62 @@ function ThreatFeedsPage({ health, error, onRefresh }) {
           ))}
         </div>
         <div className="system-note">
-          Threat-feed providers are not exposed as backend connector endpoints in this codebase. This page shows real subsystem health instead of local feed mockups.
+          Subsystem rows are loaded from backend health. CISA KEV and Elasticsearch poller status are live backend connector endpoints.
         </div>
+      </Panel>
+      <Panel
+        title="CISA KEV Connector"
+        icon={ShieldAlert}
+        action={(
+          <button type="button" className="secondary-button" onClick={() => loadKev(true)} disabled={kevLoading}>
+            <RefreshCcw size={15} />
+            {kevLoading ? 'Syncing' : 'Sync Now'}
+          </button>
+        )}
+      >
+        {kevError && <InlineError message={kevError} />}
+        {!kev && !kevError && <EmptyState icon={ShieldAlert} title="Loading CISA KEV catalog" />}
+        {kev && (
+          <div className="feed-list">
+            <div className="feed-row">
+              <div className="feed-name">
+                <span className="status-dot online" />
+                <div>
+                  <strong>{kev.title || 'Known Exploited Vulnerabilities'}</strong>
+                  <small>{kev.count} records - cached {kev.cached_at || 'from response'}</small>
+                </div>
+              </div>
+              <span className="feed-status">{kev.catalogVersion || 'KEV'}</span>
+            </div>
+            {(kev.vulnerabilities || []).slice(0, 8).map((item) => (
+              <div className="feed-row" key={item.cveID || item.cve_id}>
+                <div className="feed-name">
+                  <span className="status-dot online" />
+                  <div>
+                    <strong>{item.cveID || item.cve_id} - {item.vulnerabilityName || item.vulnerability_name}</strong>
+                    <small>{item.vendorProject || item.vendor_project} {item.product} - due {item.dueDate || item.due_date}</small>
+                  </div>
+                </div>
+                <span className="feed-status">{item.knownRansomwareCampaignUse || item.known_ransomware_campaign_use || 'unknown'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+      <Panel title="Elasticsearch Poller" icon={Database}>
+        {elasticError && <InlineError message={elasticError} />}
+        {elasticStatus ? (
+          <div className="settings-grid">
+            <ReadOnlySetting label="Enabled" value={String(elasticStatus.enabled)} />
+            <ReadOnlySetting label="Query" value={elasticStatus.query || '*'} />
+            <ReadOnlySetting label="Interval" value={`${elasticStatus.interval_seconds}s`} />
+            <ReadOnlySetting label="Window" value={`${elasticStatus.window_minutes}m`} />
+            <ReadOnlySetting label="Last Status" value={elasticStatus.last_status || 'none'} />
+            <ReadOnlySetting label="Investigations" value={String(elasticStatus.investigation_count || 0)} />
+          </div>
+        ) : (
+          <EmptyState icon={Database} title="Loading Elasticsearch poller state" />
+        )}
       </Panel>
     </div>
   );
@@ -2139,7 +2230,7 @@ function healthRows(health, healthError) {
     return [{ name: 'RAPTOR API', status: 'degraded', detail: healthError, online: false }];
   }
   const subsystems = health?.subsystems || {};
-  const names = ['api', 'sqlite', 'neo4j', 'weaviate', 'elasticsearch', 'redis', 'llm'];
+  const names = ['api', 'auth', 'sqlite', 'evidence', 'neo4j', 'weaviate', 'elasticsearch', 'redis', 'cisa_kev', 'llm'];
   return names.map((name) => {
     const entry = subsystems[name] || { status: 'unknown', detail: 'not checked' };
     return {
