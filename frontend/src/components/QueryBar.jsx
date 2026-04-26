@@ -77,6 +77,11 @@ export default function QueryBar({ investigationId }) {
               </span>
             )}
           </div>
+          {(answer.confidence === 'low' || !answer.sources?.length) && (
+            <div className="query-warning">
+              Low confidence or no grounding evidence returned. Treat this as a lead, not a verified answer.
+            </div>
+          )}
           <p className="text-sm text-raptor-text leading-relaxed whitespace-pre-wrap">{answer.answer}</p>
           <SourceList sources={answer.sources || []} />
         </div>
