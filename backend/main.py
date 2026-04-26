@@ -11,12 +11,16 @@ import asyncio
 import sqlite3
 import traceback
 import socket
+import hashlib
+import hmac
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -33,7 +37,17 @@ from config import (
     CORS_ALLOW_CREDENTIALS,
     ELASTICSEARCH_URL,
     ELASTIC_INDEX_PREFIX,
+    ELASTIC_POLL_ENABLED,
+    ELASTIC_POLL_QUERY,
+    ELASTIC_POLL_INTERVAL_SECONDS,
+    ELASTIC_POLL_WINDOW_MINUTES,
     REDIS_URL,
+    REDIS_CACHE_TTL_SECONDS,
+    RAPTOR_API_KEY,
+    RAPTOR_AUTH_EXEMPT_HEALTH,
+    EVIDENCE_DIR,
+    CISA_KEV_URL,
+    CISA_KEV_CACHE_PATH,
 )
 from schema import (
     RaptorEvent, Finding, AnalysisResult, AttributionResult,
@@ -45,6 +59,10 @@ from models import (
     SimulateRequest, SimulationResponse,
     QueryRequest, QueryResponse,
     APTProfileSummary, APTProfileListResponse,
+    EvidenceFileSummary, EvidenceListResponse,
+    AuditEntry, AuditLogResponse,
+    CisaKevVulnerability, CisaKevResponse,
+    ElasticPollRequest, ElasticPollResponse, ElasticPollStatus,
 )
 
 # ─── App Setup ────────────────────────────────────────────────────────
@@ -62,6 +80,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def optional_api_key_auth(request: Request, call_next):
+    """Require an API key when RAPTOR_API_KEY is configured."""
+    if not RAPTOR_API_KEY:
+        return await call_next(request)
+
+    path = request.url.path
+    public_paths = {"/", "/docs", "/redoc", "/openapi.json"}
+    if path in public_paths:
+        return await call_next(request)
+    if RAPTOR_AUTH_EXEMPT_HEALTH and path == "/api/v1/health":
+        return await call_next(request)
+    if not path.startswith("/api/"):
+        return await call_next(request)
+
+    supplied = request.headers.get("x-raptor-api-key", "")
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        supplied = auth_header.split(" ", 1)[1].strip()
+
+    if not hmac.compare_digest(supplied, RAPTOR_API_KEY):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Valid X-RAPTOR-API-Key or Bearer token required"},
+        )
+
+    return await call_next(request)
 
 # ─── SQLite Job State ────────────────────────────────────────────────
 
@@ -90,6 +137,57 @@ def init_db():
             completed_at TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS evidence_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            investigation_id TEXT NOT NULL,
+            original_filename TEXT DEFAULT '',
+            stored_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            content_type TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            actor TEXT DEFAULT '',
+            action TEXT NOT NULL,
+            investigation_id TEXT,
+            detail_json TEXT DEFAULT '{}',
+            ip_address TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elastic_poll_state (
+            name TEXT PRIMARY KEY,
+            enabled INTEGER DEFAULT 0,
+            query TEXT DEFAULT '',
+            interval_seconds INTEGER DEFAULT 0,
+            window_minutes INTEGER DEFAULT 0,
+            last_polled_at TEXT DEFAULT '',
+            last_status TEXT DEFAULT '',
+            last_error TEXT DEFAULT '',
+            investigation_count INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+        BEFORE UPDATE ON audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_log is append-only');
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+        BEFORE DELETE ON audit_log
+        BEGIN
+            SELECT RAISE(ABORT, 'audit_log is append-only');
+        END
+    """)
     existing_columns = {
         row[1]
         for row in conn.execute("PRAGMA table_info(investigations)").fetchall()
@@ -102,6 +200,32 @@ def init_db():
     for column, statement in migrations.items():
         if column not in existing_columns:
             conn.execute(statement)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO elastic_poll_state
+        (name, enabled, query, interval_seconds, window_minutes)
+        VALUES ('default', ?, ?, ?, ?)
+        """,
+        (
+            1 if ELASTIC_POLL_ENABLED else 0,
+            ELASTIC_POLL_QUERY,
+            ELASTIC_POLL_INTERVAL_SECONDS,
+            ELASTIC_POLL_WINDOW_MINUTES,
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE elastic_poll_state
+        SET enabled = ?, query = ?, interval_seconds = ?, window_minutes = ?
+        WHERE name = 'default'
+        """,
+        (
+            1 if ELASTIC_POLL_ENABLED else 0,
+            ELASTIC_POLL_QUERY,
+            ELASTIC_POLL_INTERVAL_SECONDS,
+            ELASTIC_POLL_WINDOW_MINUTES,
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -145,10 +269,159 @@ def db_create(inv_id: str, metadata: Optional[dict] = None, input_bytes: int = 0
     conn.close()
 
 
+def _safe_filename(value: str, default: str = "raw.log") -> str:
+    name = Path(value or default).name
+    cleaned = "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "_" for ch in name)
+    return cleaned or default
+
+
+def store_evidence_file(
+    investigation_id: str,
+    content: bytes,
+    metadata: Optional[dict] = None,
+) -> dict:
+    """Persist raw evidence bytes and record metadata in SQLite."""
+    metadata = metadata or {}
+    case_dir = EVIDENCE_DIR / investigation_id
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    original = _safe_filename(metadata.get("filename") or metadata.get("case_name") or "raw.log")
+    source = str(metadata.get("source") or "unknown")
+    stored_name = f"{int(time.time())}_{original}"
+    stored_path = case_dir / stored_name
+    stored_path.write_bytes(content)
+
+    sha256 = hashlib.sha256(content).hexdigest()
+    created_at = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(str(DB_PATH))
+    cur = conn.execute(
+        """
+        INSERT INTO evidence_files
+        (investigation_id, original_filename, stored_path, sha256, size_bytes,
+         content_type, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            investigation_id,
+            original,
+            str(stored_path),
+            sha256,
+            len(content),
+            str(metadata.get("content_type") or "text/plain"),
+            source,
+            created_at,
+        ),
+    )
+    conn.commit()
+    evidence_id = cur.lastrowid
+    conn.close()
+    return {
+        "id": evidence_id,
+        "investigation_id": investigation_id,
+        "original_filename": original,
+        "stored_path": str(stored_path),
+        "sha256": sha256,
+        "size_bytes": len(content),
+        "content_type": str(metadata.get("content_type") or "text/plain"),
+        "source": source,
+        "created_at": created_at,
+    }
+
+
+def list_evidence_files(investigation_id: str) -> list[dict]:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT id, investigation_id, original_filename, stored_path, sha256,
+               size_bytes, content_type, source, created_at
+        FROM evidence_files
+        WHERE investigation_id = ?
+        ORDER BY id DESC
+        """,
+        (investigation_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def audit_log(
+    request: Optional[Request],
+    action: str,
+    investigation_id: Optional[str] = None,
+    detail: Optional[dict] = None,
+):
+    """Append a lightweight audit event."""
+    actor = "anonymous"
+    ip_address = ""
+    if request is not None:
+        actor = request.headers.get("x-raptor-actor") or request.headers.get("x-forwarded-user") or "api-client"
+        if request.client:
+            ip_address = request.client.host
+
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute(
+        """
+        INSERT INTO audit_log
+        (timestamp, actor, action, investigation_id, detail_json, ip_address)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.utcnow().isoformat(),
+            actor,
+            action,
+            investigation_id,
+            json.dumps(detail or {}, default=str),
+            ip_address,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_audit_entries(limit: int = 100, investigation_id: Optional[str] = None) -> list[dict]:
+    safe_limit = max(1, min(limit, 500))
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    if investigation_id:
+        rows = conn.execute(
+            """
+            SELECT id, timestamp, actor, action, investigation_id, detail_json, ip_address
+            FROM audit_log
+            WHERE investigation_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (investigation_id, safe_limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, timestamp, actor, action, investigation_id, detail_json, ip_address
+            FROM audit_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+    conn.close()
+
+    entries = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["detail"] = json.loads(item.pop("detail_json") or "{}")
+        except Exception:
+            item["detail"] = {}
+        entries.append(item)
+    return entries
+
+
 def start_investigation_from_content(
     background_tasks: BackgroundTasks,
     log_content: str,
     metadata: Optional[dict] = None,
+    raw_bytes: Optional[bytes] = None,
 ) -> InvestigateResponse:
     """Validate log text, persist a queued job, and launch the pipeline."""
     if not log_content or not log_content.strip():
@@ -163,9 +436,60 @@ def start_investigation_from_content(
 
     investigation_id = str(uuid.uuid4())
     db_create(investigation_id, metadata, byte_count)
+    store_evidence_file(
+        investigation_id,
+        raw_bytes if raw_bytes is not None else log_content.encode("utf-8", errors="replace"),
+        metadata,
+    )
     background_tasks.add_task(run_investigation, investigation_id, log_content, metadata or {})
 
     logger.info(f"Investigation {investigation_id} started ({byte_count} bytes)")
+    return InvestigateResponse(
+        investigation_id=investigation_id,
+        status="queued",
+        message=f"Investigation started. {byte_count} bytes of logs received.",
+    )
+
+
+def start_investigation_now(
+    log_content: str,
+    metadata: Optional[dict] = None,
+    raw_bytes: Optional[bytes] = None,
+) -> InvestigateResponse:
+    """Create an investigation outside FastAPI BackgroundTasks."""
+    if not log_content or not log_content.strip():
+        raise HTTPException(status_code=400, detail="Investigation input is empty")
+
+    byte_count = len(log_content.encode("utf-8", errors="replace"))
+    if byte_count > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Input too large ({byte_count} bytes). Max allowed is {MAX_UPLOAD_BYTES} bytes.",
+        )
+
+    investigation_id = str(uuid.uuid4())
+    db_create(investigation_id, metadata, byte_count)
+    store_evidence_file(
+        investigation_id,
+        raw_bytes if raw_bytes is not None else log_content.encode("utf-8", errors="replace"),
+        metadata,
+    )
+    thread = threading.Thread(
+        target=run_investigation,
+        args=(investigation_id, log_content, metadata or {}),
+        daemon=True,
+    )
+    thread.start()
+    audit_log(
+        None,
+        "investigation.created",
+        investigation_id,
+        {
+            "source": metadata.get("source") or "unknown",
+            "case_name": metadata.get("case_name") or "",
+            "filename": metadata.get("filename") or "",
+        },
+    )
     return InvestigateResponse(
         investigation_id=investigation_id,
         status="queued",
@@ -221,6 +545,102 @@ def fetch_elasticsearch_logs(
         raise HTTPException(status_code=503, detail=f"Elasticsearch unavailable: {e}")
 
 
+def _redis_send_command(*parts: str) -> Optional[bytes]:
+    """Tiny Redis RESP client for cache use without an extra dependency."""
+    try:
+        parsed = urlparse(REDIS_URL)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        payload = f"*{len(parts)}\r\n".encode("utf-8")
+        for part in parts:
+            raw = str(part).encode("utf-8")
+            payload += f"${len(raw)}\r\n".encode("utf-8") + raw + b"\r\n"
+        with socket.create_connection((host, port), timeout=3) as conn:
+            conn.settimeout(1)
+            conn.sendall(payload)
+            chunks = []
+            while True:
+                try:
+                    chunk = conn.recv(1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    if parts and str(parts[0]).upper() != "GET":
+                        break
+                    if b"\r\n" in b"".join(chunks):
+                        data = b"".join(chunks)
+                        if data.startswith(b"$"):
+                            head, body = data.split(b"\r\n", 1)
+                            expected = int(head[1:])
+                            if expected < 0 or len(body) >= expected + 2:
+                                break
+                except socket.timeout:
+                    break
+            return b"".join(chunks)
+    except Exception as e:
+        logger.debug(f"Redis command skipped: {e}")
+        return None
+
+
+def redis_get_json(key: str) -> Optional[dict]:
+    response = _redis_send_command("GET", key)
+    if not response or response.startswith(b"$-1"):
+        return None
+    try:
+        head, body = response.split(b"\r\n", 1)
+        if not head.startswith(b"$"):
+            return None
+        length = int(head[1:])
+        raw = body[:length]
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+
+
+def redis_set_json(key: str, value: dict, ttl_seconds: int = REDIS_CACHE_TTL_SECONDS) -> bool:
+    payload = json.dumps(value, default=str)
+    if ttl_seconds > 0:
+        response = _redis_send_command("SET", key, payload, "EX", str(ttl_seconds))
+    else:
+        response = _redis_send_command("SET", key, payload)
+    return bool(response and response.startswith(b"+OK"))
+
+
+def fetch_cisa_kev(refresh: bool = False) -> dict:
+    """Fetch the CISA KEV catalog with Redis and file cache fallback."""
+    cache_key = "raptor:cisa_kev"
+    if not refresh:
+        cached = redis_get_json(cache_key)
+        if cached:
+            return cached
+        if CISA_KEV_CACHE_PATH.exists():
+            try:
+                return json.loads(CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+    try:
+        import requests
+        response = requests.get(
+            CISA_KEV_URL,
+            timeout=30,
+            headers={"User-Agent": "RAPTOR/1.0 threat-intel-connector"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as e:
+        if CISA_KEV_CACHE_PATH.exists():
+            logger.warning(f"CISA KEV refresh failed, using file cache: {e}")
+            return json.loads(CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
+        raise HTTPException(status_code=503, detail=f"CISA KEV feed unavailable: {e}")
+
+    payload["_raptor_cached_at"] = datetime.utcnow().isoformat()
+    payload["_raptor_source"] = CISA_KEV_URL
+    CISA_KEV_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    redis_set_json(cache_key, payload)
+    return payload
+
+
 def db_list(limit: int = 25) -> list[dict]:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -237,6 +657,49 @@ def db_list(limit: int = 25) -> list[dict]:
     ).fetchall()
     conn.close()
     return [_summarize_investigation_row(dict(row)) for row in rows]
+
+
+def update_elastic_poll_state(**kwargs):
+    if not kwargs:
+        return
+    conn = sqlite3.connect(str(DB_PATH))
+    sets = ", ".join(f"{key} = ?" for key in kwargs)
+    values = list(kwargs.values()) + ["default"]
+    conn.execute(f"UPDATE elastic_poll_state SET {sets} WHERE name = ?", values)
+    conn.commit()
+    conn.close()
+
+
+def get_elastic_poll_state() -> dict:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        """
+        SELECT enabled, query, interval_seconds, window_minutes,
+               last_polled_at, last_status, last_error, investigation_count
+        FROM elastic_poll_state
+        WHERE name = 'default'
+        """
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {}
+    data = dict(row)
+    data["enabled"] = bool(data.get("enabled"))
+    return data
+
+
+def increment_elastic_poll_investigations():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute(
+        """
+        UPDATE elastic_poll_state
+        SET investigation_count = coalesce(investigation_count, 0) + 1
+        WHERE name = 'default'
+        """
+    )
+    conn.commit()
+    conn.close()
 
 
 def _summarize_investigation_row(row: dict) -> dict:
@@ -432,10 +895,82 @@ def run_investigation(investigation_id: str, log_content: str, metadata: Optiona
                   current_phase=f"Failed: {str(e)[:200]}")
 
 
+def run_elasticsearch_poll_once(
+    query: str = ELASTIC_POLL_QUERY,
+    time_range_start: Optional[str] = None,
+    time_range_end: Optional[str] = None,
+    case_name: str = "",
+    apt_filters: Optional[list[str]] = None,
+) -> ElasticPollResponse:
+    """Poll Elasticsearch once and create an investigation if events are found."""
+    started_at = datetime.utcnow().isoformat()
+    update_elastic_poll_state(last_polled_at=started_at, last_status="polling", last_error="")
+    try:
+        content = fetch_elasticsearch_logs(
+            query=query,
+            time_range_start=time_range_start,
+            time_range_end=time_range_end,
+        )
+    except HTTPException as e:
+        if e.status_code == 404:
+            update_elastic_poll_state(last_status="no_events", last_error="")
+            return ElasticPollResponse(status="no_events", message=e.detail, event_bytes=0)
+        update_elastic_poll_state(last_status="error", last_error=str(e.detail))
+        raise
+
+    metadata = {
+        "source": "elasticsearch-poller",
+        "filename": "elasticsearch_poll.jsonl",
+        "case_name": case_name or f"Elasticsearch poll {started_at}",
+        "elastic_query": query,
+        "time_range_start": time_range_start,
+        "time_range_end": time_range_end,
+        "apt_filters": apt_filters or [],
+    }
+    response = start_investigation_now(content, metadata=metadata)
+    increment_elastic_poll_investigations()
+    update_elastic_poll_state(last_status="investigation_created", last_error="")
+    return ElasticPollResponse(
+        status="investigation_created",
+        message="Elasticsearch events queued for RAPTOR analysis.",
+        investigation_id=response.investigation_id,
+        event_bytes=len(content.encode("utf-8", errors="replace")),
+    )
+
+
+def elastic_poll_loop():
+    """Simple opt-in Elasticsearch polling loop."""
+    logger.info(
+        f"Elasticsearch poller enabled: query={ELASTIC_POLL_QUERY!r}, "
+        f"interval={ELASTIC_POLL_INTERVAL_SECONDS}s"
+    )
+    while True:
+        try:
+            run_elasticsearch_poll_once(
+                query=ELASTIC_POLL_QUERY,
+                time_range_start=f"now-{ELASTIC_POLL_WINDOW_MINUTES}m",
+                time_range_end="now",
+                case_name="Continuous Elasticsearch poll",
+            )
+        except Exception as e:
+            logger.warning(f"Elasticsearch poller iteration failed: {e}")
+            update_elastic_poll_state(last_status="error", last_error=str(e))
+        time.sleep(max(30, ELASTIC_POLL_INTERVAL_SECONDS))
+
+
+@app.on_event("startup")
+def start_optional_elastic_poller():
+    if not ELASTIC_POLL_ENABLED:
+        return
+    thread = threading.Thread(target=elastic_poll_loop, daemon=True)
+    thread.start()
+
+
 # ─── API Endpoints ───────────────────────────────────────────────────
 
 @app.post("/api/v1/investigate", response_model=InvestigateResponse)
 async def investigate(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     case_name: Optional[str] = Form(None),
@@ -455,44 +990,61 @@ async def investigate(
         )
 
     log_content = content.decode('utf-8', errors='replace')
-    return start_investigation_from_content(
+    response = start_investigation_from_content(
         background_tasks,
         log_content,
         {
             "source": "file",
             "filename": file.filename,
+            "content_type": file.content_type or "application/octet-stream",
             "case_name": case_name or file.filename or "",
         },
+        raw_bytes=content,
     )
+    audit_log(
+        request,
+        "investigation.created",
+        response.investigation_id,
+        {"source": "file", "filename": file.filename, "case_name": case_name or file.filename or ""},
+    )
+    return response
 
 
 @app.post("/api/v1/investigate/text", response_model=InvestigateResponse)
-async def investigate_text(background_tasks: BackgroundTasks, request: InvestigateTextRequest):
+async def investigate_text(request: Request, background_tasks: BackgroundTasks, payload: InvestigateTextRequest):
     """
     Start an investigation from pasted logs or an Elasticsearch query.
     POST /api/v1/investigate/text
     """
-    log_content = request.log_content or ""
-    if not log_content.strip() and request.elastic_query:
+    log_content = payload.log_content or ""
+    if not log_content.strip() and payload.elastic_query:
         log_content = fetch_elasticsearch_logs(
-            request.elastic_query,
-            request.time_range_start,
-            request.time_range_end,
+            payload.elastic_query,
+            payload.time_range_start,
+            payload.time_range_end,
         )
 
-    return start_investigation_from_content(
+    response = start_investigation_from_content(
         background_tasks,
         log_content,
         {
-            "source": request.source,
-            "case_name": request.case_name,
-            "elastic_query": request.elastic_query,
-            "time_range_start": request.time_range_start,
-            "time_range_end": request.time_range_end,
-            "sensitivity": request.sensitivity,
-            "apt_filters": request.apt_filters,
+            "source": payload.source,
+            "filename": f"{payload.source or 'text'}_input.jsonl",
+            "case_name": payload.case_name,
+            "elastic_query": payload.elastic_query,
+            "time_range_start": payload.time_range_start,
+            "time_range_end": payload.time_range_end,
+            "sensitivity": payload.sensitivity,
+            "apt_filters": payload.apt_filters,
         },
     )
+    audit_log(
+        request,
+        "investigation.created",
+        response.investigation_id,
+        {"source": payload.source, "case_name": payload.case_name},
+    )
+    return response
 
 
 @app.get("/api/v1/investigations", response_model=InvestigationListResponse)
@@ -545,7 +1097,7 @@ async def get_status(investigation_id: str):
 
 
 @app.get("/api/v1/investigate/{investigation_id}/report", response_model=InvestigationReport)
-async def get_report(investigation_id: str):
+async def get_report(request: Request, investigation_id: str):
     """
     Get full investigation report.
     GET /api/v1/investigate/{id}/report
@@ -566,6 +1118,7 @@ async def get_report(investigation_id: str):
 
     attack_seq = json.loads(record["attack_sequence_json"]) if record.get("attack_sequence_json") else []
     anomalies = json.loads(record["anomalies_json"]) if record.get("anomalies_json") else []
+    audit_log(request, "report.viewed", investigation_id, {"status": record["status"]})
 
     return InvestigationReport(
         investigation_id=investigation_id,
@@ -583,7 +1136,7 @@ async def get_report(investigation_id: str):
 
 
 @app.get("/api/v1/investigate/{investigation_id}/graph")
-async def get_graph(investigation_id: str):
+async def get_graph(request: Request, investigation_id: str):
     """
     Get Sigma.js compatible attack graph JSON.
     GET /api/v1/investigate/{id}/graph
@@ -593,18 +1146,34 @@ async def get_graph(investigation_id: str):
         raise HTTPException(status_code=404, detail="Investigation not found")
 
     graph_json = record.get("graph_json", "{}")
+    audit_log(request, "graph.viewed", investigation_id, {})
     if graph_json:
         return JSONResponse(content=json.loads(graph_json))
     return JSONResponse(content={"nodes": [], "edges": []})
 
 
+@app.get("/api/v1/investigate/{investigation_id}/evidence", response_model=EvidenceListResponse)
+async def get_evidence(request: Request, investigation_id: str):
+    """List persisted raw evidence metadata for an investigation."""
+    record = db_get(investigation_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    rows = list_evidence_files(investigation_id)
+    audit_log(request, "evidence.listed", investigation_id, {"count": len(rows)})
+    return EvidenceListResponse(
+        investigation_id=investigation_id,
+        evidence=[EvidenceFileSummary(**row) for row in rows],
+        total_count=len(rows),
+    )
+
+
 @app.post("/api/v1/simulate", response_model=SimulationResponse)
-async def simulate(request: SimulateRequest):
+async def simulate(request: Request, payload: SimulateRequest):
     """
     Simulate next attack steps for attributed APT.
     POST /api/v1/simulate
     """
-    record = db_get(request.investigation_id)
+    record = db_get(payload.investigation_id)
     if not record:
         raise HTTPException(status_code=404, detail="Investigation not found")
     if record["status"] != "complete":
@@ -616,7 +1185,7 @@ async def simulate(request: SimulateRequest):
         raise HTTPException(status_code=400, detail="No attribution data available")
 
     # Use specified APT group or top attribution
-    target_apt = request.apt_group
+    target_apt = payload.apt_group
     attribution = None
     for a in attribution_data:
         attr = AttributionResult(**a)
@@ -663,9 +1232,15 @@ async def simulate(request: SimulateRequest):
         privilege_level="domain user / admin",
         observed_ttps=observed_ttps,
     )
+    audit_log(
+        request,
+        "simulation.run",
+        payload.investigation_id,
+        {"apt_group": attribution.apt_name, "prediction_count": len(predictions)},
+    )
 
     return SimulationResponse(
-        investigation_id=request.investigation_id,
+        investigation_id=payload.investigation_id,
         apt_group=attribution.apt_name,
         predictions=predictions,
         confidence=attribution.confidence_label,
@@ -673,7 +1248,7 @@ async def simulate(request: SimulateRequest):
 
 
 @app.get("/api/v1/apt/profiles", response_model=APTProfileListResponse)
-async def get_apt_profiles():
+async def get_apt_profiles(request: Request):
     """
     List all APT group profiles with TTP counts.
     GET /api/v1/apt/profiles
@@ -681,6 +1256,7 @@ async def get_apt_profiles():
     from attribution.apt_profiles import load_apt_profiles, get_profile_summaries
     profiles = load_apt_profiles()
     summaries = get_profile_summaries(profiles)
+    audit_log(request, "apt_profiles.listed", None, {"count": len(summaries)})
 
     return APTProfileListResponse(
         profiles=[APTProfileSummary(**s) for s in summaries],
@@ -689,12 +1265,12 @@ async def get_apt_profiles():
 
 
 @app.post("/api/v1/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
+async def query(request: Request, payload: QueryRequest):
     """
     Natural language query against investigation.
     POST /api/v1/query
     """
-    record = db_get(request.investigation_id)
+    record = db_get(payload.investigation_id)
     if not record:
         raise HTTPException(status_code=404, detail="Investigation not found")
 
@@ -711,15 +1287,126 @@ async def query(request: QueryRequest):
 
     engine = QueryEngine(neo4j_client=neo4j)
     try:
-        result = engine.answer_question(request.question, request.investigation_id)
+        result = engine.answer_question(payload.question, payload.investigation_id)
     finally:
         engine.close()
+    audit_log(
+        request,
+        "query.asked",
+        payload.investigation_id,
+        {"query_type": result.get("query_type", ""), "question": payload.question[:200]},
+    )
 
     return QueryResponse(
         answer=result.get("answer", ""),
         sources=result.get("sources", []),
         confidence=result.get("confidence", ""),
         query_type=result.get("query_type", ""),
+    )
+
+
+@app.get("/api/v1/audit", response_model=AuditLogResponse)
+async def get_audit_log(
+    request: Request,
+    limit: int = 100,
+    investigation_id: Optional[str] = None,
+):
+    """List recent append-only audit entries."""
+    entries = list_audit_entries(limit=limit, investigation_id=investigation_id)
+    audit_log(request, "audit.viewed", investigation_id, {"limit": limit})
+    return AuditLogResponse(entries=[AuditEntry(**entry) for entry in entries], total_count=len(entries))
+
+
+@app.get("/api/v1/threat-feeds/cisa-kev", response_model=CisaKevResponse)
+async def get_cisa_kev(
+    request: Request,
+    query: str = "",
+    limit: int = 50,
+    refresh: bool = False,
+):
+    """Fetch and cache the public CISA KEV catalog."""
+    payload = fetch_cisa_kev(refresh=refresh)
+    vulnerabilities = payload.get("vulnerabilities", [])
+    if query:
+        needle = query.lower()
+        vulnerabilities = [
+            item for item in vulnerabilities
+            if needle in json.dumps(item, default=str).lower()
+        ]
+    safe_limit = max(1, min(limit, 500))
+    selected = vulnerabilities[:safe_limit]
+    audit_log(
+        request,
+        "threat_feed.cisa_kev.viewed",
+        None,
+        {"query": query, "limit": safe_limit, "refresh": refresh, "returned": len(selected)},
+    )
+    return {
+        "title": payload.get("title", "CISA Known Exploited Vulnerabilities Catalog"),
+        "catalogVersion": payload.get("catalogVersion", ""),
+        "dateReleased": payload.get("dateReleased", ""),
+        "count": len(vulnerabilities),
+        "source": payload.get("_raptor_source", CISA_KEV_URL),
+        "cached_at": payload.get("_raptor_cached_at", ""),
+        "vulnerabilities": selected,
+    }
+
+
+@app.post("/api/v1/threat-feeds/cisa-kev/sync", response_model=CisaKevResponse)
+async def sync_cisa_kev(request: Request):
+    """Force refresh the CISA KEV catalog cache."""
+    payload = fetch_cisa_kev(refresh=True)
+    vulnerabilities = payload.get("vulnerabilities", [])
+    audit_log(
+        request,
+        "threat_feed.cisa_kev.synced",
+        None,
+        {"count": len(vulnerabilities), "source": CISA_KEV_URL},
+    )
+    return {
+        "title": payload.get("title", "CISA Known Exploited Vulnerabilities Catalog"),
+        "catalogVersion": payload.get("catalogVersion", ""),
+        "dateReleased": payload.get("dateReleased", ""),
+        "count": len(vulnerabilities),
+        "source": payload.get("_raptor_source", CISA_KEV_URL),
+        "cached_at": payload.get("_raptor_cached_at", ""),
+        "vulnerabilities": vulnerabilities[:50],
+    }
+
+
+@app.post("/api/v1/ingest/elasticsearch/poll", response_model=ElasticPollResponse)
+async def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
+    """Poll Elasticsearch once and queue any returned events as an investigation."""
+    response = run_elasticsearch_poll_once(
+        query=payload.query,
+        time_range_start=payload.time_range_start,
+        time_range_end=payload.time_range_end,
+        case_name=payload.case_name,
+        apt_filters=payload.apt_filters,
+    )
+    audit_log(
+        request,
+        "elasticsearch.poll",
+        response.investigation_id,
+        {"status": response.status, "query": payload.query, "event_bytes": response.event_bytes},
+    )
+    return response
+
+
+@app.get("/api/v1/ingest/elasticsearch/status", response_model=ElasticPollStatus)
+async def get_elasticsearch_poll_status(request: Request):
+    """Return the simple Elasticsearch poller state."""
+    state = get_elastic_poll_state()
+    audit_log(request, "elasticsearch.poll_status.viewed", None, {})
+    return ElasticPollStatus(
+        enabled=state.get("enabled", False),
+        query=state.get("query", ELASTIC_POLL_QUERY),
+        interval_seconds=state.get("interval_seconds", ELASTIC_POLL_INTERVAL_SECONDS),
+        window_minutes=state.get("window_minutes", ELASTIC_POLL_WINDOW_MINUTES),
+        last_polled_at=state.get("last_polled_at", ""),
+        last_status=state.get("last_status", ""),
+        last_error=state.get("last_error", ""),
+        investigation_count=state.get("investigation_count", 0),
     )
 
 
@@ -744,10 +1431,13 @@ async def health_check_detailed():
     checks = {
         "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
         "sqlite": {"status": "healthy", "detail": ""},
+        "auth": {"status": "healthy", "detail": "API key auth enabled" if RAPTOR_API_KEY else "API key auth disabled"},
+        "evidence": {"status": "healthy", "detail": ""},
         "neo4j": {"status": "degraded", "detail": "unreachable"},
         "weaviate": {"status": "degraded", "detail": "unreachable"},
         "elasticsearch": {"status": "degraded", "detail": "unreachable"},
         "redis": {"status": "degraded", "detail": "unreachable"},
+        "cisa_kev": {"status": "degraded", "detail": "not cached"},
         "llm": {"status": "degraded", "detail": "OPENROUTER_API_KEY missing"},
     }
 
@@ -759,6 +1449,16 @@ async def health_check_detailed():
         checks["sqlite"] = {"status": "healthy", "detail": "query ok"}
     except Exception as e:
         checks["sqlite"] = {"status": "degraded", "detail": str(e)}
+
+    # Evidence store
+    try:
+        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        test_path = EVIDENCE_DIR / ".health"
+        test_path.write_text("ok", encoding="utf-8")
+        test_path.unlink(missing_ok=True)
+        checks["evidence"] = {"status": "healthy", "detail": str(EVIDENCE_DIR)}
+    except Exception as e:
+        checks["evidence"] = {"status": "degraded", "detail": str(e)}
 
     # Neo4j
     try:
@@ -809,10 +1509,16 @@ async def health_check_detailed():
         ready = response.startswith(b"+PONG")
         checks["redis"] = {
             "status": "healthy" if ready else "degraded",
-            "detail": "connected" if ready else "unexpected ping response",
+            "detail": "connected; used for lightweight JSON cache" if ready else "unexpected ping response",
         }
     except Exception as e:
         checks["redis"] = {"status": "degraded", "detail": str(e)}
+
+    # CISA KEV cache readiness
+    if CISA_KEV_CACHE_PATH.exists():
+        checks["cisa_kev"] = {"status": "healthy", "detail": f"cached at {CISA_KEV_CACHE_PATH}"}
+    else:
+        checks["cisa_kev"] = {"status": "degraded", "detail": "cache not populated; call /api/v1/threat-feeds/cisa-kev"}
 
     # LLM config readiness
     from config import OPENROUTER_API_KEY
