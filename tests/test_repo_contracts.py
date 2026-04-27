@@ -1,4 +1,5 @@
 import unittest
+import stat
 
 from helpers import ROOT_DIR
 
@@ -36,6 +37,26 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("listAuditEntries", api_client)
         self.assertIn("listCisaKev", api_client)
         self.assertIn("getElasticsearchPollStatus", api_client)
+
+    def test_frontend_surfaces_operational_backend_endpoints(self):
+        dashboard = self.read_text("frontend/src/components/Dashboard.jsx")
+
+        self.assertIn("getInvestigationEvidence", dashboard)
+        self.assertIn("listAuditEntries", dashboard)
+        self.assertIn("pollElasticsearch", dashboard)
+        self.assertIn("Raw Evidence Files", dashboard)
+        self.assertIn("Append-only Audit Log", dashboard)
+        self.assertIn("Run Poll Now", dashboard)
+
+    def test_commit_script_contract_exists(self):
+        script = ROOT_DIR / "commit.sh"
+        text = script.read_text(encoding="utf-8")
+        mode = script.stat().st_mode
+
+        self.assertTrue(mode & stat.S_IXUSR)
+        self.assertIn("Creating one commit per changed file", text)
+        self.assertIn("git add -A -- \"$file\"", text)
+        self.assertIn("commit_subject", text)
 
     def test_vite_reads_root_environment_for_hybrid_mode(self):
         vite_config = self.read_text("frontend/vite.config.js")
