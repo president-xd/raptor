@@ -48,11 +48,14 @@ import {
   askInvestigationQuestion,
   getDetailedHealth,
   getElasticsearchPollStatus,
+  getInvestigationEvidence,
   getInvestigationGraph,
   getInvestigationReport,
+  listAuditEntries,
   listCisaKev,
   listAptProfiles,
   listInvestigations,
+  pollElasticsearch,
   runSimulation,
   startTextInvestigation,
   syncCisaKev,
@@ -133,6 +136,7 @@ export default function Dashboard() {
   const [selectedInvestigationId, setSelectedInvestigationId] = useState('');
   const [reportCache, setReportCache] = useState({});
   const [graphCache, setGraphCache] = useState({});
+  const [evidenceCache, setEvidenceCache] = useState({});
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactError, setArtifactError] = useState('');
   const [simulationCache, setSimulationCache] = useState({});
@@ -185,9 +189,10 @@ export default function Dashboard() {
     if (!investigationId) return;
     setArtifactLoading(true);
     setArtifactError('');
-    const [reportResult, graphResult] = await Promise.allSettled([
+    const [reportResult, graphResult, evidenceResult] = await Promise.allSettled([
       getInvestigationReport(investigationId),
       getInvestigationGraph(investigationId),
+      getInvestigationEvidence(investigationId),
     ]);
 
     if (reportResult.status === 'fulfilled') {
@@ -196,7 +201,10 @@ export default function Dashboard() {
     if (graphResult.status === 'fulfilled') {
       setGraphCache((current) => ({ ...current, [investigationId]: graphResult.value }));
     }
-    if (reportResult.status === 'rejected' && graphResult.status === 'rejected') {
+    if (evidenceResult.status === 'fulfilled') {
+      setEvidenceCache((current) => ({ ...current, [investigationId]: evidenceResult.value }));
+    }
+    if (reportResult.status === 'rejected' && graphResult.status === 'rejected' && evidenceResult.status === 'rejected') {
       setArtifactError(reportResult.reason?.message || 'Failed to load investigation artifacts');
     }
     setArtifactLoading(false);
@@ -236,6 +244,7 @@ export default function Dashboard() {
   );
   const selectedReport = selectedInvestigation ? reportCache[selectedInvestigation.id] : null;
   const selectedGraph = selectedInvestigation ? graphCache[selectedInvestigation.id] : null;
+  const selectedEvidence = selectedInvestigation ? evidenceCache[selectedInvestigation.id] : null;
   const selectedSimulation = selectedInvestigation ? simulationCache[selectedInvestigation.id] : null;
 
   useEffect(() => {
@@ -358,6 +367,7 @@ export default function Dashboard() {
               investigation={selectedInvestigation}
               report={selectedReport}
               graph={selectedGraph}
+              evidence={selectedEvidence}
               activeTab={detailTab}
               setActiveTab={setDetailTab}
               artifactLoading={artifactLoading}
@@ -391,7 +401,13 @@ export default function Dashboard() {
             />
           )}
           {activePage === 'threat-feeds' && (
-            <ThreatFeedsPage health={health} error={healthError} onRefresh={loadHealth} />
+            <ThreatFeedsPage
+              health={health}
+              error={healthError}
+              onRefresh={loadHealth}
+              showToast={showToast}
+              onInvestigationsChanged={() => loadInvestigations(true)}
+            />
           )}
           {activePage === 'simulation' && (
             <StandaloneSimulationPage
@@ -416,7 +432,12 @@ export default function Dashboard() {
             />
           )}
           {activePage === 'settings' && (
-            <SettingsPage health={health} healthError={healthError} onRefresh={loadHealth} />
+            <SettingsPage
+              health={health}
+              healthError={healthError}
+              selectedInvestigation={selectedInvestigation}
+              onRefresh={loadHealth}
+            />
           )}
         </section>
       </main>
@@ -896,6 +917,7 @@ function InvestigationDetailPage({
   investigation,
   report,
   graph,
+  evidence,
   activeTab,
   setActiveTab,
   artifactLoading,
@@ -993,7 +1015,7 @@ function InvestigationDetailPage({
             showToast={showToast}
           />
         )}
-        {activeTab === 'report' && <ForensicReportTab report={report} />}
+        {activeTab === 'report' && <ForensicReportTab report={report} evidence={evidence} />}
       </div>
     </div>
   );
@@ -1427,10 +1449,11 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
   );
 }
 
-function ForensicReportTab({ report }) {
+function ForensicReportTab({ report, evidence }) {
   const [selectedFindingId, setSelectedFindingId] = useState('');
   const findings = report?.findings || [];
   const selectedFinding = findings.find((finding) => finding.technique_id === selectedFindingId) || findings[0] || null;
+  const evidenceFiles = evidence?.evidence || [];
 
   useEffect(() => {
     if (findings.length && !findings.some((finding) => finding.technique_id === selectedFindingId)) {
@@ -1483,12 +1506,12 @@ function ForensicReportTab({ report }) {
           </article>
         )}
       </Panel>
-      <EvidencePanel finding={selectedFinding} />
+      <EvidencePanel finding={selectedFinding} evidenceFiles={evidenceFiles} />
     </div>
   );
 }
 
-function EvidencePanel({ finding }) {
+function EvidencePanel({ finding, evidenceFiles = [] }) {
   if (!finding) {
     return (
       <aside className="evidence-panel">
@@ -1518,6 +1541,21 @@ function EvidencePanel({ finding }) {
         <div>
           {(finding.event_ids || []).slice(0, 12).map((eventId) => <code key={eventId}>{shortId(eventId)}</code>)}
         </div>
+      </div>
+      <div className="evidence-summary">
+        <strong>Raw Evidence Files</strong>
+        {!evidenceFiles.length && <p>No persisted raw evidence metadata returned for this investigation.</p>}
+        {evidenceFiles.slice(0, 6).map((item) => (
+          <div className="feed-row compact" key={item.id || item.sha256}>
+            <div className="feed-name">
+              <span className="status-dot online" />
+              <div>
+                <strong>{item.original_filename || 'raw evidence'}</strong>
+                <small>{formatBytes(item.size_bytes)} - {item.source || 'unknown'} - {shortId(item.sha256)}</small>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
       {finding.technique_id && (
         <a
@@ -1673,13 +1711,15 @@ function MitrePage({ report }) {
   );
 }
 
-function ThreatFeedsPage({ health, error, onRefresh }) {
+function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigationsChanged }) {
   const rows = healthRows(health, error);
   const [kev, setKev] = useState(null);
   const [kevError, setKevError] = useState('');
   const [kevLoading, setKevLoading] = useState(false);
   const [elasticStatus, setElasticStatus] = useState(null);
   const [elasticError, setElasticError] = useState('');
+  const [elasticQuery, setElasticQuery] = useState('*');
+  const [elasticPolling, setElasticPolling] = useState(false);
 
   const loadKev = async (refresh = false) => {
     setKevLoading(true);
@@ -1699,8 +1739,29 @@ function ThreatFeedsPage({ health, error, onRefresh }) {
     try {
       const response = await getElasticsearchPollStatus();
       setElasticStatus(response);
+      setElasticQuery(response.query || '*');
     } catch (loadError) {
       setElasticError(loadError.message || 'Elasticsearch poller status failed');
+    }
+  };
+
+  const runElasticPoll = async () => {
+    setElasticPolling(true);
+    setElasticError('');
+    try {
+      const response = await pollElasticsearch({
+        query: elasticQuery || '*',
+        time_range_start: elasticStatus?.window_minutes ? `now-${elasticStatus.window_minutes}m` : null,
+        time_range_end: 'now',
+        case_name: 'Manual Elasticsearch poll',
+      });
+      showToast?.(response.investigation_id ? `Queued ${shortId(response.investigation_id)}` : response.message);
+      await loadElasticStatus();
+      onInvestigationsChanged?.();
+    } catch (pollError) {
+      setElasticError(pollError.message || 'Manual Elasticsearch poll failed');
+    } finally {
+      setElasticPolling(false);
     }
   };
 
@@ -1780,17 +1841,32 @@ function ThreatFeedsPage({ health, error, onRefresh }) {
           </div>
         )}
       </Panel>
-      <Panel title="Elasticsearch Poller" icon={Database}>
+      <Panel
+        title="Elasticsearch Poller"
+        icon={Database}
+        action={(
+          <button type="button" className="secondary-button" onClick={runElasticPoll} disabled={elasticPolling}>
+            <Play size={15} />
+            {elasticPolling ? 'Polling' : 'Run Poll Now'}
+          </button>
+        )}
+      >
         {elasticError && <InlineError message={elasticError} />}
         {elasticStatus ? (
-          <div className="settings-grid">
-            <ReadOnlySetting label="Enabled" value={String(elasticStatus.enabled)} />
-            <ReadOnlySetting label="Query" value={elasticStatus.query || '*'} />
-            <ReadOnlySetting label="Interval" value={`${elasticStatus.interval_seconds}s`} />
-            <ReadOnlySetting label="Window" value={`${elasticStatus.window_minutes}m`} />
-            <ReadOnlySetting label="Last Status" value={elasticStatus.last_status || 'none'} />
-            <ReadOnlySetting label="Investigations" value={String(elasticStatus.investigation_count || 0)} />
-          </div>
+          <>
+            <div className="settings-grid">
+              <label className="setting-field">
+                <span>Manual Query</span>
+                <input value={elasticQuery} onChange={(event) => setElasticQuery(event.target.value)} />
+              </label>
+              <ReadOnlySetting label="Enabled" value={String(elasticStatus.enabled)} />
+              <ReadOnlySetting label="Interval" value={`${elasticStatus.interval_seconds}s`} />
+              <ReadOnlySetting label="Window" value={`${elasticStatus.window_minutes}m`} />
+              <ReadOnlySetting label="Last Status" value={elasticStatus.last_status || 'none'} />
+              <ReadOnlySetting label="Investigations" value={String(elasticStatus.investigation_count || 0)} />
+            </div>
+            {elasticStatus.last_error && <InlineError message={elasticStatus.last_error} />}
+          </>
         ) : (
           <EmptyState icon={Database} title="Loading Elasticsearch poller state" />
         )}
@@ -1868,8 +1944,32 @@ function ReportsPage({ investigations, selectedInvestigation, report, onSelect, 
   );
 }
 
-function SettingsPage({ health, healthError, onRefresh }) {
+function SettingsPage({ health, healthError, selectedInvestigation, onRefresh }) {
   const rows = healthRows(health, healthError);
+  const [auditEntries, setAuditEntries] = useState([]);
+  const [auditError, setAuditError] = useState('');
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError('');
+    try {
+      const response = await listAuditEntries({
+        limit: 25,
+        investigationId: selectedInvestigation?.id || '',
+      });
+      setAuditEntries(response?.entries || []);
+    } catch (error) {
+      setAuditError(error.message || 'Audit log request failed');
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [selectedInvestigation?.id]);
+
+  useEffect(() => {
+    loadAudit();
+  }, [loadAudit]);
+
   return (
     <div className="page-panel settings-page">
       <Panel title="Runtime Configuration" icon={SlidersHorizontal}>
@@ -1887,6 +1987,39 @@ function SettingsPage({ health, healthError, onRefresh }) {
             Run Health Check
           </button>
           <span className="panel-chip">Runtime settings are controlled by backend environment variables.</span>
+        </div>
+      </Panel>
+      <Panel
+        title="Append-only Audit Log"
+        icon={Bell}
+        action={(
+          <button type="button" className="secondary-button" onClick={loadAudit} disabled={auditLoading}>
+            <RefreshCcw size={15} />
+            Refresh Audit
+          </button>
+        )}
+      >
+        {auditError && <InlineError message={auditError} />}
+        {!auditEntries.length && !auditError && (
+          <EmptyState
+            icon={Bell}
+            title={auditLoading ? 'Loading audit log' : 'No audit entries returned'}
+            detail="Audit entries are loaded from the backend SQLite audit endpoint."
+          />
+        )}
+        <div className="feed-list">
+          {auditEntries.map((entry) => (
+            <div className="feed-row" key={entry.id}>
+              <div className="feed-name">
+                <span className="status-dot online" />
+                <div>
+                  <strong>{entry.action}</strong>
+                  <small>{entry.investigation_id || 'system'} - {formatDate(entry.timestamp)} - {entry.actor || 'unknown'}</small>
+                </div>
+              </div>
+              <span className="feed-status">{entry.ip_address || 'local'}</span>
+            </div>
+          ))}
         </div>
       </Panel>
     </div>
