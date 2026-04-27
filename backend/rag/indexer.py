@@ -11,6 +11,7 @@ from loguru import logger
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
+    APT_REPORTS_DIR,
     WEAVIATE_URL,
     WEAVIATE_GRPC_URL,
     ATTACK_STIX_URL,
@@ -223,6 +224,78 @@ def index_threat_reports(client, reports: List[Dict[str, str]]) -> int:
     return count
 
 
+def load_threat_report_corpus(stix_bundle: Optional[dict] = None) -> List[Dict[str, str]]:
+    """
+    Load a real local report corpus from APT_REPORTS_DIR when present.
+
+    Supported formats are .txt, .md, .json, and .jsonl. JSON records may use
+    title/content/apt_group/source or title/text/actor/source keys. If no local
+    corpus exists, ATT&CK intrusion-set profiles are used as an explicit fallback
+    corpus instead of being labeled as external reports.
+    """
+    reports: List[Dict[str, str]] = []
+    if APT_REPORTS_DIR.exists():
+        for path in sorted(APT_REPORTS_DIR.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".json", ".jsonl"}:
+                continue
+            try:
+                if path.suffix.lower() == ".jsonl":
+                    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                        if not line.strip():
+                            continue
+                        item = json.loads(line)
+                        reports.append({
+                            "title": item.get("title") or path.stem,
+                            "content": item.get("content") or item.get("text") or "",
+                            "apt_group": item.get("apt_group") or item.get("actor") or "Unknown",
+                            "source": item.get("source") or str(path.relative_to(APT_REPORTS_DIR)),
+                        })
+                elif path.suffix.lower() == ".json":
+                    payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+                    items = payload if isinstance(payload, list) else payload.get("reports", [payload])
+                    for item in items:
+                        reports.append({
+                            "title": item.get("title") or path.stem,
+                            "content": item.get("content") or item.get("text") or "",
+                            "apt_group": item.get("apt_group") or item.get("actor") or "Unknown",
+                            "source": item.get("source") or str(path.relative_to(APT_REPORTS_DIR)),
+                        })
+                else:
+                    reports.append({
+                        "title": path.stem.replace("_", " ").replace("-", " ").title(),
+                        "content": path.read_text(encoding="utf-8", errors="ignore"),
+                        "apt_group": "Unknown",
+                        "source": str(path.relative_to(APT_REPORTS_DIR)),
+                    })
+            except Exception as e:
+                logger.debug(f"Skipping threat report {path}: {e}")
+
+    reports = [report for report in reports if report.get("content")]
+    if reports:
+        logger.info(f"Loaded {len(reports)} local threat reports from {APT_REPORTS_DIR}")
+        return reports
+
+    if not stix_bundle:
+        return []
+
+    fallback_reports = []
+    for group in [o for o in stix_bundle.get("objects", []) if o.get("type") == "intrusion-set"]:
+        desc = group.get("description", "")
+        if not desc:
+            continue
+        fallback_reports.append({
+            "title": f"ATT&CK Threat Profile: {group.get('name', 'Unknown')}",
+            "content": desc,
+            "apt_group": group.get("name", "Unknown"),
+            "source": "MITRE ATT&CK STIX intrusion-set profile",
+        })
+    logger.warning(
+        f"No local threat report corpus found in {APT_REPORTS_DIR}; "
+        f"using {len(fallback_reports)} ATT&CK intrusion-set profiles as fallback context"
+    )
+    return fallback_reports
+
+
 def run_full_indexing() -> dict:
     """Run the complete indexing pipeline."""
     results = {"techniques": 0, "reports": 0, "status": "success"}
@@ -234,19 +307,7 @@ def run_full_indexing() -> dict:
         stix_bundle = download_attack_stix()
         results["techniques"] = index_attack_techniques(client, stix_bundle)
 
-        # Generate synthetic threat reports from STIX groups
-        objects = stix_bundle.get("objects", [])
-        groups = [o for o in objects if o.get("type") == "intrusion-set"]
-        reports = []
-        for g in groups[:50]:  # Limit for MVP
-            desc = g.get("description", "")
-            if desc:
-                reports.append({
-                    "title": f"Threat Profile: {g.get('name', 'Unknown')}",
-                    "content": desc,
-                    "apt_group": g.get("name", "Unknown"),
-                    "source": "MITRE ATT&CK STIX",
-                })
+        reports = load_threat_report_corpus(stix_bundle)
         results["reports"] = index_threat_reports(client, reports)
 
         client.close()
