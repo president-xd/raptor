@@ -66,8 +66,9 @@ CORS_ALLOW_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
 # ─── RAG Configuration ───────────────────────────────────────────────
-EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
-RERANKER_MODEL = "BAAI/bge-reranker-large"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-large")
+RAG_LOCAL_FALLBACK_ENABLED = os.getenv("RAG_LOCAL_FALLBACK_ENABLED", "true").lower() == "true"
 RAG_CHUNK_SIZE = 512
 RAG_CHUNK_OVERLAP = 64
 RAG_HYBRID_ALPHA = 0.6  # 60% semantic, 40% BM25
@@ -82,6 +83,7 @@ STIX_DIR = DATA_DIR / "stix"
 MOCK_DIR = DATA_DIR / "mock"
 EVIDENCE_DIR = DATA_DIR / "evidence"
 INTEL_DIR = DATA_DIR / "intel"
+APT_REPORTS_DIR = Path(os.getenv("APT_REPORTS_DIR", str(INTEL_DIR / "apt_reports")))
 DB_PATH = PROJECT_ROOT / "backend" / "raptor.db"
 
 # Ensure directories exist
