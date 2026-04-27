@@ -147,7 +147,6 @@ FastAPI backend
 |-- tests/                         # Top-level offline regression suite
 |-- docker-compose.yml
 |-- .env.example
-|-- commit.sh
 `-- README.md
 ```
 
