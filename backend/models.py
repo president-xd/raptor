@@ -217,6 +217,7 @@ class APTProfileSummary(BaseModel):
     name: str
     aliases: List[str] = Field(default_factory=list)
     nation_state: str = ""
+    nation_state_source: str = "unknown"
     technique_count: int = 0
     techniques: List[str] = Field(default_factory=list)
 
