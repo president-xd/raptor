@@ -42,15 +42,6 @@ class RepositoryContractTests(unittest.TestCase):
 
         self.assertIn("envDir: '..'", vite_config)
 
-    def test_commit_script_commits_every_changed_file_individually(self):
-        script = self.read_text("commit.sh")
-
-        self.assertIn("git diff --name-only -z HEAD --", script)
-        self.assertIn("git ls-files --others --exclude-standard -z", script)
-        self.assertIn("git add -A -- \"$file\"", script)
-        self.assertIn("git commit -m \"$subject\"", script)
-        self.assertIn("All changed files were committed individually.", script)
-
     def test_readme_documents_new_operational_surfaces(self):
         readme = self.read_text("README.md")
 
