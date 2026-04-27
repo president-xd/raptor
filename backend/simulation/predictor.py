@@ -62,8 +62,8 @@ def predict_next_steps(
         response = call_llm(system, prompt)
         predictions = _parse_predictions(response)
     except Exception as e:
-        logger.error(f"Simulation LLM failed, using fallback predictions: {e}")
-        predictions = _fallback_predictions(observed_ttps)
+        logger.error(f"Simulation LLM failed, using deterministic context predictions: {e}")
+        predictions = _fallback_predictions(observed_ttps, technique_context, attribution)
 
     retriever.close()
     return predictions
@@ -107,9 +107,33 @@ def _parse_predictions(response: str) -> List[SimulationPrediction]:
     return predictions
 
 
-def _fallback_predictions(observed_ttps: List[str]) -> List[SimulationPrediction]:
-    """Simple ATT&CK-informed next-step predictions when LLM is unavailable."""
+def _fallback_predictions(
+    observed_ttps: List[str],
+    technique_context: Optional[List[Dict]] = None,
+    attribution: Optional[AttributionResult] = None,
+) -> List[SimulationPrediction]:
+    """Deterministic next-step predictions grounded in retrieved/attribution context."""
     seen = set(observed_ttps)
+    context_predictions: List[SimulationPrediction] = []
+    for technique in technique_context or []:
+        technique_id = technique.get("technique_id", "")
+        if not technique_id or technique_id in seen:
+            continue
+        technique_name = technique.get("name", technique_id)
+        context_predictions.append(SimulationPrediction(
+            technique_id=technique_id,
+            technique_name=technique_name,
+            rationale=(
+                f"Retrieved ATT&CK context for {attribution.apt_name if attribution else 'the attributed actor'} "
+                f"matched the current foothold and observed sequence."
+            ),
+            likely_tools=["Actor-specific tooling unknown", "Technique-dependent native utilities"],
+            detection_guidance=technique.get("detection") or f"Monitor telemetry associated with {technique_name}.",
+            urgency="high",
+        ))
+        if len(context_predictions) >= 3:
+            return context_predictions
+
     candidates = [
         SimulationPrediction(
             technique_id="T1021.002",
