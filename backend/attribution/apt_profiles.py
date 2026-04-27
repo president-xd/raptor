@@ -62,12 +62,16 @@ def load_apt_profiles() -> Dict[str, Dict]:
     for group in groups:
         name = group.get("name", "")
         aliases = group.get("aliases", [])
-        # Try to extract nation state from description
+        # ATT&CK does not provide a normalized country field. Keep the derived
+        # value explicit so API consumers do not mistake it for authoritative
+        # attribution.
         desc = group.get("description", "").lower()
         nation_state = ""
+        nation_state_source = "unknown"
         for country in ["russia", "china", "iran", "north korea", "dprk", "israel", "vietnam", "pakistan", "india"]:
             if country in desc:
                 nation_state = country.title()
+                nation_state_source = "description_keyword"
                 break
 
         group_id_to_name[group["id"]] = name
@@ -75,6 +79,7 @@ def load_apt_profiles() -> Dict[str, Dict]:
         group_info[name] = {
             "aliases": aliases,
             "nation_state": nation_state,
+            "nation_state_source": nation_state_source,
             "description": group.get("description", "")[:500],
         }
 
@@ -96,6 +101,7 @@ def load_apt_profiles() -> Dict[str, Dict]:
             profiles[name] = {
                 "aliases": group_info[name]["aliases"],
                 "nation_state": group_info[name]["nation_state"],
+                "nation_state_source": group_info[name]["nation_state_source"],
                 "techniques": techs,
                 "technique_count": len(techs),
                 "description": group_info[name]["description"],
@@ -141,6 +147,7 @@ def get_profile_summaries(profiles: Dict[str, Dict]) -> List[Dict]:
             "name": name,
             "aliases": profile["aliases"],
             "nation_state": profile["nation_state"],
+            "nation_state_source": profile.get("nation_state_source", "unknown"),
             "technique_count": len(profile["techniques"]),
             "techniques": sorted(list(profile["techniques"])),
         })
