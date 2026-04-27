@@ -8,8 +8,10 @@ export default defineConfig({
     chunkSizeWarningLimit: 1300,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom'],
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react'
+          }
         },
       },
     },
