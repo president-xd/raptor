@@ -1,13 +1,19 @@
 """
 RAPTOR | Reranker
-Uses BGE-reranker-large to rerank retrieved results from k=20 to k=5.
-Per spec Section 3.6: "Do not skip this. Without reranking, top-k retrieval
-at k=20 returns too much noise."
+Uses the configured BGE cross-encoder reranker to reduce retrieved results from
+k=20 to k=5. If the model is unavailable, RAPTOR applies a deterministic lexical
+rerank instead of silently skipping the reranking stage.
 """
-from typing import List, Dict, Any, Tuple
+import re
+from typing import List, Dict, Any
 from loguru import logger
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from config import RERANKER_MODEL
+
 _reranker = None
+_TOKEN_RE = re.compile(r"[a-z0-9_.-]+")
 
 
 def get_reranker():
@@ -16,14 +22,37 @@ def get_reranker():
     if _reranker is None:
         try:
             from sentence_transformers import CrossEncoder
-            model_name = "BAAI/bge-reranker-base"  # Use base for faster inference; upgrade to -large if GPU available
+            model_name = RERANKER_MODEL
             logger.info(f"Loading reranker model: {model_name}")
             _reranker = CrossEncoder(model_name, max_length=512)
             logger.info(f"Reranker loaded: {model_name}")
         except Exception as e:
-            logger.warning(f"Failed to load reranker: {e}. Reranking will be skipped.")
+            logger.warning(f"Failed to load reranker: {e}. Lexical rerank fallback will be used.")
             _reranker = None
     return _reranker
+
+
+def _tokens(text: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(str(text).lower()) if len(token) > 1}
+
+
+def _document_text(doc: Dict[str, Any], content_key: str) -> str:
+    return str(doc.get(content_key, "") or doc.get("content", "") or doc.get("description", "") or doc.get("name", ""))
+
+
+def _lexical_rerank(query: str, documents: List[Dict[str, Any]], top_k: int, content_key: str) -> List[Dict[str, Any]]:
+    query_tokens = _tokens(query)
+    scored = []
+    for index, doc in enumerate(documents):
+        text = _document_text(doc, content_key)
+        overlap = len(query_tokens & _tokens(text))
+        score = overlap + float(doc.get("_score", 0) or 0) * 0.01
+        updated = dict(doc)
+        updated["_rerank_score"] = float(score)
+        updated["_rerank_backend"] = "lexical"
+        scored.append((score, -index, updated))
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in scored[:top_k]]
 
 
 def rerank_results(query: str, documents: List[Dict[str, Any]], top_k: int = 5,
@@ -46,15 +75,13 @@ def rerank_results(query: str, documents: List[Dict[str, Any]], top_k: int = 5,
     reranker = get_reranker()
 
     if reranker is None:
-        # Fallback: sort by existing score and truncate
-        logger.warning("Reranker not available, using retrieval scores only")
-        sorted_docs = sorted(documents, key=lambda x: x.get("_score", 0), reverse=True)
-        return sorted_docs[:top_k]
+        logger.warning("Reranker not available, using lexical rerank fallback")
+        return _lexical_rerank(query, documents, top_k, content_key)
 
     # Build query-document pairs
     pairs = []
     for doc in documents:
-        text = doc.get(content_key, "") or doc.get("content", "") or doc.get("name", "")
+        text = _document_text(doc, content_key)
         if isinstance(text, str):
             pairs.append((query, text[:512]))  # Truncate to max_length
         else:
@@ -67,6 +94,7 @@ def rerank_results(query: str, documents: List[Dict[str, Any]], top_k: int = 5,
         # Attach scores and sort
         for i, doc in enumerate(documents):
             doc["_rerank_score"] = float(scores[i])
+            doc["_rerank_backend"] = RERANKER_MODEL
 
         reranked = sorted(documents, key=lambda x: x.get("_rerank_score", 0), reverse=True)
 
@@ -74,8 +102,8 @@ def rerank_results(query: str, documents: List[Dict[str, Any]], top_k: int = 5,
         return reranked[:top_k]
 
     except Exception as e:
-        logger.warning(f"Reranking failed: {e}. Using original order.")
-        return documents[:top_k]
+        logger.warning(f"Reranking failed: {e}. Using lexical fallback.")
+        return _lexical_rerank(query, documents, top_k, content_key)
 
 
 def rerank_technique_results(query: str, techniques: List[Dict], top_k: int = 5) -> List[Dict]:
