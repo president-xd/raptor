@@ -175,6 +175,15 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS elastic_seen_events (
+            event_key TEXT PRIMARY KEY,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            hit_index TEXT DEFAULT '',
+            hit_id TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("""
         CREATE TRIGGER IF NOT EXISTS audit_log_no_update
         BEFORE UPDATE ON audit_log
         BEGIN
@@ -537,7 +546,17 @@ def fetch_elasticsearch_logs(
         hits = response.get("hits", {}).get("hits", [])
         if not hits:
             raise HTTPException(status_code=404, detail="No Elasticsearch events matched that query")
-        return "\n".join(json.dumps(hit.get("_source", {}), default=str) for hit in hits)
+        lines = []
+        for hit in hits:
+            source = hit.get("_source", {}) or {}
+            event = dict(source)
+            event["_raptor_elastic"] = {
+                "index": hit.get("_index", ""),
+                "id": hit.get("_id", ""),
+                "sort": hit.get("sort", []),
+            }
+            lines.append(json.dumps(event, default=str))
+        return "\n".join(lines)
     except HTTPException:
         raise
     except Exception as e:
@@ -551,13 +570,16 @@ def _redis_send_command(*parts: str) -> Optional[bytes]:
         parsed = urlparse(REDIS_URL)
         host = parsed.hostname or "localhost"
         port = parsed.port or 6379
-        payload = f"*{len(parts)}\r\n".encode("utf-8")
-        for part in parts:
-            raw = str(part).encode("utf-8")
-            payload += f"${len(raw)}\r\n".encode("utf-8") + raw + b"\r\n"
-        with socket.create_connection((host, port), timeout=3) as conn:
-            conn.settimeout(1)
-            conn.sendall(payload)
+        db = parsed.path.strip("/") if parsed.path and parsed.path != "/" else ""
+
+        def encode_command(*command_parts: str) -> bytes:
+            payload = f"*{len(command_parts)}\r\n".encode("utf-8")
+            for part in command_parts:
+                raw = str(part).encode("utf-8")
+                payload += f"${len(raw)}\r\n".encode("utf-8") + raw + b"\r\n"
+            return payload
+
+        def read_response(conn) -> bytes:
             chunks = []
             while True:
                 try:
@@ -565,18 +587,41 @@ def _redis_send_command(*parts: str) -> Optional[bytes]:
                     if not chunk:
                         break
                     chunks.append(chunk)
-                    if parts and str(parts[0]).upper() != "GET":
+                    data = b"".join(chunks)
+                    if data.startswith((b"+", b"-", b":")) and data.endswith(b"\r\n"):
                         break
-                    if b"\r\n" in b"".join(chunks):
-                        data = b"".join(chunks)
-                        if data.startswith(b"$"):
-                            head, body = data.split(b"\r\n", 1)
-                            expected = int(head[1:])
-                            if expected < 0 or len(body) >= expected + 2:
-                                break
+                    if data.startswith(b"$") and b"\r\n" in data:
+                        head, body = data.split(b"\r\n", 1)
+                        expected = int(head[1:])
+                        if expected < 0 or len(body) >= expected + 2:
+                            break
+                    if data.startswith(b"*") and parts and str(parts[0]).upper() != "GET":
+                        break
                 except socket.timeout:
                     break
             return b"".join(chunks)
+
+        with socket.create_connection((host, port), timeout=3) as raw_conn:
+            conn = raw_conn
+            if parsed.scheme == "rediss":
+                import ssl
+                conn = ssl.create_default_context().wrap_socket(raw_conn, server_hostname=host)
+            conn.settimeout(1)
+            if parsed.password:
+                auth_parts = ("AUTH", parsed.username, parsed.password) if parsed.username else ("AUTH", parsed.password)
+                conn.sendall(encode_command(*auth_parts))
+                auth_response = read_response(conn)
+                if auth_response.startswith(b"-"):
+                    logger.debug(f"Redis AUTH failed: {auth_response[:120]!r}")
+                    return None
+            if db:
+                conn.sendall(encode_command("SELECT", db))
+                select_response = read_response(conn)
+                if select_response.startswith(b"-"):
+                    logger.debug(f"Redis SELECT failed: {select_response[:120]!r}")
+                    return None
+            conn.sendall(encode_command(*parts))
+            return read_response(conn)
     except Exception as e:
         logger.debug(f"Redis command skipped: {e}")
         return None
@@ -700,6 +745,51 @@ def increment_elastic_poll_investigations():
     )
     conn.commit()
     conn.close()
+
+
+def filter_new_elasticsearch_events(content: str) -> tuple[str, int]:
+    """Drop Elasticsearch events already ingested by previous poll runs."""
+    lines = [line for line in content.splitlines() if line.strip()]
+    if not lines:
+        return "", 0
+
+    now = datetime.utcnow().isoformat()
+    accepted: list[str] = []
+    duplicates = 0
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = {"raw": line}
+            meta = event.get("_raptor_elastic", {}) if isinstance(event, dict) else {}
+            hit_index = str(meta.get("index", ""))
+            hit_id = str(meta.get("id", ""))
+            if hit_index and hit_id:
+                event_key = f"{hit_index}:{hit_id}"
+            else:
+                event_key = hashlib.sha256(line.encode("utf-8", errors="replace")).hexdigest()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO elastic_seen_events
+                    (event_key, first_seen_at, last_seen_at, hit_index, hit_id)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (event_key, now, now, hit_index, hit_id),
+                )
+                accepted.append(line)
+            except sqlite3.IntegrityError:
+                duplicates += 1
+                conn.execute(
+                    "UPDATE elastic_seen_events SET last_seen_at = ? WHERE event_key = ?",
+                    (now, event_key),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+    return "\n".join(accepted), duplicates
 
 
 def _summarize_investigation_row(row: dict) -> dict:
@@ -918,6 +1008,15 @@ def run_elasticsearch_poll_once(
         update_elastic_poll_state(last_status="error", last_error=str(e.detail))
         raise
 
+    content, duplicate_count = filter_new_elasticsearch_events(content)
+    if not content.strip():
+        update_elastic_poll_state(last_status="duplicate_events", last_error="")
+        return ElasticPollResponse(
+            status="no_events",
+            message=f"All matched Elasticsearch events were already ingested ({duplicate_count} duplicates).",
+            event_bytes=0,
+        )
+
     metadata = {
         "source": "elasticsearch-poller",
         "filename": "elasticsearch_poll.jsonl",
@@ -929,7 +1028,10 @@ def run_elasticsearch_poll_once(
     }
     response = start_investigation_now(content, metadata=metadata)
     increment_elastic_poll_investigations()
-    update_elastic_poll_state(last_status="investigation_created", last_error="")
+    update_elastic_poll_state(
+        last_status="investigation_created",
+        last_error=f"deduped {duplicate_count} replayed events" if duplicate_count else "",
+    )
     return ElasticPollResponse(
         status="investigation_created",
         message="Elasticsearch events queued for RAPTOR analysis.",
