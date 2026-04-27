@@ -159,6 +159,33 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         self.assertEqual(response.event_bytes, 0)
         self.assertEqual(state["last_status"], "no_events")
 
+    def test_elasticsearch_poll_deduplicates_replayed_hits(self):
+        original_fetch = app_main.fetch_elasticsearch_logs
+        original_start = app_main.start_investigation_now
+        started_payloads = []
+
+        event = {
+            "@timestamp": "2026-04-27T10:00:00Z",
+            "message": "powershell execution",
+            "_raptor_elastic": {"index": "raptor-events-1", "id": "hit-1"},
+        }
+        app_main.fetch_elasticsearch_logs = lambda *_args, **_kwargs: json.dumps(event)
+        app_main.start_investigation_now = lambda content, metadata=None: started_payloads.append(content) or type(
+            "Response",
+            (),
+            {"investigation_id": "case-elastic", "status": "queued", "message": "queued"},
+        )()
+        try:
+            first = app_main.run_elasticsearch_poll_once(query="powershell")
+            second = app_main.run_elasticsearch_poll_once(query="powershell")
+        finally:
+            app_main.fetch_elasticsearch_logs = original_fetch
+            app_main.start_investigation_now = original_start
+
+        self.assertEqual(first.status, "investigation_created")
+        self.assertEqual(second.status, "no_events")
+        self.assertEqual(len(started_payloads), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
