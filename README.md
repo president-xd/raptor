@@ -33,7 +33,7 @@ Implemented today:
 - Natural-language query endpoint that routes questions to graph, RAG, or simulation-style handlers.
 - Markdown analyst report generation with deterministic fallback.
 - Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, and LLM configuration.
-- React SOC console backed by the API for investigation creation, polling, reports, graphs, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
+- React SOC console backed by the API for investigation creation, polling, reports, graphs, raw evidence metadata, audit log review, manual Elasticsearch polling, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
 - Investigation metadata in the backend list API, including case name, source, upload size, host count, top candidate, confidence score, and confidence label.
 - Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, and content type.
 - Append-only SQLite audit logging for investigation creation, report/graph/evidence viewing, natural-language queries, simulations, threat-feed access, and Elasticsearch poller actions.
@@ -108,7 +108,7 @@ FastAPI backend
 | Runtime service | Redis 7, lightweight JSON cache plus health checks |
 | LLM client | OpenAI SDK against OpenRouter-compatible API |
 | Embeddings | `BAAI/bge-large-en-v1.5` through `sentence-transformers` |
-| Reranking | BGE cross-encoder reranker with score fallback |
+| Reranking | Configured BGE cross-encoder reranker with lexical fallback |
 | Threat framework | MITRE Enterprise ATT&CK STIX |
 | Frontend | React 18, Vite 5, Tailwind CSS, lucide-react |
 | Frontend serving | Vite in development, Nginx in Docker |
@@ -277,8 +277,8 @@ The main orchestration lives in `backend/main.py`.
 3. `LogNormalizer` converts parsed dictionaries into `RaptorEvent` models.
 4. `SigmaMatcher` enriches events with local ATT&CK technique matches and IoC scores.
 5. The RAG pipeline builds retrieval queries from events and Sigma matches.
-6. `HybridRetriever` searches Weaviate `Technique` and `ThreatReport` collections when available.
-7. Reranking reduces retrieved context before the LLM prompt is assembled.
+6. `HybridRetriever` searches Weaviate `Technique` and `ThreatReport` collections when available, then falls back to local ATT&CK STIX/report-corpus search when Weaviate or embeddings are unavailable.
+7. Reranking reduces retrieved context before the LLM prompt is assembled; if the cross-encoder cannot load, a deterministic lexical reranker is used.
 8. OpenRouter LLM analysis produces structured findings when configured and reachable.
 9. If the LLM path fails, deterministic Sigma fallback findings are generated.
 10. Findings are validated against MITRE ATT&CK STIX.
@@ -462,6 +462,10 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
 | `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
 | `RAG_AUTO_INDEX` | `true` | Attempts one-time Weaviate indexing if required collections are missing. |
+| `RAG_LOCAL_FALLBACK_ENABLED` | `true` | Uses cached ATT&CK STIX and local report files when Weaviate or embeddings are unavailable. |
+| `EMBEDDING_MODEL` | `BAAI/bge-large-en-v1.5` | Sentence-transformers embedding model for Weaviate vector search and indexing. |
+| `RERANKER_MODEL` | `BAAI/bge-reranker-large` | Sentence-transformers cross-encoder reranker model. |
+| `APT_REPORTS_DIR` | `data/intel/apt_reports` | Optional local threat-report corpus directory (`.txt`, `.md`, `.json`, `.jsonl`) used for RAG report context. |
 | `RAPTOR_ALLOW_TEST_EMBEDDINGS` | `false` | Enables deterministic non-semantic embeddings for test-only fallback. |
 
 Docker Compose overrides service URLs inside the backend container so it can reach `neo4j`, `weaviate`, `elasticsearch`, and `redis` by service name.
