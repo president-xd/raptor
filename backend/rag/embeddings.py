@@ -8,6 +8,8 @@ import numpy as np
 from typing import List, Union
 from loguru import logger
 
+from config import EMBEDDING_MODEL
+
 # Lazy-load to avoid import time penalty
 _model = None
 _model_name = None
@@ -35,7 +37,7 @@ def get_model():
     if _model is None:
         try:
             from sentence_transformers import SentenceTransformer
-            model_name = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+            model_name = EMBEDDING_MODEL
             logger.info(f"Loading embedding model: {model_name}")
             _model = SentenceTransformer(model_name)
             _model_name = model_name
