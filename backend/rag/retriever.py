@@ -3,17 +3,30 @@ RAPTOR | Hybrid Retriever
 Implements hybrid BM25 + semantic search in Weaviate.
 Alpha = 0.6 (60% semantic, 40% BM25) per spec Section 3.3.
 """
+import json
 import os
+import re
 from typing import List, Dict, Any
 from loguru import logger
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import WEAVIATE_URL, WEAVIATE_GRPC_URL, RAG_HYBRID_ALPHA, RAG_RETRIEVAL_K
+from config import (
+    APT_REPORTS_DIR,
+    ATTACK_STIX_URL,
+    RAG_HYBRID_ALPHA,
+    RAG_LOCAL_FALLBACK_ENABLED,
+    RAG_RETRIEVAL_K,
+    STIX_DIR,
+    WEAVIATE_GRPC_URL,
+    WEAVIATE_URL,
+)
 from rag.embeddings import embed_query
 
 
 _INDEX_BOOTSTRAP_ATTEMPTED = False
+_LOCAL_CORPUS = None
+_TOKEN_RE = re.compile(r"[a-z0-9_.-]+")
 
 
 def _split_host_port(endpoint: str, default_port: int) -> tuple[str, int]:
@@ -47,19 +60,175 @@ def get_weaviate_client():
         return weaviate.connect_to_local(host=http_host, port=http_port, grpc_port=grpc_port)
 
 
+def _tokenize(text: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(str(text).lower()) if len(token) > 1}
+
+
+def _load_stix_bundle() -> dict:
+    cache_path = STIX_DIR / "enterprise-attack.json"
+    if cache_path.exists():
+        with open(cache_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    import requests
+    response = requests.get(ATTACK_STIX_URL, timeout=120)
+    response.raise_for_status()
+    bundle = response.json()
+    STIX_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(bundle), encoding="utf-8")
+    return bundle
+
+
+def _load_local_threat_reports(groups: list[dict]) -> list[dict]:
+    """Load local report corpus files, with STIX group profiles as a fallback corpus."""
+    reports: list[dict] = []
+    if APT_REPORTS_DIR.exists():
+        for path in sorted(APT_REPORTS_DIR.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".json", ".jsonl"}:
+                continue
+            try:
+                if path.suffix.lower() == ".jsonl":
+                    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                        if not line.strip():
+                            continue
+                        item = json.loads(line)
+                        reports.append({
+                            "title": item.get("title") or path.stem,
+                            "content": item.get("content") or item.get("text") or "",
+                            "apt_group": item.get("apt_group") or item.get("actor") or "Unknown",
+                            "source": item.get("source") or str(path.relative_to(APT_REPORTS_DIR)),
+                        })
+                elif path.suffix.lower() == ".json":
+                    payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+                    items = payload if isinstance(payload, list) else payload.get("reports", [payload])
+                    for item in items:
+                        reports.append({
+                            "title": item.get("title") or path.stem,
+                            "content": item.get("content") or item.get("text") or "",
+                            "apt_group": item.get("apt_group") or item.get("actor") or "Unknown",
+                            "source": item.get("source") or str(path.relative_to(APT_REPORTS_DIR)),
+                        })
+                else:
+                    reports.append({
+                        "title": path.stem.replace("_", " ").replace("-", " ").title(),
+                        "content": path.read_text(encoding="utf-8", errors="ignore"),
+                        "apt_group": "Unknown",
+                        "source": str(path.relative_to(APT_REPORTS_DIR)),
+                    })
+            except Exception as e:
+                logger.debug(f"Skipping local report {path}: {e}")
+
+    reports = [report for report in reports if report.get("content")]
+    if reports:
+        return reports
+
+    fallback = []
+    for group in groups:
+        description = group.get("description", "")
+        if not description:
+            continue
+        fallback.append({
+            "title": f"ATT&CK Threat Profile: {group.get('name', 'Unknown')}",
+            "content": description,
+            "apt_group": group.get("name", "Unknown"),
+            "source": "MITRE ATT&CK STIX intrusion-set profile",
+        })
+    return fallback
+
+
+def _build_local_corpus() -> dict[str, list[dict]]:
+    global _LOCAL_CORPUS
+    if _LOCAL_CORPUS is not None:
+        return _LOCAL_CORPUS
+
+    try:
+        bundle = _load_stix_bundle()
+    except Exception as e:
+        logger.warning(f"Local RAG fallback corpus unavailable: {e}")
+        _LOCAL_CORPUS = {"Technique": [], "ThreatReport": [], "Vulnerability": []}
+        return _LOCAL_CORPUS
+
+    techniques = []
+    groups = []
+    for obj in bundle.get("objects", []):
+        if obj.get("type") == "intrusion-set":
+            groups.append(obj)
+        if obj.get("type") != "attack-pattern" or obj.get("revoked") or obj.get("x_mitre_deprecated"):
+            continue
+        technique_id = ""
+        for ref in obj.get("external_references", []):
+            if ref.get("source_name") == "mitre-attack":
+                technique_id = ref.get("external_id", "")
+                break
+        if not technique_id:
+            continue
+        phase = ""
+        kill_chain = obj.get("kill_chain_phases", [])
+        if kill_chain:
+            phase = kill_chain[0].get("phase_name", "")
+        techniques.append({
+            "technique_id": technique_id,
+            "name": obj.get("name", ""),
+            "description": obj.get("description", ""),
+            "tactic": phase.replace("-", " ").title() if phase else "",
+            "kill_chain_phase": phase,
+            "detection": "",
+            "_collection": "Technique",
+        })
+
+    reports = _load_local_threat_reports(groups)
+    for report in reports:
+        report["_collection"] = "ThreatReport"
+
+    _LOCAL_CORPUS = {"Technique": techniques, "ThreatReport": reports, "Vulnerability": []}
+    logger.info(
+        f"Local RAG fallback ready: {len(techniques)} ATT&CK techniques, "
+        f"{len(reports)} threat profile/report records"
+    )
+    return _LOCAL_CORPUS
+
+
+def _local_search(collection_name: str, query: str, limit: int, properties: list[str]) -> list[dict[str, Any]]:
+    corpus = _build_local_corpus().get(collection_name, [])
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return []
+
+    scored = []
+    for doc in corpus:
+        text = " ".join(str(doc.get(prop, "")) for prop in properties)
+        doc_tokens = _tokenize(text)
+        exact_id_bonus = 5 if doc.get("technique_id", "").lower() in query.lower() else 0
+        overlap = len(query_tokens & doc_tokens)
+        if overlap or exact_id_bonus:
+            score = overlap + exact_id_bonus
+            scored.append((score, doc))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    results = []
+    for score, doc in scored[:limit]:
+        result = {prop: doc.get(prop, "") for prop in properties}
+        result["_score"] = float(score)
+        result["_collection"] = collection_name
+        result["_retrieval_backend"] = "local-stix"
+        results.append(result)
+    return results
+
+
 class HybridRetriever:
     """Hybrid BM25 + semantic search over Weaviate collections."""
 
     def __init__(self, client=None):
         self.client = client
         self._owns_client = False
+        self.local_fallback_enabled = RAG_LOCAL_FALLBACK_ENABLED
         if self.client is None:
             try:
                 self.client = get_weaviate_client()
                 self._owns_client = True
                 self._bootstrap_index_if_needed()
             except Exception as e:
-                logger.warning(f"Could not connect to Weaviate: {e}")
+                logger.warning(f"Could not connect to Weaviate: {e}; local RAG fallback will be used")
                 self.client = None
 
     def _bootstrap_index_if_needed(self):
@@ -118,12 +287,32 @@ class HybridRetriever:
                        properties: List[str]) -> List[Dict[str, Any]]:
         """Execute hybrid search on a Weaviate collection."""
         if self.client is None:
-            logger.warning("No Weaviate connection, returning empty results")
+            if self.local_fallback_enabled:
+                return _local_search(collection_name, query, limit, properties)
+            logger.warning("No Weaviate connection and local fallback disabled, returning empty results")
             return []
 
         try:
-            query_vector = embed_query(query).flatten().tolist()
             collection = self.client.collections.get(collection_name)
+            try:
+                query_vector = embed_query(query).flatten().tolist()
+            except Exception as e:
+                logger.warning(f"Embedding unavailable for hybrid search; using BM25/local fallback: {e}")
+                try:
+                    results = collection.query.bm25(query=query, limit=limit, return_metadata=["score"])
+                    documents = []
+                    for obj in results.objects:
+                        doc = {}
+                        for prop in properties:
+                            doc[prop] = getattr(obj.properties, prop, "") if hasattr(obj.properties, prop) else obj.properties.get(prop, "")
+                        doc["_score"] = obj.metadata.score if obj.metadata and obj.metadata.score else 0.0
+                        doc["_collection"] = collection_name
+                        doc["_retrieval_backend"] = "weaviate-bm25"
+                        documents.append(doc)
+                    return documents
+                except Exception as bm25_error:
+                    logger.warning(f"Weaviate BM25 fallback failed on {collection_name}: {bm25_error}")
+                    return _local_search(collection_name, query, limit, properties) if self.local_fallback_enabled else []
 
             results = collection.query.hybrid(
                 query=query,
@@ -140,6 +329,7 @@ class HybridRetriever:
                     doc[prop] = getattr(obj.properties, prop, "") if hasattr(obj.properties, prop) else obj.properties.get(prop, "")
                 doc["_score"] = obj.metadata.score if obj.metadata and obj.metadata.score else 0.0
                 doc["_collection"] = collection_name
+                doc["_retrieval_backend"] = "weaviate-hybrid"
                 documents.append(doc)
 
             logger.debug(f"Hybrid search on {collection_name}: {len(documents)} results for '{query[:50]}...'")
@@ -147,7 +337,7 @@ class HybridRetriever:
 
         except Exception as e:
             logger.warning(f"Hybrid search failed on {collection_name}: {e}")
-            return []
+            return _local_search(collection_name, query, limit, properties) if self.local_fallback_enabled else []
 
     def close(self):
         """Close the Weaviate client if we own it."""
