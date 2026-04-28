@@ -13,6 +13,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 # ─── LLM Configuration ───────────────────────────────────────────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+RAPTOR_ALLOW_EXTERNAL_LLM = os.getenv("RAPTOR_ALLOW_EXTERNAL_LLM", "false").lower() == "true"
 LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "qwen/qwen3-coder:free")
 LLM_MAX_TOKENS = 4096  # Increased — new models support much larger context windows
@@ -36,6 +37,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "change_me_neo4j_password")
 # ─── Weaviate ─────────────────────────────────────────────────────────
 WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://localhost:8080")
 WEAVIATE_GRPC_URL = os.getenv("WEAVIATE_GRPC_URL", "localhost:50051")
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")
 
 # ─── Elasticsearch ────────────────────────────────────────────────────
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
@@ -56,6 +58,11 @@ RAPTOR_API_KEY = os.getenv("RAPTOR_API_KEY", "")
 RAPTOR_AUTH_EXEMPT_HEALTH = os.getenv("RAPTOR_AUTH_EXEMPT_HEALTH", "true").lower() == "true"
 RAPTOR_ALLOW_AUTH_DISABLED = os.getenv("RAPTOR_ALLOW_AUTH_DISABLED", "false").lower() == "true"
 RAPTOR_SESSION_COOKIE_SECURE = os.getenv("RAPTOR_SESSION_COOKIE_SECURE", "false").lower() == "true"
+RAPTOR_REQUIRE_RBAC = os.getenv("RAPTOR_REQUIRE_RBAC", "true").lower() == "true"
+RAPTOR_BOOTSTRAP_ADMIN_USERNAME = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_USERNAME", "admin")
+RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD", "")
+RAPTOR_AUTH_MAX_FAILURES = int(os.getenv("RAPTOR_AUTH_MAX_FAILURES", "5"))
+RAPTOR_AUTH_LOCK_SECONDS = int(os.getenv("RAPTOR_AUTH_LOCK_SECONDS", "900"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
 CORS_ALLOW_ORIGINS = [
   origin.strip()
@@ -93,6 +100,8 @@ INTEL_DIR = DATA_DIR / "intel"
 APT_REPORTS_DIR = _project_path_from_env("APT_REPORTS_DIR", str(INTEL_DIR / "apt_reports"))
 DB_PATH = _project_path_from_env("RAPTOR_DB_PATH", str(DATA_DIR / "raptor.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+EVIDENCE_ENCRYPTION_KEY = os.getenv("EVIDENCE_ENCRYPTION_KEY", "")
+EVIDENCE_RETENTION_DAYS = int(os.getenv("EVIDENCE_RETENTION_DAYS", "180"))
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
