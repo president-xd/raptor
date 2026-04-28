@@ -46,6 +46,7 @@ import {
 import {
   API_BASE,
   askInvestigationQuestion,
+  createAuthSession,
   getDetailedHealth,
   getElasticsearchPollStatus,
   getInvestigationEvidence,
@@ -150,6 +151,8 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   const showToast = useCallback((message) => {
     setToast(message);
@@ -180,10 +183,24 @@ export default function Dashboard() {
       });
     } catch (error) {
       setInvestigationsError(error.message || 'Failed to load investigations');
+      if (error.status === 401 || error.status === 503) setAuthDialogOpen(true);
     } finally {
       if (!quiet) setInvestigationsLoading(false);
     }
   }, []);
+
+  const authenticate = async (apiKey) => {
+    setAuthError('');
+    try {
+      await createAuthSession(apiKey);
+      showToast('Session established');
+      setAuthDialogOpen(false);
+      await Promise.all([loadHealth(), loadInvestigations(true)]);
+    } catch (error) {
+      setAuthError(error.message || 'Authentication failed');
+      throw error;
+    }
+  };
 
   const loadArtifacts = useCallback(async (investigationId) => {
     if (!investigationId) return;
@@ -332,6 +349,8 @@ export default function Dashboard() {
           health={health}
           healthError={healthError}
           onNewInvestigation={() => navigate('investigations')}
+          onAuthenticate={() => setAuthDialogOpen(true)}
+          onNotifications={() => showToast(operationFeed[0]?.detail || 'No active alerts')}
           onRefresh={() => {
             loadHealth();
             loadInvestigations(true);
@@ -451,6 +470,13 @@ export default function Dashboard() {
           onClose={() => setSearch('')}
         />
       )}
+      {authDialogOpen && (
+        <AuthSessionDialog
+          error={authError}
+          onSubmit={authenticate}
+          onClose={() => setAuthDialogOpen(false)}
+        />
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
@@ -506,10 +532,10 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
           ))}
         </div>
         <div className="profile-pill">
-          <div className="avatar">SA</div>
+          <div className="avatar">OP</div>
           <div>
-            <strong>Analyst-01</strong>
-            <span>SOC Tier-2</span>
+            <strong>Operator Session</strong>
+            <span>{health?.subsystems?.auth?.status === 'healthy' ? 'Authenticated API' : 'API auth required'}</span>
           </div>
         </div>
       </div>
@@ -517,8 +543,9 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
   );
 }
 
-function TopHeader({ title, search, setSearch, health, healthError, onNewInvestigation, onRefresh }) {
+function TopHeader({ title, search, setSearch, health, healthError, onNewInvestigation, onAuthenticate, onNotifications, onRefresh }) {
   const healthy = health?.status === 'healthy' && !healthError;
+  const authDegraded = health?.subsystems?.auth?.status && health.subsystems.auth.status !== 'healthy';
   return (
     <header className="top-header">
       <div className="top-title">
@@ -541,10 +568,16 @@ function TopHeader({ title, search, setSearch, health, healthError, onNewInvesti
         <button className="icon-button" type="button" title="Refresh" onClick={onRefresh}>
           <RefreshCcw size={17} />
         </button>
-        <button className="icon-button" type="button" title="Notifications">
+        <button className="icon-button" type="button" title="Notifications" onClick={onNotifications}>
           <Bell size={17} />
           {!healthy && <span className="notification-dot" />}
         </button>
+        {authDegraded && (
+          <button className="secondary-button" type="button" onClick={onAuthenticate}>
+            <Lock size={16} />
+            Authenticate
+          </button>
+        )}
         <button className="primary-button" type="button" onClick={onNewInvestigation}>
           <Plus size={16} />
           New Investigation
@@ -2031,6 +2064,57 @@ function ReadOnlySetting({ label, value }) {
     <div className="setting-field readonly">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function AuthSessionDialog({ error, onSubmit, onClose }) {
+  const [apiKey, setApiKey] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!apiKey.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(apiKey.trim());
+      setApiKey('');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <form className="actor-modal auth-modal" role="dialog" aria-modal="true" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <span>Protected API</span>
+            <h2>Authenticate Session</h2>
+          </div>
+          <button type="button" className="ghost-icon" onClick={onClose} title="Close authentication">
+            <X size={18} />
+          </button>
+        </div>
+        <label className="setting-field">
+          <span>API key</span>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            autoComplete="current-password"
+            autoFocus
+          />
+        </label>
+        {error && <InlineError message={error} />}
+        <div className="settings-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={submitting || !apiKey.trim()}>
+            <Lock size={16} />
+            {submitting ? 'Authenticating' : 'Start Session'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
