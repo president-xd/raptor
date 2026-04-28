@@ -18,6 +18,7 @@ from config import (
     RAG_LOCAL_FALLBACK_ENABLED,
     RAG_RETRIEVAL_K,
     STIX_DIR,
+    WEAVIATE_API_KEY,
     WEAVIATE_GRPC_URL,
     WEAVIATE_URL,
 )
@@ -45,6 +46,7 @@ def get_weaviate_client():
     import weaviate
     http_host, http_port = _split_host_port(WEAVIATE_URL, 8080)
     grpc_host, grpc_port = _split_host_port(WEAVIATE_GRPC_URL, 50051)
+    auth_credentials = weaviate.auth.AuthApiKey(WEAVIATE_API_KEY) if WEAVIATE_API_KEY else None
 
     try:
         return weaviate.connect_to_custom(
@@ -54,10 +56,16 @@ def get_weaviate_client():
             grpc_host=grpc_host,
             grpc_port=grpc_port,
             grpc_secure=False,
+            auth_credentials=auth_credentials,
         )
     except Exception:
         # Compatibility fallback for client variants
-        return weaviate.connect_to_local(host=http_host, port=http_port, grpc_port=grpc_port)
+        return weaviate.connect_to_local(
+            host=http_host,
+            port=http_port,
+            grpc_port=grpc_port,
+            auth_credentials=auth_credentials,
+        )
 
 
 def _tokenize(text: str) -> set[str]:
