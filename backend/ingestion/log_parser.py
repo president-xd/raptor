@@ -17,6 +17,16 @@ class LogParser:
     ]
     IP_RE = re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b')
 
+    def __init__(self):
+        self.parse_errors: List[Dict[str, Any]] = []
+
+    def _record_error(self, parser: str, raw: str, error: str):
+        self.parse_errors.append({
+            "parser": parser,
+            "raw_preview": str(raw)[:500],
+            "error": str(error)[:300],
+        })
+
     @staticmethod
     def _coerce_optional_str(value: Any) -> Optional[str]:
         """Return None for null-like values, otherwise stripped string."""
@@ -82,7 +92,8 @@ class LogParser:
             for line in content.strip().split('\n'):
                 try:
                     events.append(self._norm_json(json.loads(line.strip())))
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    self._record_error("jsonl", line, str(e))
                     continue
         logger.info(f"Parsed {len(events)} JSON events")
         return events
@@ -131,13 +142,15 @@ class LogParser:
             for el in root.iter('Event'):
                 e = self._parse_win_event(el)
                 if e: events.append(e)
-        except ET.ParseError:
+        except ET.ParseError as e:
+            self._record_error("xml", content[:500], str(e))
             for block in re.findall(r'<Event.*?</Event>', content, re.DOTALL):
                 try:
                     el = ET.fromstring(re.sub(r'xmlns="[^"]+"', '', block))
                     e = self._parse_win_event(el)
                     if e: events.append(e)
-                except ET.ParseError:
+                except ET.ParseError as e:
+                    self._record_error("xml-event", block, str(e))
                     continue
         logger.info(f"Parsed {len(events)} Windows events")
         return events
