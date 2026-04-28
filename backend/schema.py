@@ -2,28 +2,16 @@
 RAPTOR Event Schema — Unified format for all ingested log events.
 Matches the schema defined in WHAT_TO_CREATE.md Section 2.4.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
 class RaptorEvent(BaseModel):
     """Unified event schema for all log sources."""
-    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-    source_host: str = ""
-    source_ip: str = ""
-    dest_host: Optional[str] = None
-    dest_ip: Optional[str] = None
-    event_type: str = "process"  # process | network | file | registry | auth | lateral
-    raw: str = ""
-    sigma_matches: List[str] = Field(default_factory=list)
-    ioc_score: float = 0.0
-    enriched: bool = False
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "event_id": "550e8400-e29b-41d4-a716-446655440000",
                 "timestamp": "2026-04-23T10:30:00Z",
@@ -35,10 +23,22 @@ class RaptorEvent(BaseModel):
                 "raw": "SMB session established from WORKSTATION-01 to DC-01",
                 "sigma_matches": ["T1021.002"],
                 "ioc_score": 0.85,
-                "enriched": True
+                "enriched": True,
             }
         }
+    )
 
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    source_host: str = ""
+    source_ip: str = ""
+    dest_host: Optional[str] = None
+    dest_ip: Optional[str] = None
+    event_type: str = "process"  # process | network | file | registry | auth | lateral
+    raw: str = ""
+    sigma_matches: List[str] = Field(default_factory=list)
+    ioc_score: float = 0.0
+    enriched: bool = False
 
 class Finding(BaseModel):
     """A single forensic finding from LLM analysis."""
