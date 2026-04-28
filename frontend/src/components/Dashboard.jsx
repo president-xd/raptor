@@ -189,10 +189,10 @@ export default function Dashboard() {
     }
   }, []);
 
-  const authenticate = async (apiKey) => {
+  const authenticate = async (credentials) => {
     setAuthError('');
     try {
-      await createAuthSession(apiKey);
+      await createAuthSession(credentials);
       showToast('Session established');
       setAuthDialogOpen(false);
       await Promise.all([loadHealth(), loadInvestigations(true)]);
@@ -2070,15 +2070,21 @@ function ReadOnlySetting({ label, value }) {
 
 function AuthSessionDialog({ error, onSubmit, onClose }) {
   const [apiKey, setApiKey] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!apiKey.trim()) return;
+    const hasApiKey = apiKey.trim();
+    const hasPasswordLogin = username.trim() && password;
+    if (!hasApiKey && !hasPasswordLogin) return;
     setSubmitting(true);
     try {
-      await onSubmit(apiKey.trim());
+      await onSubmit(hasApiKey ? { api_key: apiKey.trim() } : { username: username.trim(), password });
       setApiKey('');
+      setUsername('');
+      setPassword('');
     } finally {
       setSubmitting(false);
     }
@@ -2106,10 +2112,28 @@ function AuthSessionDialog({ error, onSubmit, onClose }) {
             autoFocus
           />
         </label>
+        <label className="setting-field">
+          <span>Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+          />
+        </label>
+        <label className="setting-field">
+          <span>Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+          />
+        </label>
         {error && <InlineError message={error} />}
         <div className="settings-actions">
           <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={submitting || !apiKey.trim()}>
+          <button type="submit" className="primary-button" disabled={submitting || (!apiKey.trim() && !(username.trim() && password))}>
             <Lock size={16} />
             {submitting ? 'Authenticating' : 'Start Session'}
           </button>
