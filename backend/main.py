@@ -1,7 +1,6 @@
 """
 RAPTOR | FastAPI Application
-All 7 API endpoints per spec Section 7.1.
-Background processing with persistent SQLite job state.
+Investigation API, auth/session handling, durable jobs, and operational endpoints.
 """
 import os
 import sys
@@ -15,7 +14,10 @@ import hashlib
 import hmac
 import threading
 import time
-from datetime import datetime
+import secrets
+import base64
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -48,9 +50,17 @@ from config import (
     RAPTOR_AUTH_EXEMPT_HEALTH,
     RAPTOR_ALLOW_AUTH_DISABLED,
     RAPTOR_SESSION_COOKIE_SECURE,
+    RAPTOR_REQUIRE_RBAC,
+    RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
+    RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
+    RAPTOR_AUTH_MAX_FAILURES,
+    RAPTOR_AUTH_LOCK_SECONDS,
     EVIDENCE_DIR,
+    EVIDENCE_ENCRYPTION_KEY,
+    EVIDENCE_RETENTION_DAYS,
     CISA_KEV_URL,
     CISA_KEV_CACHE_PATH,
+    RAPTOR_ALLOW_EXTERNAL_LLM,
 )
 from schema import (
     RaptorEvent, Finding, AnalysisResult, AttributionResult,
@@ -64,6 +74,7 @@ from models import (
     APTProfileSummary, APTProfileListResponse,
     EvidenceFileSummary, EvidenceListResponse,
     AuthSessionRequest, AuthSessionResponse,
+    PrincipalResponse,
     AuditEntry, AuditLogResponse,
     CisaKevVulnerability, CisaKevResponse,
     ElasticPollRequest, ElasticPollResponse, ElasticPollStatus,
@@ -71,10 +82,16 @@ from models import (
 
 # ─── App Setup ────────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_optional_services()
+    yield
+
 app = FastAPI(
     title="RAPTOR API",
     description="Retrieval-Augmented Persistent Threat Orchestration and Reasoning",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -86,36 +103,187 @@ app.add_middleware(
 )
 
 
-def _make_session_token() -> str:
-    expires_at = str(int(time.time()) + (8 * 60 * 60))
-    signature = hmac.new(
-        RAPTOR_API_KEY.encode("utf-8"),
-        expires_at.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{expires_at}.{signature}"
+ROLE_ORDER = {"viewer": 1, "analyst": 2, "admin": 3, "service": 3, "system": 3}
+WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+WORKER_STARTED = False
+METRICS = {
+    "requests_total": 0,
+    "auth_failures_total": 0,
+    "investigations_created_total": 0,
+    "investigations_completed_total": 0,
+    "investigations_failed_total": 0,
+    "parser_errors_total": 0,
+    "llm_external_blocked_total": 0,
+    "started_at": time.time(),
+}
 
 
-def _valid_session_token(token: str) -> bool:
-    if not RAPTOR_API_KEY or "." not in token:
-        return False
-    expires_at, supplied_signature = token.split(".", 1)
+def db_connect(timeout: float = 30.0) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH), timeout=timeout, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _password_hash(password: str, salt: Optional[str] = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 210_000)
+    return f"pbkdf2_sha256$210000${salt}${base64.b64encode(digest).decode('ascii')}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
     try:
-        if int(expires_at) < int(time.time()):
+        scheme, rounds, salt, expected = stored.split("$", 3)
+        if scheme != "pbkdf2_sha256":
             return False
-    except ValueError:
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(rounds))
+        supplied = base64.b64encode(digest).decode("ascii")
+        return hmac.compare_digest(supplied, expected)
+    except Exception:
         return False
-    expected_signature = hmac.new(
-        RAPTOR_API_KEY.encode("utf-8"),
-        expires_at.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(supplied_signature, expected_signature)
+
+
+def _principal(actor: str = "anonymous", roles: Optional[list[str]] = None, tenant_id: str = "default", user_id: str = "") -> dict:
+    roles = roles or ["viewer"]
+    return {"actor": actor, "roles": roles, "tenant_id": tenant_id or "default", "user_id": user_id}
+
+
+def _has_role(principal: dict, required: str) -> bool:
+    level = max(ROLE_ORDER.get(role, 0) for role in principal.get("roles", []))
+    return level >= ROLE_ORDER.get(required, 0)
+
+
+def _request_principal(request: Optional[Request]) -> dict:
+    if request is None:
+        return _principal("system", ["system"], "system", "system")
+    state = getattr(request, "state", None)
+    return getattr(state, "principal", _principal("anonymous", ["viewer"]))
+
+
+def _set_request_principal(request: Request, principal: dict):
+    if not hasattr(request, "state"):
+        request.state = type("State", (), {})()
+    request.state.principal = principal
+
+
+def require_role(request: Request, role: str):
+    principal = _request_principal(request)
+    if not RAPTOR_REQUIRE_RBAC:
+        return principal
+    if RAPTOR_ALLOW_AUTH_DISABLED and principal["actor"] == "anonymous":
+        return principal
+    if not _has_role(principal, role):
+        raise HTTPException(status_code=403, detail=f"{role} role required")
+    return principal
+
+
+def _make_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _valid_session_token(token: str) -> Optional[dict]:
+    if not token:
+        return None
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT s.id, s.expires_at, s.revoked_at, u.id AS user_id, u.username, u.roles, u.tenant_id, u.disabled
+            FROM auth_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+            """,
+            (_token_hash(token),),
+        ).fetchone()
+        if not row or row["revoked_at"] or row["disabled"]:
+            return None
+        if float(row["expires_at"]) < time.time():
+            return None
+        conn.execute("UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?", (_utcnow(), row["id"]))
+        conn.commit()
+        return _principal(row["username"], json.loads(row["roles"] or "[]"), row["tenant_id"], row["user_id"])
+    finally:
+        conn.close()
+
+
+def _bootstrap_admin_user(conn: sqlite3.Connection):
+    """Create a local admin only when an explicit bootstrap password is provided."""
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO users (id, username, password_hash, roles, tenant_id, created_at)
+        VALUES ('api-key', 'api-key', '', ?, 'default', ?)
+        """,
+        (json.dumps(["service"]), _utcnow()),
+    )
+    if not RAPTOR_BOOTSTRAP_ADMIN_PASSWORD:
+        return
+    existing = conn.execute(
+        "SELECT id FROM users WHERE username = ?",
+        (RAPTOR_BOOTSTRAP_ADMIN_USERNAME,),
+    ).fetchone()
+    if existing:
+        return
+    conn.execute(
+        """
+        INSERT INTO users (id, username, password_hash, roles, tenant_id, created_at)
+        VALUES (?, ?, ?, ?, 'default', ?)
+        """,
+        (
+            str(uuid.uuid4()),
+            RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
+            _password_hash(RAPTOR_BOOTSTRAP_ADMIN_PASSWORD),
+            json.dumps(["admin", "analyst", "viewer"]),
+            _utcnow(),
+        ),
+    )
+
+
+def authenticate_user(username: str, password: str) -> dict:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        now = time.time()
+        if not row or row["disabled"]:
+            METRICS["auth_failures_total"] += 1
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        if row["locked_until"] and float(row["locked_until"]) > now:
+            METRICS["auth_failures_total"] += 1
+            raise HTTPException(status_code=429, detail="Account temporarily locked after failed attempts")
+        if not _verify_password(password, row["password_hash"]):
+            failures = int(row["failed_attempts"] or 0) + 1
+            locked_until = now + RAPTOR_AUTH_LOCK_SECONDS if failures >= RAPTOR_AUTH_MAX_FAILURES else 0
+            conn.execute(
+                "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?",
+                (failures, locked_until, row["id"]),
+            )
+            conn.commit()
+            METRICS["auth_failures_total"] += 1
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        conn.execute(
+            "UPDATE users SET failed_attempts = 0, locked_until = 0, last_login_at = ? WHERE id = ?",
+            (_utcnow(), row["id"]),
+        )
+        conn.commit()
+        return _principal(row["username"], json.loads(row["roles"] or "[]"), row["tenant_id"], row["id"])
+    finally:
+        conn.close()
 
 
 @app.middleware("http")
 async def optional_api_key_auth(request: Request, call_next):
     """Require an API key when RAPTOR_API_KEY is configured."""
+    METRICS["requests_total"] += 1
     path = request.url.path
     public_paths = {"/", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/session"}
     if path in public_paths:
@@ -125,39 +293,40 @@ async def optional_api_key_auth(request: Request, call_next):
     if not path.startswith("/api/"):
         return await call_next(request)
 
-    if not RAPTOR_API_KEY:
-        if RAPTOR_ALLOW_AUTH_DISABLED:
-            return await call_next(request)
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "RAPTOR_API_KEY is not configured; API routes are unavailable"},
-        )
-
     supplied = request.headers.get("x-raptor-api-key", "")
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         supplied = auth_header.split(" ", 1)[1].strip()
-    if not supplied:
-        session_token = request.cookies.get("raptor_session", "")
-        if _valid_session_token(session_token):
-            supplied = RAPTOR_API_KEY
+    if supplied and RAPTOR_API_KEY and hmac.compare_digest(supplied, RAPTOR_API_KEY):
+        _set_request_principal(request, _principal("api-key", ["service"], "default", "api-key"))
+        return await call_next(request)
 
-    if not hmac.compare_digest(supplied, RAPTOR_API_KEY):
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Valid X-RAPTOR-API-Key or Bearer token required"},
-        )
+    session_token = request.cookies.get("raptor_session", "")
+    principal = _valid_session_token(session_token)
+    if principal:
+        _set_request_principal(request, principal)
+        return await call_next(request)
 
-    return await call_next(request)
+    if RAPTOR_ALLOW_AUTH_DISABLED and not RAPTOR_API_KEY:
+        _set_request_principal(request, _principal("anonymous", ["admin"], "default"))
+        return await call_next(request)
+
+    METRICS["auth_failures_total"] += 1
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Valid API key or browser session required"},
+    )
 
 # ─── SQLite Job State ────────────────────────────────────────────────
 
 def init_db():
     """Initialize SQLite database for job tracking."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS investigations (
             id TEXT PRIMARY KEY,
+            owner_id TEXT DEFAULT '',
+            tenant_id TEXT DEFAULT 'default',
             name TEXT DEFAULT '',
             source TEXT DEFAULT '',
             input_bytes INTEGER DEFAULT 0,
@@ -187,7 +356,36 @@ def init_db():
             size_bytes INTEGER DEFAULT 0,
             content_type TEXT DEFAULT '',
             source TEXT DEFAULT '',
+            encrypted INTEGER DEFAULT 0,
+            encryption_key_id TEXT DEFAULT '',
+            retention_expires_at TEXT DEFAULT '',
             created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            roles TEXT NOT NULL DEFAULT '["viewer"]',
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            disabled INTEGER DEFAULT 0,
+            failed_attempts INTEGER DEFAULT 0,
+            locked_until REAL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            last_login_at TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            expires_at REAL NOT NULL,
+            revoked_at TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT DEFAULT '',
+            FOREIGN KEY(user_id) REFERENCES users(id)
         )
     """)
     conn.execute("""
@@ -198,7 +396,9 @@ def init_db():
             action TEXT NOT NULL,
             investigation_id TEXT,
             detail_json TEXT DEFAULT '{}',
-            ip_address TEXT DEFAULT ''
+            ip_address TEXT DEFAULT '',
+            prev_hash TEXT DEFAULT '',
+            entry_hash TEXT DEFAULT ''
         )
     """)
     conn.execute("""
@@ -224,6 +424,32 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            investigation_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'queued',
+            attempts INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            payload_json TEXT NOT NULL,
+            locked_by TEXT DEFAULT '',
+            locked_at REAL DEFAULT 0,
+            next_run_at REAL DEFAULT 0,
+            last_error TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS parser_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            investigation_id TEXT NOT NULL,
+            parser TEXT DEFAULT '',
+            raw_preview TEXT DEFAULT '',
+            error TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
         CREATE TRIGGER IF NOT EXISTS audit_log_no_update
         BEFORE UPDATE ON audit_log
         BEGIN
@@ -242,12 +468,37 @@ def init_db():
         for row in conn.execute("PRAGMA table_info(investigations)").fetchall()
     }
     migrations = {
+        "owner_id": "ALTER TABLE investigations ADD COLUMN owner_id TEXT DEFAULT ''",
+        "tenant_id": "ALTER TABLE investigations ADD COLUMN tenant_id TEXT DEFAULT 'default'",
         "name": "ALTER TABLE investigations ADD COLUMN name TEXT DEFAULT ''",
         "source": "ALTER TABLE investigations ADD COLUMN source TEXT DEFAULT ''",
         "input_bytes": "ALTER TABLE investigations ADD COLUMN input_bytes INTEGER DEFAULT 0",
     }
     for column, statement in migrations.items():
         if column not in existing_columns:
+            conn.execute(statement)
+    evidence_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(evidence_files)").fetchall()
+    }
+    evidence_migrations = {
+        "encrypted": "ALTER TABLE evidence_files ADD COLUMN encrypted INTEGER DEFAULT 0",
+        "encryption_key_id": "ALTER TABLE evidence_files ADD COLUMN encryption_key_id TEXT DEFAULT ''",
+        "retention_expires_at": "ALTER TABLE evidence_files ADD COLUMN retention_expires_at TEXT DEFAULT ''",
+    }
+    for column, statement in evidence_migrations.items():
+        if column not in evidence_columns:
+            conn.execute(statement)
+    audit_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(audit_log)").fetchall()
+    }
+    audit_migrations = {
+        "prev_hash": "ALTER TABLE audit_log ADD COLUMN prev_hash TEXT DEFAULT ''",
+        "entry_hash": "ALTER TABLE audit_log ADD COLUMN entry_hash TEXT DEFAULT ''",
+    }
+    for column, statement in audit_migrations.items():
+        if column not in audit_columns:
             conn.execute(statement)
     conn.execute(
         """
@@ -275,6 +526,7 @@ def init_db():
             ELASTIC_POLL_WINDOW_MINUTES,
         ),
     )
+    _bootstrap_admin_user(conn)
     conn.commit()
     conn.close()
 
@@ -282,15 +534,30 @@ init_db()
 
 
 def db_get(inv_id: str) -> Optional[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM investigations WHERE id = ?", (inv_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
+def ensure_investigation_access(request: Request, inv_id: str, role: str = "viewer") -> dict:
+    principal = require_role(request, role)
+    record = db_get(inv_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    if _has_role(principal, "admin") or "service" in principal.get("roles", []):
+        return record
+    if record.get("tenant_id") != principal.get("tenant_id"):
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    owner_id = record.get("owner_id") or ""
+    if owner_id and owner_id != principal.get("user_id"):
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    return record
+
+
 def db_update(inv_id: str, **kwargs):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     sets = ", ".join(f"{k} = ?" for k in kwargs.keys())
     values = list(kwargs.values()) + [inv_id]
     conn.execute(f"UPDATE investigations SET {sets} WHERE id = ?", values)
@@ -306,13 +573,15 @@ def db_create(inv_id: str, metadata: Optional[dict] = None, input_bytes: int = 0
         if filename:
             name = filename
     source = str(metadata.get("source") or "file").strip()
-    conn = sqlite3.connect(str(DB_PATH))
+    owner_id = str(metadata.get("owner_id") or "system")
+    tenant_id = str(metadata.get("tenant_id") or "default")
+    conn = db_connect()
     conn.execute(
         """
-        INSERT INTO investigations (id, name, source, input_bytes, status, created_at)
-        VALUES (?, ?, ?, ?, 'queued', ?)
+        INSERT INTO investigations (id, owner_id, tenant_id, name, source, input_bytes, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)
         """,
-        (inv_id, name, source, input_bytes, datetime.utcnow().isoformat())
+        (inv_id, owner_id, tenant_id, name, source, input_bytes, _utcnow())
     )
     conn.commit()
     conn.close()
@@ -322,6 +591,33 @@ def _safe_filename(value: str, default: str = "raw.log") -> str:
     name = Path(value or default).name
     cleaned = "".join(ch if ch.isalnum() or ch in {".", "-", "_"} else "_" for ch in name)
     return cleaned or default
+
+
+def _evidence_key() -> Optional[bytes]:
+    if not EVIDENCE_ENCRYPTION_KEY:
+        return None
+    return hashlib.sha256(EVIDENCE_ENCRYPTION_KEY.encode("utf-8")).digest()
+
+
+def _hmac_stream(key: bytes, nonce: bytes, length: int) -> bytes:
+    blocks = []
+    counter = 0
+    while sum(len(block) for block in blocks) < length:
+        blocks.append(hmac.new(key, nonce + counter.to_bytes(8, "big"), hashlib.sha256).digest())
+        counter += 1
+    return b"".join(blocks)[:length]
+
+
+def encrypt_evidence(content: bytes) -> tuple[bytes, bool, str]:
+    key = _evidence_key()
+    if not key:
+        return content, False, ""
+    nonce = secrets.token_bytes(16)
+    stream = _hmac_stream(key, nonce, len(content))
+    ciphertext = bytes(a ^ b for a, b in zip(content, stream))
+    tag = hmac.new(key, nonce + ciphertext, hashlib.sha256).hexdigest()
+    header = f"RAPTOR-EVIDENCE-v1:{nonce.hex()}:{tag}\n".encode("ascii")
+    return header + ciphertext, True, "local-hmac-sha256-v1"
 
 
 def store_evidence_file(
@@ -338,17 +634,22 @@ def store_evidence_file(
     source = str(metadata.get("source") or "unknown")
     stored_name = f"{time.time_ns()}_{uuid.uuid4().hex[:12]}_{original}"
     stored_path = case_dir / stored_name
-    stored_path.write_bytes(content)
+    stored_content, encrypted, key_id = encrypt_evidence(content)
+    stored_path.write_bytes(stored_content)
 
     sha256 = hashlib.sha256(content).hexdigest()
-    created_at = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    created_at = _utcnow()
+    retention_expires_at = datetime.fromtimestamp(
+        time.time() + max(EVIDENCE_RETENTION_DAYS, 1) * 86400,
+        timezone.utc,
+    ).isoformat()
+    conn = db_connect()
     cur = conn.execute(
         """
         INSERT INTO evidence_files
         (investigation_id, original_filename, stored_path, sha256, size_bytes,
-         content_type, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         content_type, source, encrypted, encryption_key_id, retention_expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             investigation_id,
@@ -358,6 +659,9 @@ def store_evidence_file(
             len(content),
             str(metadata.get("content_type") or "text/plain"),
             source,
+            1 if encrypted else 0,
+            key_id,
+            retention_expires_at,
             created_at,
         ),
     )
@@ -373,17 +677,19 @@ def store_evidence_file(
         "size_bytes": len(content),
         "content_type": str(metadata.get("content_type") or "text/plain"),
         "source": source,
+        "encrypted": encrypted,
+        "retention_expires_at": retention_expires_at,
         "created_at": created_at,
     }
 
 
 def list_evidence_files(investigation_id: str) -> list[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
         SELECT id, investigation_id, original_filename, stored_path, sha256,
-               size_bytes, content_type, source, created_at
+               size_bytes, content_type, source, encrypted, retention_expires_at, created_at
         FROM evidence_files
         WHERE investigation_id = ?
         ORDER BY id DESC
@@ -408,20 +714,30 @@ def audit_log(
         if request.client:
             ip_address = request.client.host
 
-    conn = sqlite3.connect(str(DB_PATH))
+    timestamp = _utcnow()
+    detail_json = json.dumps(detail or {}, default=str)
+    conn = db_connect()
+    prev = conn.execute(
+        "SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    prev_hash = prev[0] if prev and prev[0] else ""
+    entry_material = "|".join([timestamp, actor, action, investigation_id or "", detail_json, ip_address, prev_hash])
+    entry_hash = hashlib.sha256(entry_material.encode("utf-8")).hexdigest()
     conn.execute(
         """
         INSERT INTO audit_log
-        (timestamp, actor, action, investigation_id, detail_json, ip_address)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (timestamp, actor, action, investigation_id, detail_json, ip_address, prev_hash, entry_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            datetime.utcnow().isoformat(),
+            timestamp,
             actor,
             action,
             investigation_id,
-            json.dumps(detail or {}, default=str),
+            detail_json,
             ip_address,
+            prev_hash,
+            entry_hash,
         ),
     )
     conn.commit()
@@ -449,7 +765,7 @@ def _authenticated_actor(request: Request) -> str:
 
 def list_audit_entries(limit: int = 100, investigation_id: Optional[str] = None) -> list[dict]:
     safe_limit = max(1, min(limit, 500))
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.row_factory = sqlite3.Row
     if investigation_id:
         rows = conn.execute(
@@ -509,9 +825,10 @@ def start_investigation_from_content(
         raw_bytes if raw_bytes is not None else log_content.encode("utf-8", errors="replace"),
         metadata,
     )
-    background_tasks.add_task(run_investigation, investigation_id, log_content, metadata or {})
+    enqueue_investigation_job(investigation_id, log_content, metadata or {})
 
     logger.info(f"Investigation {investigation_id} started ({byte_count} bytes)")
+    METRICS["investigations_created_total"] += 1
     return InvestigateResponse(
         investigation_id=investigation_id,
         status="queued",
@@ -524,7 +841,7 @@ def start_investigation_now(
     metadata: Optional[dict] = None,
     raw_bytes: Optional[bytes] = None,
 ) -> InvestigateResponse:
-    """Create an investigation outside FastAPI BackgroundTasks."""
+    """Create an investigation from a non-request caller."""
     if not log_content or not log_content.strip():
         raise HTTPException(status_code=400, detail="Investigation input is empty")
 
@@ -542,12 +859,7 @@ def start_investigation_now(
         raw_bytes if raw_bytes is not None else log_content.encode("utf-8", errors="replace"),
         metadata,
     )
-    thread = threading.Thread(
-        target=run_investigation,
-        args=(investigation_id, log_content, metadata or {}),
-        daemon=True,
-    )
-    thread.start()
+    enqueue_investigation_job(investigation_id, log_content, metadata or {})
     audit_log(
         None,
         "investigation.created",
@@ -558,6 +870,7 @@ def start_investigation_now(
             "filename": metadata.get("filename") or "",
         },
     )
+    METRICS["investigations_created_total"] += 1
     return InvestigateResponse(
         investigation_id=investigation_id,
         status="queued",
@@ -738,27 +1051,42 @@ def fetch_cisa_kev(refresh: bool = False) -> dict:
             return json.loads(CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
         raise HTTPException(status_code=503, detail=f"CISA KEV feed unavailable: {e}")
 
-    payload["_raptor_cached_at"] = datetime.utcnow().isoformat()
+    payload["_raptor_cached_at"] = _utcnow()
     payload["_raptor_source"] = CISA_KEV_URL
     CISA_KEV_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     redis_set_json(cache_key, payload)
     return payload
 
 
-def db_list(limit: int = 25) -> list[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+def db_list(limit: int = 25, principal: Optional[dict] = None) -> list[dict]:
+    conn = db_connect()
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT id, name, source, input_bytes, status, progress, current_phase, error,
-               event_count, technique_count, created_at, completed_at,
-               attribution_json, graph_json
-        FROM investigations
-        ORDER BY datetime(created_at) DESC
-        LIMIT ?
-        """,
-        (limit,),
-    ).fetchall()
+    principal = principal or _principal("system", ["system"], "system")
+    if _has_role(principal, "admin") or "service" in principal.get("roles", []):
+        rows = conn.execute(
+            """
+            SELECT id, owner_id, tenant_id, name, source, input_bytes, status, progress, current_phase, error,
+                   event_count, technique_count, created_at, completed_at,
+                   attribution_json, graph_json
+            FROM investigations
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, owner_id, tenant_id, name, source, input_bytes, status, progress, current_phase, error,
+                   event_count, technique_count, created_at, completed_at,
+                   attribution_json, graph_json
+            FROM investigations
+            WHERE tenant_id = ? AND (owner_id = ? OR owner_id = '')
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+            """,
+            (principal.get("tenant_id", "default"), principal.get("user_id", ""), limit),
+        ).fetchall()
     conn.close()
     return [_summarize_investigation_row(dict(row)) for row in rows]
 
@@ -766,7 +1094,7 @@ def db_list(limit: int = 25) -> list[dict]:
 def update_elastic_poll_state(**kwargs):
     if not kwargs:
         return
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     sets = ", ".join(f"{key} = ?" for key in kwargs)
     values = list(kwargs.values()) + ["default"]
     conn.execute(f"UPDATE elastic_poll_state SET {sets} WHERE name = ?", values)
@@ -775,7 +1103,7 @@ def update_elastic_poll_state(**kwargs):
 
 
 def get_elastic_poll_state() -> dict:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.row_factory = sqlite3.Row
     row = conn.execute(
         """
@@ -794,7 +1122,7 @@ def get_elastic_poll_state() -> dict:
 
 
 def increment_elastic_poll_investigations():
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     conn.execute(
         """
         UPDATE elastic_poll_state
@@ -812,10 +1140,10 @@ def filter_new_elasticsearch_events(content: str) -> tuple[str, int]:
     if not lines:
         return "", 0
 
-    now = datetime.utcnow().isoformat()
+    now = _utcnow()
     accepted: list[str] = []
     duplicates = 0
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = db_connect()
     try:
         for line in lines:
             try:
@@ -880,6 +1208,169 @@ def _summarize_investigation_row(row: dict) -> dict:
     return row
 
 
+def enqueue_investigation_job(investigation_id: str, log_content: str, metadata: dict):
+    now = _utcnow()
+    conn = db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO job_queue
+            (investigation_id, status, attempts, payload_json, next_run_at, created_at, updated_at)
+            VALUES (?, 'queued', 0, ?, ?, ?, ?)
+            """,
+            (
+                investigation_id,
+                json.dumps({"log_content": log_content, "metadata": metadata}, default=str),
+                time.time(),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def store_parser_errors(investigation_id: str, errors: list[dict]):
+    if not errors:
+        return
+    conn = db_connect()
+    try:
+        conn.executemany(
+            """
+            INSERT INTO parser_errors (investigation_id, parser, raw_preview, error, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    investigation_id,
+                    str(item.get("parser", "")),
+                    str(item.get("raw_preview", "")),
+                    str(item.get("error", "")),
+                    _utcnow(),
+                )
+                for item in errors
+            ],
+        )
+        conn.commit()
+        METRICS["parser_errors_total"] += len(errors)
+    finally:
+        conn.close()
+
+
+def claim_next_investigation_job() -> Optional[dict]:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        now = time.time()
+        stale_before = now - 3600
+        conn.execute(
+            """
+            UPDATE job_queue
+            SET status = 'queued', locked_by = '', locked_at = 0, updated_at = ?, last_error = 'recovered stale worker lock'
+            WHERE status = 'running' AND locked_at < ?
+            """,
+            (_utcnow(), stale_before),
+        )
+        row = conn.execute(
+            """
+            SELECT *
+            FROM job_queue
+            WHERE status = 'queued' AND next_run_at <= ?
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (now,),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return None
+        updated = conn.execute(
+            """
+            UPDATE job_queue
+            SET status = 'running',
+                attempts = attempts + 1,
+                locked_by = ?,
+                locked_at = ?,
+                updated_at = ?
+            WHERE id = ? AND status = 'queued'
+            """,
+            (WORKER_ID, now, _utcnow(), row["id"]),
+        ).rowcount
+        conn.commit()
+        if not updated:
+            return None
+        job = dict(row)
+        payload = json.loads(job.get("payload_json") or "{}")
+        job["log_content"] = payload.get("log_content", "")
+        job["metadata"] = payload.get("metadata", {})
+        return job
+    finally:
+        conn.close()
+
+
+def complete_investigation_job(job_id: int, failed: bool = False, error: str = ""):
+    conn = db_connect()
+    try:
+        if failed:
+            row = conn.execute("SELECT attempts, max_attempts FROM job_queue WHERE id = ?", (job_id,)).fetchone()
+            attempts, max_attempts = row if row else (1, 1)
+            status = "failed" if attempts >= max_attempts else "queued"
+            next_run_at = time.time() + min(300, 2 ** max(attempts, 1))
+            conn.execute(
+                """
+                UPDATE job_queue
+                SET status = ?, locked_by = '', locked_at = 0, next_run_at = ?,
+                    last_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, next_run_at, error[:500], _utcnow(), job_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE job_queue
+                SET status = 'complete', locked_by = '', locked_at = 0, updated_at = ?
+                WHERE id = ?
+                """,
+                (_utcnow(), job_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def investigation_worker_loop():
+    logger.info(f"Investigation worker started: {WORKER_ID}")
+    while True:
+        job = claim_next_investigation_job()
+        if not job:
+            time.sleep(2)
+            continue
+        try:
+            payload = json.loads(job.get("payload_json") or "{}")
+            run_investigation(
+                job["investigation_id"],
+                payload.get("log_content", ""),
+                payload.get("metadata", {}),
+            )
+            record = db_get(job["investigation_id"]) or {}
+            failed = record.get("status") == "failed"
+            complete_investigation_job(job["id"], failed=failed, error=record.get("error") or "")
+        except Exception as e:
+            logger.error(f"Investigation worker failed job {job.get('investigation_id')}: {e}")
+            complete_investigation_job(job["id"], failed=True, error=str(e))
+
+
+def start_investigation_worker():
+    global WORKER_STARTED
+    if WORKER_STARTED:
+        return
+    WORKER_STARTED = True
+    thread = threading.Thread(target=investigation_worker_loop, daemon=True)
+    thread.start()
+
+
 # ─── Background Investigation Pipeline ──────────────────────────────
 
 def run_investigation(investigation_id: str, log_content: str, metadata: Optional[dict] = None):
@@ -898,6 +1389,7 @@ def run_investigation(investigation_id: str, log_content: str, metadata: Optiona
         from ingestion.normalizer import LogNormalizer
         normalizer = LogNormalizer()
         events = normalizer.normalize_content(log_content)
+        store_parser_errors(investigation_id, getattr(normalizer, "parse_errors", []))
         db_update(investigation_id, progress=15,
                   current_phase="Log parsing complete", event_count=len(events))
         logger.info(f"[{investigation_id}] Parsed {len(events)} events")
@@ -1034,14 +1526,16 @@ def run_investigation(investigation_id: str, log_content: str, metadata: Optiona
             graph_json=graph_json,
             narrative_report=narrative,
             technique_count=len(analysis.findings),
-            completed_at=datetime.utcnow().isoformat(),
+            completed_at=_utcnow(),
         )
         logger.info(f"[{investigation_id}] Investigation complete!")
+        METRICS["investigations_completed_total"] += 1
 
     except Exception as e:
         logger.error(f"[{investigation_id}] Investigation failed: {e}\n{traceback.format_exc()}")
         db_update(investigation_id, status="failed", error=str(e),
                   current_phase=f"Failed: {str(e)[:200]}")
+        METRICS["investigations_failed_total"] += 1
 
 
 def run_elasticsearch_poll_once(
@@ -1052,7 +1546,7 @@ def run_elasticsearch_poll_once(
     apt_filters: Optional[list[str]] = None,
 ) -> ElasticPollResponse:
     """Poll Elasticsearch once and create an investigation if events are found."""
-    started_at = datetime.utcnow().isoformat()
+    started_at = _utcnow()
     update_elastic_poll_state(last_polled_at=started_at, last_status="polling", last_error="")
     try:
         content = fetch_elasticsearch_logs(
@@ -1119,8 +1613,8 @@ def elastic_poll_loop():
         time.sleep(max(30, ELASTIC_POLL_INTERVAL_SECONDS))
 
 
-@app.on_event("startup")
-def start_optional_elastic_poller():
+def start_optional_services():
+    start_investigation_worker()
     if not ELASTIC_POLL_ENABLED:
         return
     thread = threading.Thread(target=elastic_poll_loop, daemon=True)
@@ -1131,21 +1625,74 @@ def start_optional_elastic_poller():
 
 @app.post("/api/v1/auth/session", response_model=AuthSessionResponse)
 async def create_auth_session(payload: AuthSessionRequest, response: Response):
-    """Exchange the operator-provided API key for an HttpOnly browser session cookie."""
-    if not RAPTOR_API_KEY:
-        raise HTTPException(status_code=503, detail="RAPTOR_API_KEY is not configured")
-    if not hmac.compare_digest(payload.api_key, RAPTOR_API_KEY):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    """Create a server-side browser session from user credentials or the service API key."""
+    principal = None
+    if payload.api_key:
+        if not RAPTOR_API_KEY or not hmac.compare_digest(payload.api_key, RAPTOR_API_KEY):
+            METRICS["auth_failures_total"] += 1
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        principal = _principal("api-key", ["service"], "default", "api-key")
+    elif payload.username and payload.password:
+        principal = authenticate_user(payload.username, payload.password)
+    else:
+        raise HTTPException(status_code=400, detail="api_key or username/password is required")
+
+    token = _make_session_token()
+    expires_at = time.time() + (8 * 60 * 60)
+    conn = db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(uuid.uuid4()), principal.get("user_id") or "api-key", _token_hash(token), expires_at, _utcnow()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     response.set_cookie(
         "raptor_session",
-        _make_session_token(),
+        token,
         httponly=True,
         secure=RAPTOR_SESSION_COOKIE_SECURE,
         samesite="lax",
         max_age=8 * 60 * 60,
     )
-    return AuthSessionResponse(authenticated=True)
+    return AuthSessionResponse(
+        authenticated=True,
+        actor=principal["actor"],
+        roles=principal["roles"],
+        tenant_id=principal["tenant_id"],
+    )
+
+
+@app.get("/api/v1/auth/me", response_model=PrincipalResponse)
+async def get_current_principal(request: Request):
+    principal = require_role(request, "viewer")
+    return PrincipalResponse(
+        actor=principal["actor"],
+        roles=principal["roles"],
+        tenant_id=principal["tenant_id"],
+    )
+
+
+@app.post("/api/v1/auth/logout")
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("raptor_session", "")
+    if token:
+        conn = db_connect()
+        try:
+            conn.execute(
+                "UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ?",
+                (_utcnow(), _token_hash(token)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    response.delete_cookie("raptor_session")
+    return {"authenticated": False}
 
 
 @app.post("/api/v1/investigate", response_model=InvestigateResponse)
@@ -1159,6 +1706,7 @@ async def investigate(
     Upload a log file and start an investigation.
     POST /api/v1/investigate
     """
+    principal = require_role(request, "analyst")
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -1178,6 +1726,8 @@ async def investigate(
             "filename": file.filename,
             "content_type": file.content_type or "application/octet-stream",
             "case_name": case_name or file.filename or "",
+            "owner_id": principal.get("user_id") or principal.get("actor"),
+            "tenant_id": principal.get("tenant_id", "default"),
         },
         raw_bytes=content,
     )
@@ -1196,6 +1746,7 @@ def investigate_text(request: Request, background_tasks: BackgroundTasks, payloa
     Start an investigation from pasted logs or an Elasticsearch query.
     POST /api/v1/investigate/text
     """
+    principal = require_role(request, "analyst")
     log_content = payload.log_content or ""
     if not log_content.strip() and payload.elastic_query:
         log_content = fetch_elasticsearch_logs(
@@ -1216,6 +1767,8 @@ def investigate_text(request: Request, background_tasks: BackgroundTasks, payloa
             "time_range_end": payload.time_range_end,
             "sensitivity": payload.sensitivity,
             "apt_filters": payload.apt_filters,
+            "owner_id": principal.get("user_id") or principal.get("actor"),
+            "tenant_id": principal.get("tenant_id", "default"),
         },
     )
     audit_log(
@@ -1228,10 +1781,11 @@ def investigate_text(request: Request, background_tasks: BackgroundTasks, payloa
 
 
 @app.get("/api/v1/investigations", response_model=InvestigationListResponse)
-async def list_investigations(limit: int = 25):
+async def list_investigations(request: Request, limit: int = 25):
     """List recent investigations for case management UX."""
+    principal = require_role(request, "viewer")
     safe_limit = max(1, min(limit, 100))
-    rows = db_list(safe_limit)
+    rows = db_list(safe_limit, principal)
     items = [
         InvestigationListItem(
             investigation_id=row.get("id", ""),
@@ -1257,14 +1811,12 @@ async def list_investigations(limit: int = 25):
 
 
 @app.get("/api/v1/investigate/{investigation_id}/status", response_model=InvestigationStatus)
-async def get_status(investigation_id: str):
+async def get_status(request: Request, investigation_id: str):
     """
     Check investigation status and progress.
     GET /api/v1/investigate/{id}/status
     """
-    record = db_get(investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, investigation_id, "viewer")
 
     return InvestigationStatus(
         investigation_id=investigation_id,
@@ -1282,9 +1834,7 @@ async def get_report(request: Request, investigation_id: str):
     Get full investigation report.
     GET /api/v1/investigate/{id}/report
     """
-    record = db_get(investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, investigation_id, "viewer")
 
     findings = []
     if record.get("findings_json"):
@@ -1321,9 +1871,7 @@ async def get_graph(request: Request, investigation_id: str):
     Get Sigma.js compatible attack graph JSON.
     GET /api/v1/investigate/{id}/graph
     """
-    record = db_get(investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, investigation_id, "viewer")
 
     graph_json = record.get("graph_json", "{}")
     audit_log(request, "graph.viewed", investigation_id, {})
@@ -1335,9 +1883,7 @@ async def get_graph(request: Request, investigation_id: str):
 @app.get("/api/v1/investigate/{investigation_id}/evidence", response_model=EvidenceListResponse)
 async def get_evidence(request: Request, investigation_id: str):
     """List persisted raw evidence metadata for an investigation."""
-    record = db_get(investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, investigation_id, "viewer")
     rows = list_evidence_files(investigation_id)
     audit_log(request, "evidence.listed", investigation_id, {"count": len(rows)})
     return EvidenceListResponse(
@@ -1353,9 +1899,7 @@ def simulate(request: Request, payload: SimulateRequest):
     Simulate next attack steps for attributed APT.
     POST /api/v1/simulate
     """
-    record = db_get(payload.investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, payload.investigation_id, "analyst")
     if record["status"] != "complete":
         raise HTTPException(status_code=400, detail="Investigation not complete yet")
 
@@ -1453,9 +1997,7 @@ def query(request: Request, payload: QueryRequest):
     Natural language query against investigation.
     POST /api/v1/query
     """
-    record = db_get(payload.investigation_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+    record = ensure_investigation_access(request, payload.investigation_id, "viewer")
 
     if record["status"] != "complete":
         raise HTTPException(status_code=400, detail="Investigation not complete yet")
@@ -1605,7 +2147,7 @@ async def health_check():
     """Fast liveness check that does not touch external services."""
     sqlite_status = "healthy"
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=1)
+        conn = db_connect(timeout=1)
         conn.execute("SELECT 1")
         conn.close()
     except Exception:
@@ -1615,12 +2157,43 @@ async def health_check():
         "status": "healthy" if sqlite_status == "healthy" else "degraded",
         "service": "RAPTOR API",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": _utcnow(),
         "subsystems": {
             "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
             "sqlite": {"status": sqlite_status, "detail": "query ok" if sqlite_status == "healthy" else "query failed"},
         },
     }
+
+
+@app.get("/api/v1/metrics")
+async def metrics(request: Request):
+    """Prometheus-compatible operational counters."""
+    require_role(request, "viewer")
+    uptime = max(0, time.time() - METRICS["started_at"])
+    lines = [
+        "# HELP raptor_requests_total Total API requests seen by middleware",
+        "# TYPE raptor_requests_total counter",
+        f"raptor_requests_total {METRICS['requests_total']}",
+        "# HELP raptor_auth_failures_total Authentication failures",
+        "# TYPE raptor_auth_failures_total counter",
+        f"raptor_auth_failures_total {METRICS['auth_failures_total']}",
+        "# HELP raptor_investigations_created_total Investigations queued",
+        "# TYPE raptor_investigations_created_total counter",
+        f"raptor_investigations_created_total {METRICS['investigations_created_total']}",
+        "# HELP raptor_investigations_completed_total Investigations completed",
+        "# TYPE raptor_investigations_completed_total counter",
+        f"raptor_investigations_completed_total {METRICS['investigations_completed_total']}",
+        "# HELP raptor_investigations_failed_total Investigations failed",
+        "# TYPE raptor_investigations_failed_total counter",
+        f"raptor_investigations_failed_total {METRICS['investigations_failed_total']}",
+        "# HELP raptor_parser_errors_total Parser dead-letter records",
+        "# TYPE raptor_parser_errors_total counter",
+        f"raptor_parser_errors_total {METRICS['parser_errors_total']}",
+        "# HELP raptor_uptime_seconds Process uptime",
+        "# TYPE raptor_uptime_seconds gauge",
+        f"raptor_uptime_seconds {uptime:.0f}",
+    ]
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 def _endpoint_host_port(endpoint: str, default_port: int) -> tuple[str, int]:
@@ -1655,6 +2228,7 @@ async def health_check_detailed():
         "sqlite": {"status": "healthy", "detail": ""},
         "auth": {"status": "healthy", "detail": "API key auth enabled" if RAPTOR_API_KEY else "API key missing"},
         "evidence": {"status": "healthy", "detail": ""},
+        "evidence_encryption": {"status": "healthy", "detail": ""},
         "neo4j": {"status": "degraded", "detail": "unreachable"},
         "weaviate": {"status": "degraded", "detail": "unreachable"},
         "elasticsearch": {"status": "degraded", "detail": "unreachable"},
@@ -1665,7 +2239,7 @@ async def health_check_detailed():
 
     # SQLite
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=1)
+        conn = db_connect(timeout=1)
         conn.execute("SELECT 1")
         conn.close()
         checks["sqlite"] = {"status": "healthy", "detail": "query ok"}
@@ -1681,6 +2255,11 @@ async def health_check_detailed():
         checks["evidence"] = {"status": "healthy", "detail": str(EVIDENCE_DIR)}
     except Exception as e:
         checks["evidence"] = {"status": "degraded", "detail": str(e)}
+    checks["evidence_encryption"] = (
+        {"status": "healthy", "detail": "EVIDENCE_ENCRYPTION_KEY configured"}
+        if EVIDENCE_ENCRYPTION_KEY
+        else {"status": "degraded", "detail": "EVIDENCE_ENCRYPTION_KEY missing; evidence stored without local encryption"}
+    )
 
     checks["neo4j"] = _tcp_status("Neo4j", os.getenv("NEO4J_URI", "bolt://localhost:7687"), 7687)
     checks["weaviate"] = _tcp_status("Weaviate", WEAVIATE_URL, 8080)
@@ -1725,7 +2304,7 @@ async def health_check_detailed():
         "status": overall,
         "service": "RAPTOR API",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": _utcnow(),
         "subsystems": checks,
     }
 
