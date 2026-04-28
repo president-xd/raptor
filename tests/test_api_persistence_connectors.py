@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -5,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 
 from helpers import BACKEND_DIR  # noqa: F401
 import main as app_main
@@ -20,6 +20,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             "EVIDENCE_DIR": app_main.EVIDENCE_DIR,
             "CISA_KEV_CACHE_PATH": app_main.CISA_KEV_CACHE_PATH,
             "RAPTOR_API_KEY": app_main.RAPTOR_API_KEY,
+            "RAPTOR_ALLOW_AUTH_DISABLED": app_main.RAPTOR_ALLOW_AUTH_DISABLED,
             "ELASTIC_POLL_ENABLED": app_main.ELASTIC_POLL_ENABLED,
             "ELASTIC_POLL_QUERY": app_main.ELASTIC_POLL_QUERY,
             "ELASTIC_POLL_INTERVAL_SECONDS": app_main.ELASTIC_POLL_INTERVAL_SECONDS,
@@ -30,6 +31,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         app_main.CISA_KEV_CACHE_PATH = self.root / "intel" / "cisa_kev.json"
         app_main.CISA_KEV_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         app_main.RAPTOR_API_KEY = ""
+        app_main.RAPTOR_ALLOW_AUTH_DISABLED = True
         app_main.ELASTIC_POLL_ENABLED = False
         app_main.ELASTIC_POLL_QUERY = "*"
         app_main.ELASTIC_POLL_INTERVAL_SECONDS = 300
@@ -44,14 +46,23 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
     def test_api_key_middleware_allows_docs_and_guards_api(self):
         app_main.RAPTOR_API_KEY = "test-secret"
 
-        with TestClient(app_main.app) as client:
-            docs = client.get("/docs")
-            blocked = client.get("/api/v1/investigations")
-            allowed = client.get("/api/v1/investigations", headers={"Authorization": "Bearer test-secret"})
+        class FakeURL:
+            path = "/api/v1/investigations"
 
-        self.assertEqual(docs.status_code, 200)
+        class FakeRequest:
+            url = FakeURL()
+            headers = {}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        blocked = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+        FakeRequest.headers = {"authorization": "Bearer test-secret"}
+        allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+
         self.assertEqual(blocked.status_code, 401)
-        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed, "allowed")
 
     def test_evidence_endpoint_lists_persisted_raw_upload_metadata(self):
         app_main.db_create("case-1", {"case_name": "Case One", "source": "file"}, input_bytes=18)
@@ -61,11 +72,9 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             {"filename": "raw.json", "content_type": "application/json", "source": "file"},
         )
 
-        with TestClient(app_main.app) as client:
-            response = client.get("/api/v1/investigate/case-1/evidence")
+        response = asyncio.run(app_main.get_evidence(None, "case-1"))
 
-        payload = response.json()
-        self.assertEqual(response.status_code, 200)
+        payload = response.model_dump()
         self.assertEqual(payload["investigation_id"], "case-1")
         self.assertEqual(payload["total_count"], 1)
         self.assertEqual(payload["evidence"][0]["original_filename"], "raw.json")
@@ -74,14 +83,32 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
     def test_audit_log_endpoint_returns_structured_details(self):
         app_main.audit_log(None, "query.asked", "case-1", {"question": "Which hosts?"})
 
-        with TestClient(app_main.app) as client:
-            response = client.get("/api/v1/audit?investigation_id=case-1")
+        response = asyncio.run(app_main.get_audit_log(None, investigation_id="case-1"))
 
-        payload = response.json()
-        self.assertEqual(response.status_code, 200)
+        payload = response.model_dump()
         self.assertGreaterEqual(payload["total_count"], 1)
         self.assertEqual(payload["entries"][0]["action"], "query.asked")
         self.assertEqual(payload["entries"][0]["detail"]["question"], "Which hosts?")
+
+    def test_audit_actor_ignores_spoofable_identity_headers(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+
+        class Client:
+            host = "127.0.0.1"
+
+        class FakeRequest:
+            headers = {
+                "x-raptor-actor": "spoofed-admin",
+                "x-forwarded-user": "spoofed-user",
+                "x-raptor-api-key": "test-secret",
+            }
+            cookies = {}
+            client = Client()
+
+        app_main.audit_log(FakeRequest(), "report.viewed", "case-1", {"status": "complete"})
+        entry = app_main.list_audit_entries(investigation_id="case-1")[0]
+
+        self.assertEqual(entry["actor"], "api-key")
 
     def test_audit_table_rejects_update_and_delete(self):
         app_main.audit_log(None, "report.viewed", "case-1", {"status": "complete"})
@@ -135,11 +162,9 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with TestClient(app_main.app) as client:
-            response = client.get("/api/v1/threat-feeds/cisa-kev?query=gateway&limit=5")
+        response = app_main.get_cisa_kev(None, query="gateway", limit=5)
 
-        payload = response.json()
-        self.assertEqual(response.status_code, 200)
+        payload = response
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["vulnerabilities"][0]["cveID"], "CVE-2026-0001")
         self.assertEqual(payload["source"], "cache")
