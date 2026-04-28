@@ -6,7 +6,7 @@ RAPTOR is a cybersecurity investigation platform for turning security telemetry 
 
 This repository is now wired as one live application:
 
-- The backend investigation API ingests logs, runs the analysis pipeline, persists job state in SQLite, and exposes reports, graphs, attribution, simulation, APT profiles, health, and natural-language query endpoints.
+- The backend investigation API ingests logs, runs the analysis pipeline through a durable SQLite-backed job queue, persists job state, and exposes reports, graphs, attribution, simulation, APT profiles, health, metrics, and natural-language query endpoints.
 - The React console calls the backend through `frontend/src/api/raptorApi.js`. The investigation queue, new-ingestion workflow, report preview/download, graph view, attribution view, simulation, intelligence query, APT library, MITRE view, and subsystem health screens are API-backed rather than fabricated local data.
 
 ## Current Status
@@ -30,12 +30,14 @@ Implemented today:
 - Predictive simulation endpoint gated by attribution confidence.
 - Natural-language query endpoint that routes questions to graph, RAG, or simulation-style handlers.
 - Markdown analyst report generation with deterministic fallback.
-- Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, and LLM configuration.
+- Detailed health endpoint for API, SQLite, Neo4j, Weaviate, Elasticsearch, Redis, evidence encryption, and LLM configuration.
+- Prometheus-compatible operational counters at `/api/v1/metrics`.
 - React SOC console backed by the API for investigation creation, polling, reports, graphs, raw evidence metadata, audit log review, manual Elasticsearch polling, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
 - Investigation metadata in the backend list API, including case name, source, upload size, host count, top candidate, confidence score, and confidence label.
-- Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, and content type.
-- Append-only SQLite audit logging for investigation creation, report/graph/evidence viewing, natural-language queries, simulations, threat-feed access, and Elasticsearch poller actions.
-- Optional shared API-key authentication with `X-RAPTOR-API-Key` or `Authorization: Bearer`.
+- Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, content type, encryption state, and retention expiry.
+- Append-only SQLite audit logging with a database-level update/delete guard and per-entry hash chain for investigation creation, report/graph/evidence viewing, natural-language queries, simulations, threat-feed access, and Elasticsearch poller actions.
+- Server-side browser sessions, API-key service access, local bootstrap admin credentials, role checks, tenant scoping, and case ownership enforcement.
+- SQLite-backed investigation job queue with retry tracking, stale-claim recovery, and worker isolation from request handlers.
 - CISA Known Exploited Vulnerabilities connector with file cache and Redis JSON cache when Redis is reachable.
 - Optional interval-based Elasticsearch poller that queues matching events as investigations.
 - Redis health plus lightweight CISA KEV cache usage.
@@ -47,10 +49,9 @@ Implemented today:
 Operational boundaries:
 
 - MISP and OpenCTI are not active backend connectors.
-- API-key authentication is a basic shared-secret gate, not user identity, authorization, RBAC, or case ownership.
 - Elasticsearch ingest is a simple interval poller, not a streaming pipeline with checkpoints and deduplication.
-- Redis is used as a lightweight cache, not a durable queue, lock service, or worker backend.
-- SQLite is used for local job state and single-node deployment. Use an external relational database integration for multi-node, high-concurrency case management.
+- Redis is used as a lightweight cache, not a lock service.
+- SQLite is used for local single-node job, audit, identity, session, and investigation metadata. Use PostgreSQL or equivalent through the documented deployment path for multi-node, high-concurrency case management.
 - The sample credentials in `.env.example` must be changed before use outside a private local workstation.
 
 ## Architecture
@@ -139,11 +140,17 @@ FastAPI backend
 |   |-- vite.config.js
 |   |-- nginx.conf
 |   `-- Dockerfile
+|-- docs/
+|   |-- production-runbook.md      # Deployment, backup, operations, and incident procedures
+|   |-- threat-model.md            # Trust boundaries, abuse paths, and required controls
+|   |-- data-governance.md         # Evidence, telemetry, LLM, retention, and audit policy
+|   `-- scaling-limits.md          # Scale limits and migration path
 |-- scripts/
 |   |-- docker/                    # Full Docker launch helpers
 |   `-- hybrid/                    # Docker infrastructure plus local app helpers
 |-- tests/                         # Top-level offline regression suite
 |-- docker-compose.yml
+|-- docker-compose.prod.yml
 |-- .env.example
 `-- README.md
 ```
@@ -183,12 +190,18 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-2. Edit `.env`, replace the `NEO4J_PASSWORD` and `RAPTOR_API_KEY` placeholders. Set `OPENROUTER_API_KEY` if you want live LLM calls.
+2. Edit `.env`, replace the `NEO4J_PASSWORD`, `RAPTOR_API_KEY`, and bootstrap admin placeholders. Set `OPENROUTER_API_KEY` and `RAPTOR_ALLOW_EXTERNAL_LLM=true` only when your data policy permits live LLM calls.
 
 3. Start the stack.
 
 ```bash
 docker compose up -d --build
+```
+
+For a hardened single-node deployment profile, apply the production overlay after setting real secrets:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 4. Open the frontend and API docs.
@@ -284,7 +297,7 @@ The main orchestration lives in `backend/main.py`.
 12. If Neo4j is down, the backend still returns an in-memory graph export.
 13. APT attribution is scored from observed TTP overlap against STIX-derived APT profiles.
 14. The report generator creates a markdown analyst report, with deterministic fallback.
-15. SQLite stores status, findings, attack sequence, attribution, graph JSON, report markdown, evidence metadata, and audit entries.
+15. SQLite stores status, durable job claims, findings, attack sequence, attribution, graph JSON, report markdown, evidence metadata, server-side sessions, tenants, users, and hash-chained audit entries.
 
 ## Backend API
 
@@ -294,13 +307,15 @@ Base URL:
 http://localhost:8000/api/v1
 ```
 
-When `RAPTOR_API_KEY` is set, API clients can include `X-RAPTOR-API-Key: <key>` or `Authorization: Bearer <key>`. Browser sessions should call `POST /api/v1/auth/session`; the backend sets an HttpOnly `raptor_session` cookie. If `RAPTOR_API_KEY` is missing and `RAPTOR_ALLOW_AUTH_DISABLED=false`, protected API routes return `503` instead of silently disabling auth. `/api/v1/health` can remain unauthenticated when `RAPTOR_AUTH_EXEMPT_HEALTH=true`.
+When `RAPTOR_API_KEY` is set, service clients can include `X-RAPTOR-API-Key: <key>` or `Authorization: Bearer <key>`. Browser sessions should call `POST /api/v1/auth/session` with either an API key or username/password credentials; the backend creates a server-side session record and sets an HttpOnly `raptor_session` cookie. If no valid API key or session is supplied and `RAPTOR_ALLOW_AUTH_DISABLED=false`, protected API routes return `401` instead of silently disabling auth. `/api/v1/health` can remain unauthenticated when `RAPTOR_AUTH_EXEMPT_HEALTH=true`.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/auth/session` | Establish an HttpOnly browser session from an operator-provided API key. |
-| `POST` | `/investigate` | Upload a log file and start a background investigation. |
-| `POST` | `/investigate/text` | Start an investigation from pasted logs or an Elasticsearch query. |
+| `POST` | `/auth/session` | Establish an HttpOnly browser session from an API key or username/password credentials. |
+| `GET` | `/auth/me` | Return the authenticated actor, roles, and tenant. |
+| `POST` | `/auth/logout` | Revoke the current server-side browser session. |
+| `POST` | `/investigate` | Upload a log file and queue an investigation job. |
+| `POST` | `/investigate/text` | Queue an investigation from pasted logs or an Elasticsearch query. |
 | `GET` | `/investigations` | List recent investigation jobs from SQLite. |
 | `GET` | `/investigate/{id}/status` | Poll job progress and current phase. |
 | `GET` | `/investigate/{id}/report` | Fetch findings, sequence, anomalies, attribution, and report markdown. |
@@ -316,6 +331,7 @@ When `RAPTOR_API_KEY` is set, API clients can include `X-RAPTOR-API-Key: <key>` 
 | `GET` | `/ingest/elasticsearch/status` | Return the interval poller state. |
 | `GET` | `/health` | High-level service health. |
 | `GET` | `/health/detailed` | Detailed subsystem health. |
+| `GET` | `/metrics` | Prometheus-compatible request, auth, queue, and investigation counters. |
 
 ### Upload A Log File
 
@@ -440,7 +456,9 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `NEO4J_PASSWORD` | `change_me_neo4j_password` | Local Neo4j password placeholder. Change before running shared environments. |
 | `WEAVIATE_URL` | `http://localhost:8080` | Weaviate HTTP endpoint. |
 | `WEAVIATE_GRPC_URL` | `localhost:50051` | Weaviate gRPC endpoint. |
+| `WEAVIATE_API_KEY` | `change_me_weaviate_api_key` | API key used by the production overlay when Weaviate anonymous access is disabled. |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch endpoint for optional query-based investigations. |
+| `ELASTIC_PASSWORD` | `change_me_elasticsearch_password` | Password for the production overlay Elasticsearch `elastic` user. |
 | `ELASTIC_INDEX_PREFIX` | `raptor-events` | Elasticsearch index prefix searched by query and poller ingestion. |
 | `ELASTIC_POLL_ENABLED` | `false` | Enables the interval poller when set to `true`. |
 | `ELASTIC_POLL_QUERY` | `*` | Query string used by the interval poller. |
@@ -453,15 +471,23 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `API_PORT` | `8000` | Backend port. |
 | `FRONTEND_PORT` | `3100` | Frontend port. |
 | `LOCAL_BIND_ADDRESS` | `127.0.0.1` | Host address Docker Compose publishes service ports on. |
-| `RAPTOR_API_KEY` | `change_me_raptor_api_key` in `.env.example` | Enables shared API-key authentication when non-empty. |
+| `RAPTOR_API_KEY` | `change_me_raptor_api_key` in `.env.example` | Enables service API-key authentication when non-empty. |
 | `RAPTOR_AUTH_EXEMPT_HEALTH` | `true` | Leaves `/api/v1/health` public when API-key auth is enabled. |
 | `RAPTOR_ALLOW_AUTH_DISABLED` | `false` | Allows protected API routes without auth only when explicitly set to `true` for local development. |
+| `RAPTOR_REQUIRE_RBAC` | `true` | Enforces endpoint role checks, tenant scoping, and case ownership. |
+| `RAPTOR_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Local bootstrap admin username created during database initialization when a password is set. |
+| `RAPTOR_BOOTSTRAP_ADMIN_PASSWORD` | empty | Bootstrap admin password. Set a strong value before creating the runtime database. |
+| `RAPTOR_AUTH_MAX_FAILURES` | `5` | Failed login count before temporary lockout. |
+| `RAPTOR_AUTH_LOCK_SECONDS` | `300` | Login lockout duration in seconds. |
 | `RAPTOR_SESSION_COOKIE_SECURE` | `false` | Set to `true` behind HTTPS so browser session cookies require TLS. |
+| `RAPTOR_ALLOW_EXTERNAL_LLM` | `false` | Allows telemetry to leave the deployment for OpenRouter-compatible LLM calls only when explicitly enabled. |
 | `VITE_API_BASE_URL` | `/api/v1` | Optional frontend API base override for local or remote deployments. |
 | `MAX_UPLOAD_BYTES` | `10485760` | Maximum upload or pasted input size. |
 | `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
 | `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
 | `RAPTOR_DB_PATH` | `data/raptor.db` | SQLite runtime database path for local job state and investigation results. |
+| `EVIDENCE_ENCRYPTION_KEY` | empty | Base64 or raw key used to encrypt stored evidence bytes. Must be set for protected evidence storage. |
+| `EVIDENCE_RETENTION_DAYS` | `90` | Retention window recorded for evidence metadata and operational cleanup. |
 | `RAG_AUTO_INDEX` | `false` | When explicitly enabled, attempts one-time Weaviate indexing if required collections are missing. Leave disabled on request-serving deployments and run indexing as an operational setup task. |
 | `RAG_LOCAL_FALLBACK_ENABLED` | `true` | Uses cached ATT&CK STIX and local report files when Weaviate or embeddings are unavailable. |
 | `EMBEDDING_MODEL` | `BAAI/bge-large-en-v1.5` | Sentence-transformers embedding model for Weaviate vector search and indexing. |
@@ -470,6 +496,8 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `RAPTOR_ALLOW_TEST_EMBEDDINGS` | `false` | Enables deterministic non-semantic embeddings for test-only fallback. |
 
 Docker Compose overrides service URLs inside the backend container so it can reach `neo4j`, `weaviate`, `elasticsearch`, and `redis` by service name.
+
+Backend containers install from `backend/requirements.lock` for reproducible builds. Review and refresh that lock file deliberately after dependency scanning.
 
 ## Data
 
@@ -486,8 +514,8 @@ If the STIX bundle is missing, the backend can download the MITRE Enterprise ATT
 
 Runtime state:
 
-- `data/raptor.db` is created locally by the backend and stores investigation job state and results.
-- `data/evidence/{investigation_id}/` stores raw uploaded or ingested evidence bytes.
+- `data/raptor.db` is created locally by the backend and stores investigation job state, queued jobs, users, sessions, audit entries, and results.
+- `data/evidence/{investigation_id}/` stores uploaded or ingested evidence bytes. When `EVIDENCE_ENCRYPTION_KEY` is set, the backend stores encrypted evidence blobs and records retention metadata.
 - `data/intel/cisa_kev.json` stores the file-cache copy of the CISA KEV catalog.
 - Docker named volumes store Neo4j, Weaviate, Elasticsearch, and Redis data.
 
@@ -537,28 +565,29 @@ curl http://localhost:8000/api/v1/health/detailed
 
 - Do not commit `.env`; it may contain API keys.
 - Replace the `.env.example` placeholder values before using the stack beyond local development.
-- Docker Compose publishes service ports on `127.0.0.1` by default. Keep that binding for local work or place the stack behind a proper network boundary.
+- Docker Compose publishes service ports on `127.0.0.1` by default. Keep that binding for local work, or run with `docker-compose.prod.yml` behind a TLS-terminating ingress.
 - Tighten `CORS_ALLOW_ORIGINS` for any non-local deployment.
-- `RAPTOR_API_KEY` is a shared-secret gate only; it is not user identity, RBAC, tenancy, or case ownership. Put RAPTOR behind your SSO/auth proxy for production multi-user deployments.
+- Use bootstrap credentials only to create the first administrator, then rotate secrets and issue named operator accounts through the database-backed identity model.
 - Do not embed API keys into frontend builds. The React console uses an HttpOnly session cookie created at runtime.
-- Audit logging is append-only at the SQLite table level. For regulated multi-user deployments, back this with centralized identity and database controls.
-- The graph natural-language query path enforces read-only patterns and investigation scoping, but production deployments should still monitor and restrict generated-query behavior.
+- Audit logging is append-only at the SQLite table level and hash-chained per entry. Export audit records to immutable external storage when regulatory retention requires out-of-process custody.
+- The graph natural-language query path uses deterministic allowlisted handlers for Neo4j access and investigation scoping.
+- External LLM calls are disabled unless `RAPTOR_ALLOW_EXTERNAL_LLM=true`; prompts redact common secrets before provider submission.
 - LLM output is validated and has fallbacks, but attribution and simulation should be treated as analyst-supporting evidence, not automatic truth.
 - Uploaded telemetry can contain credentials, hostnames, usernames, IP addresses, file paths, and other sensitive data.
+- Read `docs/production-runbook.md`, `docs/threat-model.md`, `docs/data-governance.md`, and `docs/scaling-limits.md` before operating the stack outside a private workstation.
 
 ## Roadmap
 
 Likely next engineering steps:
 
 - Add end-to-end browser tests for the live API-backed console.
-- Add user authentication, roles, RBAC, and case ownership beyond the shared API-key gate.
-- Replace SQLite job/audit/evidence metadata with a production database for multi-user deployments.
+- Add identity-provider federation for SSO environments that already standardize on OIDC or SAML.
+- Add a PostgreSQL-backed metadata store and object-storage evidence backend for multi-node deployments.
 - Add MISP, OpenCTI, and additional threat-feed connectors.
 - Add streaming Elasticsearch checkpoints, deduplication, and replay controls.
-- Add Redis-backed queued background workers instead of FastAPI in-process background tasks.
 - Add report export to PDF or DOCX.
-- Add frontend tests and API integration tests.
-- Add deployment hardening for credentials, TLS, CORS, and service exposure.
+- Add frontend component, accessibility, and API integration tests.
+- Add Helm or Kubernetes manifests for teams that do not deploy with Compose.
 
 ## License
 
