@@ -16,9 +16,17 @@ cd "$ROOT_DIR"
 sudo docker-compose up -d neo4j weaviate elasticsearch redis
 
 echo "[2/4] Waiting for services to become healthy..."
-# Simple sleep for MVP since docker inspect in shell varies
-echo "Waiting 20 seconds for services to initialize..."
-sleep 20
+for svc in raptor-neo4j raptor-weaviate raptor-elastic raptor-redis; do
+  echo "Waiting for $svc..."
+  for _ in $(seq 1 40); do
+    status=$(docker inspect --format='{{.State.Health.Status}}' "$svc" 2>/dev/null || true)
+    if [ "$status" = "healthy" ]; then
+      echo "  $svc healthy"
+      break
+    fi
+    sleep 3
+  done
+done
 
 echo "[3/4] Starting Backend API (FastAPI on :8000)..."
 cd "$ROOT_DIR/backend"
