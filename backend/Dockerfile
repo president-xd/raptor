@@ -8,16 +8,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+COPY backend/requirements.lock /app/backend/requirements.lock
+RUN pip install --no-cache-dir -r /app/backend/requirements.lock
+
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin raptor
 
 # Copy application code
 COPY backend/ /app/backend/
 COPY data/ /app/data/
+RUN chown -R raptor:raptor /app
 
 WORKDIR /app/backend
 
 EXPOSE 8000
+
+USER raptor
 
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
