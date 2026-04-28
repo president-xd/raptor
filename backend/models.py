@@ -97,6 +97,8 @@ class EvidenceFileSummary(BaseModel):
     size_bytes: int = 0
     content_type: str = ""
     source: str = ""
+    encrypted: bool = False
+    retention_expires_at: str = ""
     created_at: str = ""
 
 
@@ -126,12 +128,24 @@ class AuditLogResponse(BaseModel):
 
 class AuthSessionRequest(BaseModel):
     """Runtime browser authentication request."""
-    api_key: str
+    api_key: str = ""
+    username: str = ""
+    password: str = ""
 
 
 class AuthSessionResponse(BaseModel):
     """Response after establishing an HttpOnly browser session."""
     authenticated: bool = True
+    actor: str = ""
+    roles: List[str] = Field(default_factory=list)
+    tenant_id: str = "default"
+
+
+class PrincipalResponse(BaseModel):
+    """Authenticated principal context."""
+    actor: str
+    roles: List[str] = Field(default_factory=list)
+    tenant_id: str = "default"
 
 
 class CisaKevVulnerability(BaseModel):
