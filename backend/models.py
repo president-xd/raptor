@@ -124,6 +124,16 @@ class AuditLogResponse(BaseModel):
     total_count: int = 0
 
 
+class AuthSessionRequest(BaseModel):
+    """Runtime browser authentication request."""
+    api_key: str
+
+
+class AuthSessionResponse(BaseModel):
+    """Response after establishing an HttpOnly browser session."""
+    authenticated: bool = True
+
+
 class CisaKevVulnerability(BaseModel):
     """CISA KEV vulnerability summary."""
     cve_id: str = Field(default="", alias="cveID")
