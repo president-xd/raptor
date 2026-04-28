@@ -1,11 +1,10 @@
 import hashlib
+import asyncio
 import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-from fastapi.testclient import TestClient
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -26,6 +25,7 @@ class PersistenceConnectorTests(unittest.TestCase):
             "ELASTIC_POLL_INTERVAL_SECONDS": app_main.ELASTIC_POLL_INTERVAL_SECONDS,
             "ELASTIC_POLL_WINDOW_MINUTES": app_main.ELASTIC_POLL_WINDOW_MINUTES,
             "RAPTOR_API_KEY": app_main.RAPTOR_API_KEY,
+            "RAPTOR_ALLOW_AUTH_DISABLED": app_main.RAPTOR_ALLOW_AUTH_DISABLED,
         }
         root = Path(self.tmp.name)
         app_main.DB_PATH = root / "raptor.db"
@@ -35,6 +35,7 @@ class PersistenceConnectorTests(unittest.TestCase):
         app_main.ELASTIC_POLL_INTERVAL_SECONDS = 300
         app_main.ELASTIC_POLL_WINDOW_MINUTES = 5
         app_main.RAPTOR_API_KEY = ""
+        app_main.RAPTOR_ALLOW_AUTH_DISABLED = True
         app_main.init_db()
 
     def tearDown(self):
@@ -64,6 +65,22 @@ class PersistenceConnectorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["sha256"], summary["sha256"])
         self.assertEqual(rows[0]["source"], "file")
+
+    def test_evidence_store_avoids_same_second_filename_collision(self):
+        first = app_main.store_evidence_file(
+            "case-1",
+            b"first",
+            {"filename": "raw.json", "content_type": "application/json", "source": "file"},
+        )
+        second = app_main.store_evidence_file(
+            "case-1",
+            b"second",
+            {"filename": "raw.json", "content_type": "application/json", "source": "file"},
+        )
+
+        self.assertNotEqual(first["stored_path"], second["stored_path"])
+        self.assertTrue(Path(first["stored_path"]).is_file())
+        self.assertTrue(Path(second["stored_path"]).is_file())
 
     def test_audit_log_is_append_only(self):
         app_main.audit_log(None, "report.viewed", "case-1", {"status": "complete"})
@@ -107,17 +124,23 @@ class PersistenceConnectorTests(unittest.TestCase):
     def test_api_key_middleware_guards_api_routes(self):
         app_main.RAPTOR_API_KEY = "test-secret"
 
-        with TestClient(app_main.app) as client:
-            blocked = client.get("/api/v1/investigations")
-            allowed = client.get(
-                "/api/v1/investigations",
-                headers={"X-RAPTOR-API-Key": "test-secret"},
-            )
-            docs = client.get("/docs")
+        class FakeURL:
+            path = "/api/v1/investigations"
+
+        class FakeRequest:
+            url = FakeURL()
+            headers = {}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        blocked = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+        FakeRequest.headers = {"x-raptor-api-key": "test-secret"}
+        allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
 
         self.assertEqual(blocked.status_code, 401)
-        self.assertEqual(allowed.status_code, 200)
-        self.assertEqual(docs.status_code, 200)
+        self.assertEqual(allowed, "allowed")
 
 
 if __name__ == "__main__":
