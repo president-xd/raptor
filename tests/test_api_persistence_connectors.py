@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 
 from fastapi import HTTPException
+from starlette.responses import Response
 
 from helpers import BACKEND_DIR  # noqa: F401
+from models import AuthSessionRequest
 import main as app_main
 
 
@@ -21,6 +23,10 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             "CISA_KEV_CACHE_PATH": app_main.CISA_KEV_CACHE_PATH,
             "RAPTOR_API_KEY": app_main.RAPTOR_API_KEY,
             "RAPTOR_ALLOW_AUTH_DISABLED": app_main.RAPTOR_ALLOW_AUTH_DISABLED,
+            "RAPTOR_REQUIRE_RBAC": app_main.RAPTOR_REQUIRE_RBAC,
+            "RAPTOR_BOOTSTRAP_ADMIN_USERNAME": app_main.RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
+            "RAPTOR_BOOTSTRAP_ADMIN_PASSWORD": app_main.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
+            "EVIDENCE_ENCRYPTION_KEY": app_main.EVIDENCE_ENCRYPTION_KEY,
             "ELASTIC_POLL_ENABLED": app_main.ELASTIC_POLL_ENABLED,
             "ELASTIC_POLL_QUERY": app_main.ELASTIC_POLL_QUERY,
             "ELASTIC_POLL_INTERVAL_SECONDS": app_main.ELASTIC_POLL_INTERVAL_SECONDS,
@@ -32,6 +38,10 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         app_main.CISA_KEV_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         app_main.RAPTOR_API_KEY = ""
         app_main.RAPTOR_ALLOW_AUTH_DISABLED = True
+        app_main.RAPTOR_REQUIRE_RBAC = True
+        app_main.RAPTOR_BOOTSTRAP_ADMIN_USERNAME = "admin"
+        app_main.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = "admin-secret"
+        app_main.EVIDENCE_ENCRYPTION_KEY = ""
         app_main.ELASTIC_POLL_ENABLED = False
         app_main.ELASTIC_POLL_QUERY = "*"
         app_main.ELASTIC_POLL_INTERVAL_SECONDS = 300
@@ -80,6 +90,22 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         self.assertEqual(payload["evidence"][0]["original_filename"], "raw.json")
         self.assertEqual(payload["evidence"][0]["source"], "file")
 
+    def test_evidence_encryption_records_metadata_and_hides_plaintext(self):
+        app_main.EVIDENCE_ENCRYPTION_KEY = "test-evidence-key-with-enough-length"
+        content = b'{"secret":"do-not-store-cleartext"}'
+
+        summary = app_main.store_evidence_file(
+            "case-1",
+            content,
+            {"filename": "raw.json", "content_type": "application/json", "source": "file"},
+        )
+
+        stored_bytes = Path(summary["stored_path"]).read_bytes()
+        self.assertTrue(summary["encrypted"])
+        self.assertNotEqual(stored_bytes, content)
+        self.assertEqual(summary["sha256"], app_main.hashlib.sha256(content).hexdigest())
+        self.assertTrue(summary["retention_expires_at"])
+
     def test_audit_log_endpoint_returns_structured_details(self):
         app_main.audit_log(None, "query.asked", "case-1", {"question": "Which hosts?"})
 
@@ -121,6 +147,71 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
                 conn.execute("DELETE FROM audit_log")
         finally:
             conn.close()
+
+    def test_audit_hash_chain_links_entries(self):
+        app_main.audit_log(None, "report.viewed", "case-1", {"status": "complete"})
+        app_main.audit_log(None, "graph.viewed", "case-1", {"status": "complete"})
+
+        conn = sqlite3.connect(str(app_main.DB_PATH))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT prev_hash, entry_hash FROM audit_log ORDER BY id ASC"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        self.assertEqual(rows[0]["prev_hash"], "")
+        self.assertTrue(rows[0]["entry_hash"])
+        self.assertEqual(rows[1]["prev_hash"], rows[0]["entry_hash"])
+        self.assertTrue(rows[1]["entry_hash"])
+
+    def test_auth_session_creates_server_side_record(self):
+        response = Response()
+
+        payload = asyncio.run(
+            app_main.create_auth_session(
+                AuthSessionRequest(username="admin", password="admin-secret"),
+                response,
+            )
+        )
+
+        conn = sqlite3.connect(str(app_main.DB_PATH))
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM auth_sessions").fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertTrue(payload.authenticated)
+        self.assertEqual(payload.actor, "admin")
+        self.assertIn("admin", payload.roles)
+        self.assertEqual(count, 1)
+
+    def test_durable_queue_claims_pending_investigation(self):
+        app_main.db_create("case-queue", {"case_name": "Queued", "source": "test"}, input_bytes=5)
+        app_main.enqueue_investigation_job("case-queue", "event", {"source": "test"})
+
+        claimed = app_main.claim_next_investigation_job()
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["investigation_id"], "case-queue")
+        self.assertEqual(claimed["log_content"], "event")
+
+    def test_case_access_requires_owner_for_non_admin_user(self):
+        app_main.db_create(
+            "case-owned",
+            {"case_name": "Owned", "source": "test", "tenant_id": "default", "owner_id": "owner-1"},
+            input_bytes=5,
+        )
+
+        class State:
+            principal = app_main._principal("other", ["viewer"], "default", "owner-2")
+
+        class FakeRequest:
+            state = State()
+
+        with self.assertRaises(HTTPException):
+            app_main.ensure_investigation_access(FakeRequest(), "case-owned", "viewer")
 
     def test_cisa_kev_connector_uses_file_cache_and_filters(self):
         app_main.CISA_KEV_CACHE_PATH.write_text(
