@@ -1,7 +1,7 @@
 """
 RAPTOR | FastAPI Application
 All 7 API endpoints per spec Section 7.1.
-Background processing via asyncio (SQLite for job state per MVP spec).
+Background processing with persistent SQLite job state.
 """
 import os
 import sys
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -37,6 +37,7 @@ from config import (
     CORS_ALLOW_CREDENTIALS,
     ELASTICSEARCH_URL,
     ELASTIC_INDEX_PREFIX,
+    WEAVIATE_URL,
     ELASTIC_POLL_ENABLED,
     ELASTIC_POLL_QUERY,
     ELASTIC_POLL_INTERVAL_SECONDS,
@@ -45,6 +46,8 @@ from config import (
     REDIS_CACHE_TTL_SECONDS,
     RAPTOR_API_KEY,
     RAPTOR_AUTH_EXEMPT_HEALTH,
+    RAPTOR_ALLOW_AUTH_DISABLED,
+    RAPTOR_SESSION_COOKIE_SECURE,
     EVIDENCE_DIR,
     CISA_KEV_URL,
     CISA_KEV_CACHE_PATH,
@@ -60,6 +63,7 @@ from models import (
     QueryRequest, QueryResponse,
     APTProfileSummary, APTProfileListResponse,
     EvidenceFileSummary, EvidenceListResponse,
+    AuthSessionRequest, AuthSessionResponse,
     AuditEntry, AuditLogResponse,
     CisaKevVulnerability, CisaKevResponse,
     ElasticPollRequest, ElasticPollResponse, ElasticPollStatus,
@@ -82,14 +86,38 @@ app.add_middleware(
 )
 
 
+def _make_session_token() -> str:
+    expires_at = str(int(time.time()) + (8 * 60 * 60))
+    signature = hmac.new(
+        RAPTOR_API_KEY.encode("utf-8"),
+        expires_at.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{expires_at}.{signature}"
+
+
+def _valid_session_token(token: str) -> bool:
+    if not RAPTOR_API_KEY or "." not in token:
+        return False
+    expires_at, supplied_signature = token.split(".", 1)
+    try:
+        if int(expires_at) < int(time.time()):
+            return False
+    except ValueError:
+        return False
+    expected_signature = hmac.new(
+        RAPTOR_API_KEY.encode("utf-8"),
+        expires_at.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(supplied_signature, expected_signature)
+
+
 @app.middleware("http")
 async def optional_api_key_auth(request: Request, call_next):
     """Require an API key when RAPTOR_API_KEY is configured."""
-    if not RAPTOR_API_KEY:
-        return await call_next(request)
-
     path = request.url.path
-    public_paths = {"/", "/docs", "/redoc", "/openapi.json"}
+    public_paths = {"/", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/session"}
     if path in public_paths:
         return await call_next(request)
     if RAPTOR_AUTH_EXEMPT_HEALTH and path == "/api/v1/health":
@@ -97,10 +125,22 @@ async def optional_api_key_auth(request: Request, call_next):
     if not path.startswith("/api/"):
         return await call_next(request)
 
+    if not RAPTOR_API_KEY:
+        if RAPTOR_ALLOW_AUTH_DISABLED:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "RAPTOR_API_KEY is not configured; API routes are unavailable"},
+        )
+
     supplied = request.headers.get("x-raptor-api-key", "")
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         supplied = auth_header.split(" ", 1)[1].strip()
+    if not supplied:
+        session_token = request.cookies.get("raptor_session", "")
+        if _valid_session_token(session_token):
+            supplied = RAPTOR_API_KEY
 
     if not hmac.compare_digest(supplied, RAPTOR_API_KEY):
         return JSONResponse(
@@ -296,7 +336,7 @@ def store_evidence_file(
 
     original = _safe_filename(metadata.get("filename") or metadata.get("case_name") or "raw.log")
     source = str(metadata.get("source") or "unknown")
-    stored_name = f"{int(time.time())}_{original}"
+    stored_name = f"{time.time_ns()}_{uuid.uuid4().hex[:12]}_{original}"
     stored_path = case_dir / stored_name
     stored_path.write_bytes(content)
 
@@ -361,10 +401,10 @@ def audit_log(
     detail: Optional[dict] = None,
 ):
     """Append a lightweight audit event."""
-    actor = "anonymous"
+    actor = "system"
     ip_address = ""
     if request is not None:
-        actor = request.headers.get("x-raptor-actor") or request.headers.get("x-forwarded-user") or "api-client"
+        actor = _authenticated_actor(request)
         if request.client:
             ip_address = request.client.host
 
@@ -386,6 +426,25 @@ def audit_log(
     )
     conn.commit()
     conn.close()
+
+
+def _authenticated_actor(request: Request) -> str:
+    """Derive audit actor from trusted authentication state, not user-supplied identity headers."""
+    if not RAPTOR_API_KEY:
+        return "local-auth-disabled" if RAPTOR_ALLOW_AUTH_DISABLED else "unauthenticated"
+
+    supplied = request.headers.get("x-raptor-api-key", "")
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        supplied = auth_header.split(" ", 1)[1].strip()
+    if supplied and hmac.compare_digest(supplied, RAPTOR_API_KEY):
+        return "api-key"
+
+    session_token = request.cookies.get("raptor_session", "")
+    if _valid_session_token(session_token):
+        return "browser-session"
+
+    return "authenticated-request"
 
 
 def list_audit_entries(limit: int = 100, investigation_id: Optional[str] = None) -> list[dict]:
@@ -1070,6 +1129,25 @@ def start_optional_elastic_poller():
 
 # ─── API Endpoints ───────────────────────────────────────────────────
 
+@app.post("/api/v1/auth/session", response_model=AuthSessionResponse)
+async def create_auth_session(payload: AuthSessionRequest, response: Response):
+    """Exchange the operator-provided API key for an HttpOnly browser session cookie."""
+    if not RAPTOR_API_KEY:
+        raise HTTPException(status_code=503, detail="RAPTOR_API_KEY is not configured")
+    if not hmac.compare_digest(payload.api_key, RAPTOR_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    response.set_cookie(
+        "raptor_session",
+        _make_session_token(),
+        httponly=True,
+        secure=RAPTOR_SESSION_COOKIE_SECURE,
+        samesite="lax",
+        max_age=8 * 60 * 60,
+    )
+    return AuthSessionResponse(authenticated=True)
+
+
 @app.post("/api/v1/investigate", response_model=InvestigateResponse)
 async def investigate(
     request: Request,
@@ -1113,7 +1191,7 @@ async def investigate(
 
 
 @app.post("/api/v1/investigate/text", response_model=InvestigateResponse)
-async def investigate_text(request: Request, background_tasks: BackgroundTasks, payload: InvestigateTextRequest):
+def investigate_text(request: Request, background_tasks: BackgroundTasks, payload: InvestigateTextRequest):
     """
     Start an investigation from pasted logs or an Elasticsearch query.
     POST /api/v1/investigate/text
@@ -1270,7 +1348,7 @@ async def get_evidence(request: Request, investigation_id: str):
 
 
 @app.post("/api/v1/simulate", response_model=SimulationResponse)
-async def simulate(request: Request, payload: SimulateRequest):
+def simulate(request: Request, payload: SimulateRequest):
     """
     Simulate next attack steps for attributed APT.
     POST /api/v1/simulate
@@ -1324,7 +1402,10 @@ async def simulate(request: Request, payload: SimulateRequest):
         compromised_hosts = []
 
     if not compromised_hosts:
-        compromised_hosts = ["unknown compromised hosts"]
+        raise HTTPException(
+            status_code=400,
+            detail="Simulation requires at least one compromised host in the investigation graph.",
+        )
 
     # Run simulation
     from simulation.predictor import predict_next_steps
@@ -1350,7 +1431,7 @@ async def simulate(request: Request, payload: SimulateRequest):
 
 
 @app.get("/api/v1/apt/profiles", response_model=APTProfileListResponse)
-async def get_apt_profiles(request: Request):
+def get_apt_profiles(request: Request):
     """
     List all APT group profiles with TTP counts.
     GET /api/v1/apt/profiles
@@ -1367,7 +1448,7 @@ async def get_apt_profiles(request: Request):
 
 
 @app.post("/api/v1/query", response_model=QueryResponse)
-async def query(request: Request, payload: QueryRequest):
+def query(request: Request, payload: QueryRequest):
     """
     Natural language query against investigation.
     POST /api/v1/query
@@ -1396,7 +1477,12 @@ async def query(request: Request, payload: QueryRequest):
         request,
         "query.asked",
         payload.investigation_id,
-        {"query_type": result.get("query_type", ""), "question": payload.question[:200]},
+        {
+            "query_type": result.get("query_type", ""),
+            "question": payload.question[:200],
+            "answer_preview": str(result.get("answer", ""))[:500],
+            "source_count": len(result.get("sources", [])),
+        },
     )
 
     return QueryResponse(
@@ -1420,7 +1506,7 @@ async def get_audit_log(
 
 
 @app.get("/api/v1/threat-feeds/cisa-kev", response_model=CisaKevResponse)
-async def get_cisa_kev(
+def get_cisa_kev(
     request: Request,
     query: str = "",
     limit: int = 50,
@@ -1455,7 +1541,7 @@ async def get_cisa_kev(
 
 
 @app.post("/api/v1/threat-feeds/cisa-kev/sync", response_model=CisaKevResponse)
-async def sync_cisa_kev(request: Request):
+def sync_cisa_kev(request: Request):
     """Force refresh the CISA KEV catalog cache."""
     payload = fetch_cisa_kev(refresh=True)
     vulnerabilities = payload.get("vulnerabilities", [])
@@ -1477,7 +1563,7 @@ async def sync_cisa_kev(request: Request):
 
 
 @app.post("/api/v1/ingest/elasticsearch/poll", response_model=ElasticPollResponse)
-async def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
+def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
     """Poll Elasticsearch once and queue any returned events as an investigation."""
     response = run_elasticsearch_poll_once(
         query=payload.query,
@@ -1516,24 +1602,58 @@ async def get_elasticsearch_poll_status(request: Request):
 
 @app.get("/api/v1/health")
 async def health_check():
-    """Health check endpoint."""
-    detail = await health_check_detailed()
+    """Fast liveness check that does not touch external services."""
+    sqlite_status = "healthy"
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=1)
+        conn.execute("SELECT 1")
+        conn.close()
+    except Exception:
+        sqlite_status = "degraded"
+
     return {
-        "status": detail.get("status", "degraded"),
+        "status": "healthy" if sqlite_status == "healthy" else "degraded",
         "service": "RAPTOR API",
         "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat(),
-        "subsystems": detail.get("subsystems", {}),
+        "subsystems": {
+            "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
+            "sqlite": {"status": sqlite_status, "detail": "query ok" if sqlite_status == "healthy" else "query failed"},
+        },
     }
+
+
+def _endpoint_host_port(endpoint: str, default_port: int) -> tuple[str, int]:
+    parsed = urlparse(endpoint)
+    if parsed.scheme and parsed.hostname:
+        return parsed.hostname, parsed.port or default_port
+    cleaned = endpoint.replace("http://", "").replace("https://", "").replace("bolt://", "").split("/")[0]
+    if ":" in cleaned:
+        host, port = cleaned.rsplit(":", 1)
+        try:
+            return host, int(port)
+        except ValueError:
+            return host, default_port
+    return cleaned or "localhost", default_port
+
+
+def _tcp_status(name: str, endpoint: str, default_port: int, timeout_seconds: float = 0.5) -> dict:
+    try:
+        host, port = _endpoint_host_port(endpoint, default_port)
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            pass
+        return {"status": "healthy", "detail": f"{name} reachable at {host}:{port}"}
+    except Exception as e:
+        return {"status": "degraded", "detail": str(e)}
 
 
 @app.get("/api/v1/health/detailed")
 async def health_check_detailed():
-    """Detailed subsystem health for API/UI degraded-mode visibility."""
+    """Bounded subsystem health for API/UI degraded-mode visibility."""
     checks = {
         "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
         "sqlite": {"status": "healthy", "detail": ""},
-        "auth": {"status": "healthy", "detail": "API key auth enabled" if RAPTOR_API_KEY else "API key auth disabled"},
+        "auth": {"status": "healthy", "detail": "API key auth enabled" if RAPTOR_API_KEY else "API key missing"},
         "evidence": {"status": "healthy", "detail": ""},
         "neo4j": {"status": "degraded", "detail": "unreachable"},
         "weaviate": {"status": "degraded", "detail": "unreachable"},
@@ -1545,7 +1665,7 @@ async def health_check_detailed():
 
     # SQLite
     try:
-        conn = sqlite3.connect(str(DB_PATH))
+        conn = sqlite3.connect(str(DB_PATH), timeout=1)
         conn.execute("SELECT 1")
         conn.close()
         checks["sqlite"] = {"status": "healthy", "detail": "query ok"}
@@ -1562,50 +1682,16 @@ async def health_check_detailed():
     except Exception as e:
         checks["evidence"] = {"status": "degraded", "detail": str(e)}
 
-    # Neo4j
-    try:
-        from graph.neo4j_client import Neo4jClient
-        neo = Neo4jClient()
-        checks["neo4j"] = {
-            "status": "healthy" if neo.is_connected() else "degraded",
-            "detail": "connected" if neo.is_connected() else "not connected",
-        }
-        neo.close()
-    except Exception as e:
-        checks["neo4j"] = {"status": "degraded", "detail": str(e)}
-
-    # Weaviate
-    try:
-        from rag.retriever import get_weaviate_client
-        client = get_weaviate_client()
-        ready = bool(client.is_ready()) if client and hasattr(client, "is_ready") else bool(client)
-        checks["weaviate"] = {
-            "status": "healthy" if ready else "degraded",
-            "detail": "connected" if ready else "not connected",
-        }
-        if client:
-            client.close()
-    except Exception as e:
-        checks["weaviate"] = {"status": "degraded", "detail": str(e)}
-
-    # Elasticsearch
-    try:
-        from elasticsearch import Elasticsearch
-        es = Elasticsearch(ELASTICSEARCH_URL, request_timeout=3)
-        ready = bool(es.ping())
-        checks["elasticsearch"] = {
-            "status": "healthy" if ready else "degraded",
-            "detail": "connected" if ready else "not connected",
-        }
-    except Exception as e:
-        checks["elasticsearch"] = {"status": "degraded", "detail": str(e)}
+    checks["neo4j"] = _tcp_status("Neo4j", os.getenv("NEO4J_URI", "bolt://localhost:7687"), 7687)
+    checks["weaviate"] = _tcp_status("Weaviate", WEAVIATE_URL, 8080)
+    checks["elasticsearch"] = _tcp_status("Elasticsearch", ELASTICSEARCH_URL, 9200)
 
     # Redis, checked without requiring an extra Python package.
     try:
         parsed = urlparse(REDIS_URL)
         host = parsed.hostname or "localhost"
         port = parsed.port or 6379
-        with socket.create_connection((host, port), timeout=3) as conn:
+        with socket.create_connection((host, port), timeout=0.5) as conn:
             conn.sendall(b"*1\r\n$4\r\nPING\r\n")
             response = conn.recv(32)
         ready = response.startswith(b"+PONG")
@@ -1626,6 +1712,10 @@ async def health_check_detailed():
     from config import OPENROUTER_API_KEY
     if OPENROUTER_API_KEY:
         checks["llm"] = {"status": "healthy", "detail": "api key configured"}
+    if not RAPTOR_API_KEY and not RAPTOR_ALLOW_AUTH_DISABLED:
+        checks["auth"] = {"status": "degraded", "detail": "RAPTOR_API_KEY missing and auth-disabled mode is not allowed"}
+    elif not RAPTOR_API_KEY and RAPTOR_ALLOW_AUTH_DISABLED:
+        checks["auth"] = {"status": "degraded", "detail": "API key auth explicitly disabled for local development"}
 
     overall = "healthy"
     if any(v["status"] != "healthy" for v in checks.values()):
