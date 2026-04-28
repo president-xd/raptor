@@ -20,6 +20,8 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   weaviate:
     image: semitechnologies/weaviate:1.27.6
@@ -42,6 +44,8 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
@@ -61,6 +65,8 @@ services:
       retries: 5
       start_period: 40s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   redis:
     image: redis:7.2-alpine
@@ -76,6 +82,8 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   # ─── Application Services ──────────────────────────────────────────
 
@@ -98,6 +106,12 @@ services:
       - REDIS_URL=redis://redis:6379
     volumes:
       - ./data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
     depends_on:
       neo4j:
         condition: service_healthy
@@ -128,6 +142,14 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
 
 volumes:
   neo4j_data:
