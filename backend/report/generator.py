@@ -22,7 +22,6 @@ def generate_report(
 ) -> str:
     """
     Generate a full natural-language investigation report.
-    Per spec Section 8, MVP deliverable #5.
     """
     logger.info(f"Generating investigation report for {investigation_id}")
 
