@@ -1,7 +1,6 @@
 const DEFAULT_TIMEOUT_MS = 30000;
 
 export const API_BASE = normalizeBase(import.meta.env.VITE_API_BASE_URL || '/api/v1');
-const API_KEY = import.meta.env.VITE_RAPTOR_API_KEY || '';
 
 function normalizeBase(value) {
   return String(value || '/api/v1').replace(/\/+$/, '');
@@ -29,10 +28,6 @@ async function request(path, options = {}) {
   const body = options.body;
   const isFormData = body instanceof FormData;
 
-  if (API_KEY && !headers.has('X-RAPTOR-API-Key')) {
-    headers.set('X-RAPTOR-API-Key', API_KEY);
-  }
-
   if (body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
@@ -43,6 +38,7 @@ async function request(path, options = {}) {
       headers,
       body: body && !isFormData ? JSON.stringify(body) : body,
       signal: controller.signal,
+      credentials: 'include',
     });
 
     const text = await response.text();
@@ -70,6 +66,14 @@ function parseJson(text) {
   } catch {
     return text;
   }
+}
+
+export function createAuthSession(apiKey) {
+  return request('/auth/session', {
+    method: 'POST',
+    body: { api_key: apiKey },
+    timeoutMs: 15000,
+  });
 }
 
 export function listInvestigations(limit = 50) {
