@@ -33,3 +33,6 @@ WHAT_TO_CREATE.md
 Thumbs.db
 
 # Volumes / data
+data/raptor.db
+data/evidence
+data/intel/cisa_kev.json
