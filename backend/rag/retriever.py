@@ -240,7 +240,7 @@ class HybridRetriever:
 
         _INDEX_BOOTSTRAP_ATTEMPTED = True
 
-        auto_index = os.getenv("RAG_AUTO_INDEX", "true").lower() == "true"
+        auto_index = os.getenv("RAG_AUTO_INDEX", "false").lower() == "true"
         if not auto_index:
             return
 
