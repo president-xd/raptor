@@ -4,7 +4,7 @@ Converts parsed log dictionaries into validated RaptorEvent objects.
 """
 import uuid
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 
 import sys, os
@@ -20,6 +20,7 @@ class LogNormalizer:
     def __init__(self):
         self.parser = LogParser()
         self.sigma = SigmaMatcher()
+        self.parse_errors = []
 
     def normalize_file(self, filepath: str) -> List[RaptorEvent]:
         """Parse and normalize a log file."""
@@ -29,6 +30,7 @@ class LogNormalizer:
     def normalize_content(self, content: str) -> List[RaptorEvent]:
         """Parse and normalize log content string."""
         raw_events = self.parser.parse_content(content)
+        self.parse_errors = list(getattr(self.parser, "parse_errors", []))
         return self._normalize(raw_events)
 
     def _normalize(self, raw_events: List[Dict[str, Any]]) -> List[RaptorEvent]:
@@ -63,7 +65,7 @@ class LogNormalizer:
     def _normalize_timestamp(self, ts: str) -> str:
         """Normalize timestamp to ISO8601 format."""
         if not ts:
-            return datetime.utcnow().isoformat() + "Z"
+            return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Already ISO8601
         if 'T' in ts and ('-' in ts[:10]):
@@ -73,24 +75,28 @@ class LogNormalizer:
         formats = [
             '%Y-%m-%d %H:%M:%S',
             '%Y-%m-%d %H:%M:%S.%f',
-            '%b %d %H:%M:%S',
             '%m/%d/%Y %H:%M:%S',
         ]
         for fmt in formats:
             try:
                 dt = datetime.strptime(ts, fmt)
-                if dt.year == 1900:  # Syslog format without year
-                    dt = dt.replace(year=datetime.utcnow().year)
                 return dt.isoformat() + "Z"
             except ValueError:
                 continue
+
+        try:
+            current_year = datetime.now(timezone.utc).year
+            dt = datetime.strptime(f"{current_year} {ts}", "%Y %b %d %H:%M:%S")
+            return dt.isoformat() + "Z"
+        except ValueError:
+            pass
 
         # Try epoch
         try:
             epoch = float(ts)
             if epoch > 1e12:  # milliseconds
                 epoch /= 1000
-            return datetime.utcfromtimestamp(epoch).isoformat() + "Z"
+            return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
         except ValueError:
             pass
 
