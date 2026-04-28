@@ -68,10 +68,11 @@ function parseJson(text) {
   }
 }
 
-export function createAuthSession(apiKey) {
+export function createAuthSession(credentials) {
+  const payload = typeof credentials === 'string' ? { api_key: credentials } : credentials;
   return request('/auth/session', {
     method: 'POST',
-    body: { api_key: apiKey },
+    body: payload,
     timeoutMs: 15000,
   });
 }
