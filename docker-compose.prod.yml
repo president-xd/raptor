@@ -1,0 +1,38 @@
+services:
+  neo4j:
+    ports: !reset []
+    environment:
+      NEO4J_dbms_security_procedures_unrestricted: ""
+
+  weaviate:
+    ports: !reset []
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
+      AUTHENTICATION_APIKEY_USERS: raptor
+
+  elasticsearch:
+    ports: !reset []
+    environment:
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
+
+  redis:
+    ports: !reset []
+    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes"]
+
+  backend:
+    ports: !reset []
+    environment:
+      - RAPTOR_ALLOW_AUTH_DISABLED=false
+      - RAPTOR_REQUIRE_RBAC=true
+      - RAPTOR_ALLOW_EXTERNAL_LLM=false
+      - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
+      - ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}@elasticsearch:9200
+
+  frontend:
+    ports: !reset []
+    read_only: true
