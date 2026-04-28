@@ -90,13 +90,7 @@ class QueryEngine:
             cypher = deterministic
             logger.info(f"Using deterministic graph query: {cypher}")
         else:
-            # Generate Cypher via LLM (grounded by schema in prompt)
-            prompt = NLQ_CYPHER_PROMPT.format(question=question)
-            try:
-                generated = call_llm("You are a Neo4j Cypher expert. Return ONLY the query.", prompt)
-                cypher = self._sanitize_and_scope_query(generated)
-            except Exception as e:
-                logger.error(f"Cypher generation failed: {e}")
+            logger.warning("No allowlisted graph query matched; using safe default")
 
         if not cypher:
             cypher = (
