@@ -1,5 +1,4 @@
 import unittest
-import stat
 
 from helpers import ROOT_DIR
 
@@ -14,7 +13,10 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("NEO4J_PASSWORD=change_me_neo4j_password", env)
         self.assertIn("LOCAL_BIND_ADDRESS=127.0.0.1", env)
         self.assertIn("RAPTOR_API_KEY=change_me_raptor_api_key", env)
-        self.assertIn("VITE_RAPTOR_API_KEY=change_me_raptor_api_key", env)
+        self.assertIn("RAPTOR_ALLOW_AUTH_DISABLED=false", env)
+        self.assertIn("RAPTOR_DB_PATH=./data/raptor.db", env)
+        self.assertIn("RAG_AUTO_INDEX=false", env)
+        self.assertNotIn("VITE_RAPTOR_API_KEY", env)
         self.assertIn("ELASTIC_POLL_ENABLED=false", env)
         self.assertIn("CISA_KEV_URL=https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json", env)
         self.assertNotIn("raptor_secret_2024", env)
@@ -26,13 +28,15 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertIn(f"${{LOCAL_BIND_ADDRESS:-127.0.0.1}}:{published_port}:{published_port}", compose)
         self.assertIn("${LOCAL_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000", compose)
         self.assertIn("${LOCAL_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3100}:3100", compose)
+        self.assertIn("./data:/app/data", compose)
+        self.assertNotIn("./backend/raptor.db:/app/backend/raptor.db", compose)
         self.assertNotIn("raptor_secret_2024", compose)
 
     def test_frontend_api_client_sends_configured_api_key(self):
         api_client = self.read_text("frontend/src/api/raptorApi.js")
 
-        self.assertIn("import.meta.env.VITE_RAPTOR_API_KEY", api_client)
-        self.assertIn("X-RAPTOR-API-Key", api_client)
+        self.assertIn("credentials: 'include'", api_client)
+        self.assertIn("createAuthSession", api_client)
         self.assertIn("getInvestigationEvidence", api_client)
         self.assertIn("listAuditEntries", api_client)
         self.assertIn("listCisaKev", api_client)
@@ -48,16 +52,6 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("Append-only Audit Log", dashboard)
         self.assertIn("Run Poll Now", dashboard)
 
-    def test_commit_script_contract_exists(self):
-        script = ROOT_DIR / "commit.sh"
-        text = script.read_text(encoding="utf-8")
-        mode = script.stat().st_mode
-
-        self.assertTrue(mode & stat.S_IXUSR)
-        self.assertIn("Creating one commit per changed file", text)
-        self.assertIn("git add -A -- \"$file\"", text)
-        self.assertIn("commit_subject", text)
-
     def test_vite_reads_root_environment_for_hybrid_mode(self):
         vite_config = self.read_text("frontend/vite.config.js")
 
@@ -66,6 +60,7 @@ class RepositoryContractTests(unittest.TestCase):
     def test_readme_documents_new_operational_surfaces(self):
         readme = self.read_text("README.md")
 
+        self.assertNotIn("MVP", readme)
         self.assertIn("Persistent raw evidence storage", readme)
         self.assertIn("Append-only SQLite audit logging", readme)
         self.assertIn("CISA Known Exploited Vulnerabilities connector", readme)
