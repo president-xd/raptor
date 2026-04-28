@@ -54,6 +54,8 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 RAPTOR_API_KEY = os.getenv("RAPTOR_API_KEY", "")
 RAPTOR_AUTH_EXEMPT_HEALTH = os.getenv("RAPTOR_AUTH_EXEMPT_HEALTH", "true").lower() == "true"
+RAPTOR_ALLOW_AUTH_DISABLED = os.getenv("RAPTOR_ALLOW_AUTH_DISABLED", "false").lower() == "true"
+RAPTOR_SESSION_COOKIE_SECURE = os.getenv("RAPTOR_SESSION_COOKIE_SECURE", "false").lower() == "true"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
 CORS_ALLOW_ORIGINS = [
   origin.strip()
@@ -78,13 +80,19 @@ EVENT_BATCH_WINDOW_MINUTES = 15
 MAX_INPUT_TOKENS = 16384  # Increased from 4096 — new models support 128K+ context
 
 # ─── Paths ────────────────────────────────────────────────────────────
+def _project_path_from_env(name: str, default: str) -> Path:
+    candidate = Path(os.getenv(name, default))
+    return candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
+
+
 DATA_DIR = PROJECT_ROOT / "data"
 STIX_DIR = DATA_DIR / "stix"
 MOCK_DIR = DATA_DIR / "mock"
 EVIDENCE_DIR = DATA_DIR / "evidence"
 INTEL_DIR = DATA_DIR / "intel"
-APT_REPORTS_DIR = Path(os.getenv("APT_REPORTS_DIR", str(INTEL_DIR / "apt_reports")))
-DB_PATH = PROJECT_ROOT / "backend" / "raptor.db"
+APT_REPORTS_DIR = _project_path_from_env("APT_REPORTS_DIR", str(INTEL_DIR / "apt_reports"))
+DB_PATH = _project_path_from_env("RAPTOR_DB_PATH", str(DATA_DIR / "raptor.db"))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
