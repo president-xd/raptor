@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL,
     LLM_FALLBACK_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS,
-    LLM_TIMEOUT_SECONDS,
+    LLM_TIMEOUT_SECONDS, RAPTOR_ALLOW_EXTERNAL_LLM,
     LOG_ANALYSIS_SYSTEM_PROMPT, RAG_RERANK_K,
 )
 from schema import RaptorEvent, Finding, AnalysisResult
@@ -27,6 +27,8 @@ _llm_client = None
 
 def get_llm_client() -> OpenAI:
     global _llm_client
+    if not RAPTOR_ALLOW_EXTERNAL_LLM:
+        raise RuntimeError("External LLM calls are disabled by RAPTOR_ALLOW_EXTERNAL_LLM=false")
     if not OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
@@ -109,7 +111,7 @@ def build_augmented_prompt(events: List[RaptorEvent], context: Dict[str, List[Di
     for e in events[:20]:
         sigma_str = ','.join(e.sigma_matches) if e.sigma_matches else 'none'
         event_lines.append(
-            f"[{e.event_type}] {e.source_host} Sigma:{sigma_str} | {e.raw[:150]}"
+            f"[{e.event_type}] {redact_sensitive_text(e.source_host)} Sigma:{sigma_str} | {redact_sensitive_text(e.raw[:300])[:150]}"
         )
 
     # Format retrieved ATT&CK context (cap description at 120 chars)
@@ -141,6 +143,17 @@ def build_augmented_prompt(events: List[RaptorEvent], context: Dict[str, List[Di
 Map suspicious events to ATT&CK techniques. Use only IDs from the context above or from Sigma matches shown."""
 
     return prompt
+
+
+def redact_sensitive_text(value: str) -> str:
+    """Best-effort telemetry redaction before external model use."""
+    import re
+    text = str(value or "")
+    text = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<ip>", text)
+    text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "<email>", text)
+    text = re.sub(r"(?i)(password|passwd|pwd|secret|token|apikey|api_key|authorization)\s*[:=]\s*[^,\s;]+", r"\1=<redacted>", text)
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "bearer <redacted>", text)
+    return text
 
 
 def _phase_for_technique(technique_id: str) -> str:
@@ -387,7 +400,7 @@ def analyze_events_batch(events: List[RaptorEvent], window_minutes: int = 15) ->
     Per spec Section 3.5: analyze each 15-min window independently,
     then synthesize with a consolidation LLM call.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone
 
     if len(events) <= 50:
         return analyze_events(events)
@@ -404,7 +417,7 @@ def analyze_events_batch(events: List[RaptorEvent], window_minutes: int = 15) ->
         try:
             ts = datetime.fromisoformat(event.timestamp.replace('Z', '+00:00'))
         except (ValueError, AttributeError):
-            ts = datetime.utcnow()
+            ts = datetime.now(timezone.utc)
 
         if window_start is None:
             window_start = ts
