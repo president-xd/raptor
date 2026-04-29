@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vite build --mode test"
+    "test": "vite build --mode test",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "lucide-react": "^0.378.0",
@@ -15,6 +16,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^6.0.1",
