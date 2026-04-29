@@ -12,9 +12,10 @@ from loguru import logger
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
-    OPENROUTER_API_KEY, OPENROUTER_BASE_URL, LLM_MODEL,
+    LLM_API_KEY, LLM_BASE_URL, LLM_PROVIDER, LLM_MODEL,
     LLM_FALLBACK_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS,
-    LLM_TIMEOUT_SECONDS, RAPTOR_ALLOW_EXTERNAL_LLM,
+    LLM_TOP_P, LLM_TIMEOUT_SECONDS, LLM_STREAM_RESPONSES,
+    LLM_ENABLE_THINKING, LLM_CLEAR_THINKING, RAPTOR_ALLOW_EXTERNAL_LLM,
     LOG_ANALYSIS_SYSTEM_PROMPT, RAG_RERANK_K,
 )
 from schema import RaptorEvent, Finding, AnalysisResult
@@ -22,24 +23,68 @@ from rag.retriever import HybridRetriever
 from rag.reranker import rerank_technique_results, rerank_report_results
 
 
-# OpenRouter client (OpenAI-compatible)
+# OpenAI-compatible LLM client.
 _llm_client = None
 
 def get_llm_client() -> OpenAI:
     global _llm_client
     if not RAPTOR_ALLOW_EXTERNAL_LLM:
         raise RuntimeError("External LLM calls are disabled by RAPTOR_ALLOW_EXTERNAL_LLM=false")
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not configured")
+    if not LLM_API_KEY:
+        raise RuntimeError(f"LLM_API_KEY is not configured for provider {LLM_PROVIDER}")
 
     if _llm_client is None:
         _llm_client = OpenAI(
-            base_url=OPENROUTER_BASE_URL,
-            api_key=OPENROUTER_API_KEY,
+            base_url=LLM_BASE_URL,
+            api_key=LLM_API_KEY,
             timeout=LLM_TIMEOUT_SECONDS,
             max_retries=0,
         )
     return _llm_client
+
+
+def _llm_extra_body(model: str) -> Optional[Dict[str, Any]]:
+    if not LLM_ENABLE_THINKING:
+        return None
+    if not model.startswith("z-ai/"):
+        return None
+    return {
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "clear_thinking": LLM_CLEAR_THINKING,
+        }
+    }
+
+
+def _chat_completion_content(client: OpenAI, args: Dict[str, Any], model: str) -> str:
+    """Return assistant content while discarding provider reasoning streams."""
+    if not LLM_STREAM_RESPONSES:
+        response = client.chat.completions.create(**args)
+        if not response or not getattr(response, "choices", None) or len(response.choices) == 0:
+            logger.warning(f"LLM returned empty/null choices via {model}")
+            raise ValueError(f"LLM returned no choices via {model}")
+        return response.choices[0].message.content or ""
+
+    content_parts = []
+    reasoning_chars = 0
+    for chunk in client.chat.completions.create(**args, stream=True):
+        if not getattr(chunk, "choices", None):
+            continue
+        if len(chunk.choices) == 0 or getattr(chunk.choices[0], "delta", None) is None:
+            continue
+
+        delta = chunk.choices[0].delta
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            reasoning_chars += len(reasoning)
+        content = getattr(delta, "content", None)
+        if content is not None:
+            content_parts.append(content)
+
+    content = "".join(content_parts)
+    if reasoning_chars:
+        logger.debug(f"Discarded {reasoning_chars} reasoning chars from {model} stream")
+    return content
 
 
 def extract_candidate_signatures(events: List[RaptorEvent]) -> List[str]:
@@ -240,35 +285,34 @@ def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -
 
 
 def call_llm(system_prompt: str, user_prompt: str, model: str = None, _retries: int = 0) -> str:
-    """Step 5: Call the LLM via OpenRouter with robust error handling."""
+    """Step 5: Call the configured OpenAI-compatible LLM with robust error handling."""
     import time
     client = get_llm_client()
     model = model or LLM_MODEL
     MAX_RETRIES = 3
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        request_args = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=LLM_TEMPERATURE,
-            max_tokens=LLM_MAX_TOKENS,
-            timeout=LLM_TIMEOUT_SECONDS,
-        )
+            "temperature": LLM_TEMPERATURE,
+            "top_p": LLM_TOP_P,
+            "max_tokens": LLM_MAX_TOKENS,
+            "timeout": LLM_TIMEOUT_SECONDS,
+        }
+        extra_body = _llm_extra_body(model)
+        if extra_body:
+            request_args["extra_body"] = extra_body
 
-        # Guard against None/empty choices (upstream provider can return null)
-        if not response or not getattr(response, 'choices', None) or len(response.choices) == 0:
-            logger.warning(f"LLM returned empty/null choices via {model}")
-            raise ValueError(f"LLM returned no choices via {model}")
-
-        content = response.choices[0].message.content
+        content = _chat_completion_content(client, request_args, model)
         if not content:
             logger.warning(f"LLM returned empty content via {model}")
             raise ValueError(f"LLM returned empty content via {model}")
 
-        logger.info(f"LLM response received ({len(content)} chars) via {model}")
+        logger.info(f"LLM response received ({len(content)} chars) via {LLM_PROVIDER}/{model}")
         return content
 
     except Exception as e:
