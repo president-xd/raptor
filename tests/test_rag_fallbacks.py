@@ -3,10 +3,71 @@ import unittest
 from pathlib import Path
 
 from helpers import BACKEND_DIR  # noqa: F401
-from rag import reranker, retriever
+from rag import pipeline, reranker, retriever
 
 
 class RagFallbackTests(unittest.TestCase):
+    def test_glm_streaming_collector_discards_reasoning_chunks(self):
+        class Delta:
+            def __init__(self, content=None, reasoning_content=None):
+                self.content = content
+                self.reasoning_content = reasoning_content
+
+        class Choice:
+            def __init__(self, delta):
+                self.delta = delta
+
+        class Chunk:
+            def __init__(self, delta):
+                self.choices = [Choice(delta)]
+
+        class Completions:
+            def __init__(self):
+                self.calls = []
+
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+                return [
+                    Chunk(Delta(reasoning_content="private reasoning")),
+                    Chunk(Delta(content="final ")),
+                    Chunk(Delta(content="answer")),
+                ]
+
+        class Chat:
+            def __init__(self):
+                self.completions = Completions()
+
+        class Client:
+            def __init__(self):
+                self.chat = Chat()
+
+        original_stream = pipeline.LLM_STREAM_RESPONSES
+        pipeline.LLM_STREAM_RESPONSES = True
+        try:
+            client = Client()
+            content = pipeline._chat_completion_content(client, {"model": "z-ai/glm-5.1"}, "z-ai/glm-5.1")
+        finally:
+            pipeline.LLM_STREAM_RESPONSES = original_stream
+
+        self.assertEqual(content, "final answer")
+        self.assertTrue(client.chat.completions.calls[0]["stream"])
+
+    def test_glm_extra_body_enables_thinking_without_clearing(self):
+        original_enable = pipeline.LLM_ENABLE_THINKING
+        original_clear = pipeline.LLM_CLEAR_THINKING
+        pipeline.LLM_ENABLE_THINKING = True
+        pipeline.LLM_CLEAR_THINKING = False
+        try:
+            extra_body = pipeline._llm_extra_body("z-ai/glm-5.1")
+        finally:
+            pipeline.LLM_ENABLE_THINKING = original_enable
+            pipeline.LLM_CLEAR_THINKING = original_clear
+
+        self.assertEqual(
+            extra_body,
+            {"chat_template_kwargs": {"enable_thinking": True, "clear_thinking": False}},
+        )
+
     def test_reranker_uses_lexical_fallback_when_model_unavailable(self):
         original_get_reranker = reranker.get_reranker
         reranker.get_reranker = lambda: None
