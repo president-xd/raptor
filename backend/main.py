@@ -68,6 +68,9 @@ from config import (
     CISA_KEV_URL,
     CISA_KEV_CACHE_PATH,
     RAPTOR_ALLOW_EXTERNAL_LLM,
+    LLM_API_KEY,
+    LLM_PROVIDER,
+    LLM_MODEL,
     validate_startup_config,
 )
 from schema import (
@@ -205,6 +208,24 @@ def _is_trusted_origin(origin: str) -> bool:
     return origin.rstrip("/") in {item.rstrip("/") for item in CSRF_TRUSTED_ORIGINS}
 
 
+def _is_allowed_cors_origin(origin: str) -> bool:
+    if not origin:
+        return False
+    allowed = {item.rstrip("/") for item in CORS_ALLOW_ORIGINS}
+    return "*" in allowed or origin.rstrip("/") in allowed
+
+
+def _json_auth_error(request: Request, status_code: int, content: dict) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=content)
+    origin = request.headers.get("origin", "")
+    if _is_allowed_cors_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        if CORS_ALLOW_CREDENTIALS:
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
 @app.middleware("http")
 async def csrf_guard(request: Request, call_next):
     """Protect browser-session mutations while allowing API-key service calls."""
@@ -229,7 +250,11 @@ async def csrf_guard(request: Request, call_next):
         return await call_next(request)
 
     METRICS["auth_failures_total"] += 1
-    return JSONResponse(status_code=403, content={"detail": "Trusted Origin or Referer required for browser mutations"})
+    return _json_auth_error(
+        request,
+        403,
+        {"detail": "Trusted Origin or Referer required for browser mutations"},
+    )
 
 
 class DbRow(dict):
@@ -568,6 +593,8 @@ async def optional_api_key_auth(request: Request, call_next):
     """Require an API key when RAPTOR_API_KEY is configured."""
     path = request.url.path
     public_paths = {"/", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/session"}
+    if getattr(request, "method", "GET") == "OPTIONS":
+        return await call_next(request)
     if path in public_paths:
         return await call_next(request)
     if RAPTOR_AUTH_EXEMPT_HEALTH and path == "/api/v1/health":
@@ -594,9 +621,10 @@ async def optional_api_key_auth(request: Request, call_next):
         return await call_next(request)
 
     METRICS["auth_failures_total"] += 1
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "Valid API key or browser session required"},
+    return _json_auth_error(
+        request,
+        401,
+        {"detail": "Valid API key or browser session required"},
     )
 
 # ─── Runtime Metadata Store ──────────────────────────────────────────
@@ -2596,7 +2624,7 @@ async def health_check_detailed():
         "elasticsearch": {"status": "degraded", "detail": "unreachable"},
         "redis": {"status": "degraded", "detail": "unreachable"},
         "cisa_kev": {"status": "degraded", "detail": "not cached"},
-        "llm": {"status": "degraded", "detail": "OPENROUTER_API_KEY missing"},
+        "llm": {"status": "degraded", "detail": f"{LLM_PROVIDER} API key missing"},
     }
 
     # Runtime metadata database
@@ -2650,9 +2678,8 @@ async def health_check_detailed():
         checks["cisa_kev"] = {"status": "degraded", "detail": "cache not populated; call /api/v1/threat-feeds/cisa-kev"}
 
     # LLM config readiness
-    from config import OPENROUTER_API_KEY
-    if OPENROUTER_API_KEY:
-        checks["llm"] = {"status": "healthy", "detail": "api key configured"}
+    if LLM_API_KEY:
+        checks["llm"] = {"status": "healthy", "detail": f"{LLM_PROVIDER}/{LLM_MODEL} configured"}
     if not RAPTOR_API_KEY and not RAPTOR_ALLOW_AUTH_DISABLED:
         checks["auth"] = {"status": "degraded", "detail": "RAPTOR_API_KEY missing and auth-disabled mode is not allowed"}
     elif not RAPTOR_API_KEY and RAPTOR_ALLOW_AUTH_DISABLED:
