@@ -1,5 +1,25 @@
 # RAPTOR Changelog
 
+## [1.4.0] - 2026-04-29
+
+### Added
+- Added production startup guardrails for unsafe defaults, process roles, database engine selection, and SQLite production acknowledgement.
+- Added PostgreSQL runtime metadata support with adapter translation, worker entrypoint, and a production compose overlay that provisions postgres and a worker service.
+- Added CSRF trusted origin checks for session-authenticated mutations, security headers, and request ID tracing.
+- Added AES-256-GCM evidence encryption with key identifiers and a decrypt helper.
+- Added CI workflow with backend tests, frontend build plus Playwright e2e, compose validation, and a PostgreSQL integration test.
+- Added Playwright configuration and dashboard e2e coverage.
+
+### Changed
+- Updated metrics to emit request latency and status counters; health now reports a database subsystem with backend type.
+- Updated evidence metadata and access controls for audit log, threat feeds, and Elasticsearch poll endpoints.
+- Updated README and operational docs for production hardening, worker separation, CSRF safeguards, and PostgreSQL runtime metadata.
+- Updated frontend subsystem display to show Database instead of SQLite.
+- Updated backend dependency locks, including CPU Torch wheels, PostgreSQL driver, and cryptography.
+
+### Fixed
+- Fixed Elasticsearch poll de-duplication to avoid duplicate inserts while tracking last-seen timestamps.
+
 ## [1.3.0] - 2026-04-25
 
 ### Added
