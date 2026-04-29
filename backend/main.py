@@ -16,6 +16,7 @@ import threading
 import time
 import secrets
 import base64
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,7 @@ from config import (
     MAX_UPLOAD_BYTES,
     CORS_ALLOW_ORIGINS,
     CORS_ALLOW_CREDENTIALS,
+    CSRF_TRUSTED_ORIGINS,
     ELASTICSEARCH_URL,
     ELASTIC_INDEX_PREFIX,
     WEAVIATE_URL,
@@ -55,12 +57,18 @@ from config import (
     RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
     RAPTOR_AUTH_MAX_FAILURES,
     RAPTOR_AUTH_LOCK_SECONDS,
+    RAPTOR_ENV,
+    RAPTOR_PRODUCTION,
+    RAPTOR_PROCESS_ROLE,
+    RAPTOR_DB_ENGINE,
+    RAPTOR_DATABASE_URL,
     EVIDENCE_DIR,
     EVIDENCE_ENCRYPTION_KEY,
     EVIDENCE_RETENTION_DAYS,
     CISA_KEV_URL,
     CISA_KEV_CACHE_PATH,
     RAPTOR_ALLOW_EXTERNAL_LLM,
+    validate_startup_config,
 )
 from schema import (
     RaptorEvent, Finding, AnalysisResult, AttributionResult,
@@ -81,6 +89,7 @@ from models import (
 )
 
 # ─── App Setup ────────────────────────────────────────────────────────
+validate_startup_config()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -115,10 +124,284 @@ METRICS = {
     "parser_errors_total": 0,
     "llm_external_blocked_total": 0,
     "started_at": time.time(),
+    "request_latency_seconds_sum": 0.0,
+    "request_latency_seconds_count": 0,
+    "requests_by_status": {},
 }
 
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+REQUEST_ID_RE = re.compile(r"[^A-Za-z0-9_.:-]")
 
-def db_connect(timeout: float = 30.0) -> sqlite3.Connection:
+
+def _request_id_from_headers(request: Request) -> str:
+    supplied = request.headers.get("x-request-id", "").strip()
+    if supplied:
+        cleaned = REQUEST_ID_RE.sub("", supplied)[:80]
+        if cleaned:
+            return cleaned
+    return uuid.uuid4().hex
+
+
+@app.middleware("http")
+async def request_context_and_metrics(request: Request, call_next):
+    request_id = _request_id_from_headers(request)
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        elapsed = time.perf_counter() - started
+        METRICS["requests_total"] += 1
+        METRICS["request_latency_seconds_sum"] += elapsed
+        METRICS["request_latency_seconds_count"] += 1
+        bucket = str(status_code)
+        METRICS["requests_by_status"][bucket] = METRICS["requests_by_status"].get(bucket, 0) + 1
+        logger.info(
+            json.dumps(
+                {
+                    "event": "http_request",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "duration_ms": round(elapsed * 1000, 2),
+                },
+                separators=(",", ":"),
+            )
+        )
+        response = locals().get("response")
+        if response is not None:
+            response.headers.setdefault("X-Request-ID", request_id)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    if hasattr(request.state, "request_id"):
+        response.headers.setdefault("X-Request-ID", request.state.request_id)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if RAPTOR_PRODUCTION:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
+def _extract_api_key(request: Request) -> str:
+    supplied = request.headers.get("x-raptor-api-key", "")
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        supplied = auth_header.split(" ", 1)[1].strip()
+    return supplied
+
+
+def _is_trusted_origin(origin: str) -> bool:
+    if not origin:
+        return False
+    return origin.rstrip("/") in {item.rstrip("/") for item in CSRF_TRUSTED_ORIGINS}
+
+
+@app.middleware("http")
+async def csrf_guard(request: Request, call_next):
+    """Protect browser-session mutations while allowing API-key service calls."""
+    if request.method not in MUTATING_METHODS or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    if request.url.path == "/api/v1/auth/session":
+        return await call_next(request)
+    supplied = _extract_api_key(request)
+    if supplied and RAPTOR_API_KEY and hmac.compare_digest(supplied, RAPTOR_API_KEY):
+        return await call_next(request)
+    if not request.cookies.get("raptor_session"):
+        return await call_next(request)
+
+    origin = request.headers.get("origin", "")
+    referrer = request.headers.get("referer", "")
+    referrer_origin = ""
+    if referrer:
+        parsed = urlparse(referrer)
+        if parsed.scheme and parsed.netloc:
+            referrer_origin = f"{parsed.scheme}://{parsed.netloc}"
+    if _is_trusted_origin(origin) or _is_trusted_origin(referrer_origin):
+        return await call_next(request)
+
+    METRICS["auth_failures_total"] += 1
+    return JSONResponse(status_code=403, content={"detail": "Trusted Origin or Referer required for browser mutations"})
+
+
+class DbRow(dict):
+    """Mapping row that also supports sqlite-style positional access."""
+
+    def __init__(self, values: tuple, columns: list[str]):
+        super().__init__(zip(columns, values))
+        self._values = values
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class DbResult:
+    def __init__(self, rows=None, columns=None, rowcount: int = -1, lastrowid=None):
+        self._rows = rows or []
+        self._columns = columns or []
+        self.rowcount = rowcount
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        row = self._rows[0]
+        return DbRow(row, self._columns)
+
+    def fetchall(self):
+        return [DbRow(row, self._columns) for row in self._rows]
+
+
+class PostgresConnection:
+    def __init__(self, timeout: float = 30.0):
+        import psycopg
+
+        self._conn = psycopg.connect(RAPTOR_DATABASE_URL, connect_timeout=int(timeout))
+        self.row_factory = None
+
+    def close(self):
+        self._conn.close()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def execute(self, sql: str, params=()):
+        sql, params = _postgres_sql(sql, params or ())
+        with self._conn.cursor() as cursor:
+            try:
+                cursor.execute(sql, params)
+            except Exception:
+                self._conn.rollback()
+                raise
+            columns = [item.name for item in cursor.description] if cursor.description else []
+            rows = cursor.fetchall() if cursor.description else []
+            lastrowid = None
+            if sql.lstrip().upper().startswith("INSERT INTO EVIDENCE_FILES") and rows:
+                lastrowid = rows[0][0]
+            return DbResult(rows=rows, columns=columns, rowcount=cursor.rowcount, lastrowid=lastrowid)
+
+    def executemany(self, sql: str, seq_of_params):
+        sql, _ = _postgres_sql(sql, ())
+        sql = _replace_qmark_params(sql)
+        with self._conn.cursor() as cursor:
+            try:
+                cursor.executemany(sql, seq_of_params)
+            except Exception:
+                self._conn.rollback()
+                raise
+            return DbResult(rowcount=cursor.rowcount)
+
+
+def _replace_qmark_params(sql: str) -> str:
+    return sql.replace("?", "%s")
+
+
+def _postgres_sql(sql: str, params):
+    stripped = sql.strip()
+    upper = " ".join(stripped.upper().split())
+
+    if upper.startswith("PRAGMA TABLE_INFO("):
+        table_name = stripped[stripped.find("(") + 1:stripped.rfind(")")].strip().strip("'\"")
+        return (
+            """
+            SELECT ordinal_position - 1 AS cid, column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            (table_name,),
+        )
+
+    if upper.startswith("CREATE TABLE"):
+        sql = re.sub(r"\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b", "BIGSERIAL PRIMARY KEY", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\bINTEGER\b", "INTEGER", sql, flags=re.IGNORECASE)
+
+    if "CREATE TRIGGER IF NOT EXISTS AUDIT_LOG_NO_UPDATE" in upper:
+        return (
+            """
+            DO $do$
+            BEGIN
+                CREATE OR REPLACE FUNCTION audit_log_reject_update()
+                RETURNS trigger AS $fn$
+                BEGIN
+                    RAISE EXCEPTION 'audit_log is append-only';
+                END;
+                $fn$ LANGUAGE plpgsql;
+                DROP TRIGGER IF EXISTS audit_log_no_update ON audit_log;
+                CREATE TRIGGER audit_log_no_update
+                BEFORE UPDATE ON audit_log
+                FOR EACH ROW EXECUTE FUNCTION audit_log_reject_update();
+            END
+            $do$;
+            """,
+            (),
+        )
+
+    if "CREATE TRIGGER IF NOT EXISTS AUDIT_LOG_NO_DELETE" in upper:
+        return (
+            """
+            DO $do$
+            BEGIN
+                CREATE OR REPLACE FUNCTION audit_log_reject_delete()
+                RETURNS trigger AS $fn$
+                BEGIN
+                    RAISE EXCEPTION 'audit_log is append-only';
+                END;
+                $fn$ LANGUAGE plpgsql;
+                DROP TRIGGER IF EXISTS audit_log_no_delete ON audit_log;
+                CREATE TRIGGER audit_log_no_delete
+                BEFORE DELETE ON audit_log
+                FOR EACH ROW EXECUTE FUNCTION audit_log_reject_delete();
+            END
+            $do$;
+            """,
+            (),
+        )
+
+    if upper.startswith("INSERT OR IGNORE INTO"):
+        sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, count=1, flags=re.IGNORECASE)
+        sql = f"{sql.rstrip()} ON CONFLICT DO NOTHING"
+
+    if upper.startswith("INSERT OR REPLACE INTO JOB_QUEUE"):
+        sql = """
+            INSERT INTO job_queue
+            (investigation_id, status, attempts, payload_json, next_run_at, created_at, updated_at)
+            VALUES (%s, 'queued', 0, %s, %s, %s, %s)
+            ON CONFLICT (investigation_id) DO UPDATE SET
+                status = 'queued',
+                attempts = 0,
+                payload_json = EXCLUDED.payload_json,
+                locked_by = '',
+                locked_at = 0,
+                next_run_at = EXCLUDED.next_run_at,
+                last_error = '',
+                updated_at = EXCLUDED.updated_at
+        """
+        return sql, params
+
+    if upper.startswith("INSERT INTO EVIDENCE_FILES") and "RETURNING" not in upper:
+        sql = f"{sql.rstrip()} RETURNING id"
+
+    return _replace_qmark_params(sql), params
+
+
+def db_connect(timeout: float = 30.0):
+    if RAPTOR_DB_ENGINE == "postgresql":
+        return PostgresConnection(timeout=timeout)
     conn = sqlite3.connect(str(DB_PATH), timeout=timeout, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
@@ -283,7 +566,6 @@ def authenticate_user(username: str, password: str) -> dict:
 @app.middleware("http")
 async def optional_api_key_auth(request: Request, call_next):
     """Require an API key when RAPTOR_API_KEY is configured."""
-    METRICS["requests_total"] += 1
     path = request.url.path
     public_paths = {"/", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/session"}
     if path in public_paths:
@@ -317,10 +599,10 @@ async def optional_api_key_auth(request: Request, call_next):
         content={"detail": "Valid API key or browser session required"},
     )
 
-# ─── SQLite Job State ────────────────────────────────────────────────
+# ─── Runtime Metadata Store ──────────────────────────────────────────
 
 def init_db():
-    """Initialize SQLite database for job tracking."""
+    """Initialize runtime metadata schema for investigations, auth, audit, and jobs."""
     conn = db_connect()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS investigations (
@@ -596,28 +878,47 @@ def _safe_filename(value: str, default: str = "raw.log") -> str:
 def _evidence_key() -> Optional[bytes]:
     if not EVIDENCE_ENCRYPTION_KEY:
         return None
-    return hashlib.sha256(EVIDENCE_ENCRYPTION_KEY.encode("utf-8")).digest()
-
-
-def _hmac_stream(key: bytes, nonce: bytes, length: int) -> bytes:
-    blocks = []
-    counter = 0
-    while sum(len(block) for block in blocks) < length:
-        blocks.append(hmac.new(key, nonce + counter.to_bytes(8, "big"), hashlib.sha256).digest())
-        counter += 1
-    return b"".join(blocks)[:length]
+    key_value = EVIDENCE_ENCRYPTION_KEY.strip()
+    if key_value.startswith("base64:"):
+        raw = base64.b64decode(key_value.split(":", 1)[1])
+        if len(raw) != 32:
+            raise RuntimeError("base64 EVIDENCE_ENCRYPTION_KEY must decode to 32 bytes")
+        return raw
+    try:
+        padded = key_value + ("=" * (-len(key_value) % 4))
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        if len(raw) == 32:
+            return raw
+    except Exception:
+        pass
+    return hashlib.sha256(key_value.encode("utf-8")).digest()
 
 
 def encrypt_evidence(content: bytes) -> tuple[bytes, bool, str]:
     key = _evidence_key()
     if not key:
         return content, False, ""
-    nonce = secrets.token_bytes(16)
-    stream = _hmac_stream(key, nonce, len(content))
-    ciphertext = bytes(a ^ b for a, b in zip(content, stream))
-    tag = hmac.new(key, nonce + ciphertext, hashlib.sha256).hexdigest()
-    header = f"RAPTOR-EVIDENCE-v1:{nonce.hex()}:{tag}\n".encode("ascii")
-    return header + ciphertext, True, "local-hmac-sha256-v1"
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = secrets.token_bytes(12)
+    ciphertext = AESGCM(key).encrypt(nonce, content, None)
+    key_id = hashlib.sha256(key).hexdigest()[:16]
+    header = f"RAPTOR-EVIDENCE-v2:aes-256-gcm:{key_id}:{nonce.hex()}\n".encode("ascii")
+    return header + ciphertext, True, f"aes-256-gcm:{key_id}"
+
+
+def decrypt_evidence(stored_content: bytes) -> bytes:
+    """Decrypt evidence blobs written by encrypt_evidence."""
+    if not stored_content.startswith(b"RAPTOR-EVIDENCE-v2:"):
+        return stored_content
+    key = _evidence_key()
+    if not key:
+        raise RuntimeError("EVIDENCE_ENCRYPTION_KEY is required to decrypt evidence")
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    header, ciphertext = stored_content.split(b"\n", 1)
+    _prefix, _alg, _key_id, nonce_hex = header.decode("ascii").split(":", 3)
+    return AESGCM(key).decrypt(bytes.fromhex(nonce_hex), ciphertext, None)
 
 
 def store_evidence_file(
@@ -625,7 +926,7 @@ def store_evidence_file(
     content: bytes,
     metadata: Optional[dict] = None,
 ) -> dict:
-    """Persist raw evidence bytes and record metadata in SQLite."""
+    """Persist raw evidence bytes and record metadata."""
     metadata = metadata or {}
     case_dir = EVIDENCE_DIR / investigation_id
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -678,6 +979,7 @@ def store_evidence_file(
         "content_type": str(metadata.get("content_type") or "text/plain"),
         "source": source,
         "encrypted": encrypted,
+        "encryption_key_id": key_id,
         "retention_expires_at": retention_expires_at,
         "created_at": created_at,
     }
@@ -711,8 +1013,9 @@ def audit_log(
     ip_address = ""
     if request is not None:
         actor = _authenticated_actor(request)
-        if request.client:
-            ip_address = request.client.host
+        client = getattr(request, "client", None)
+        if client:
+            ip_address = client.host
 
     timestamp = _utcnow()
     detail_json = json.dumps(detail or {}, default=str)
@@ -1069,7 +1372,7 @@ def db_list(limit: int = 25, principal: Optional[dict] = None) -> list[dict]:
                    event_count, technique_count, created_at, completed_at,
                    attribution_json, graph_json
             FROM investigations
-            ORDER BY datetime(created_at) DESC
+            ORDER BY created_at DESC
             LIMIT ?
             """,
             (limit,),
@@ -1082,7 +1385,7 @@ def db_list(limit: int = 25, principal: Optional[dict] = None) -> list[dict]:
                    attribution_json, graph_json
             FROM investigations
             WHERE tenant_id = ? AND (owner_id = ? OR owner_id = '')
-            ORDER BY datetime(created_at) DESC
+            ORDER BY created_at DESC
             LIMIT ?
             """,
             (principal.get("tenant_id", "default"), principal.get("user_id", ""), limit),
@@ -1158,15 +1461,23 @@ def filter_new_elasticsearch_events(content: str) -> tuple[str, int]:
             else:
                 event_key = hashlib.sha256(line.encode("utf-8", errors="replace")).hexdigest()
             try:
-                conn.execute(
+                result = conn.execute(
                     """
                     INSERT INTO elastic_seen_events
                     (event_key, first_seen_at, last_seen_at, hit_index, hit_id)
                     VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
                     """,
                     (event_key, now, now, hit_index, hit_id),
                 )
-                accepted.append(line)
+                if result.rowcount:
+                    accepted.append(line)
+                else:
+                    duplicates += 1
+                    conn.execute(
+                        "UPDATE elastic_seen_events SET last_seen_at = ? WHERE event_key = ?",
+                        (now, event_key),
+                    )
             except sqlite3.IntegrityError:
                 duplicates += 1
                 conn.execute(
@@ -1544,6 +1855,8 @@ def run_elasticsearch_poll_once(
     time_range_end: Optional[str] = None,
     case_name: str = "",
     apt_filters: Optional[list[str]] = None,
+    owner_id: str = "system",
+    tenant_id: str = "default",
 ) -> ElasticPollResponse:
     """Poll Elasticsearch once and create an investigation if events are found."""
     started_at = _utcnow()
@@ -1578,6 +1891,8 @@ def run_elasticsearch_poll_once(
         "time_range_start": time_range_start,
         "time_range_end": time_range_end,
         "apt_filters": apt_filters or [],
+        "owner_id": owner_id or "system",
+        "tenant_id": tenant_id or "default",
     }
     response = start_investigation_now(content, metadata=metadata)
     increment_elastic_poll_investigations()
@@ -1614,11 +1929,23 @@ def elastic_poll_loop():
 
 
 def start_optional_services():
+    if RAPTOR_PROCESS_ROLE not in {"all", "worker"}:
+        logger.info(f"Optional background services disabled for RAPTOR_PROCESS_ROLE={RAPTOR_PROCESS_ROLE}")
+        return
     start_investigation_worker()
     if not ELASTIC_POLL_ENABLED:
         return
     thread = threading.Thread(target=elastic_poll_loop, daemon=True)
     thread.start()
+
+
+def run_worker_process():
+    """Run background workers as the main container process."""
+    logger.info(f"Starting RAPTOR worker process ({WORKER_ID})")
+    if ELASTIC_POLL_ENABLED:
+        thread = threading.Thread(target=elastic_poll_loop, daemon=True)
+        thread.start()
+    investigation_worker_loop()
 
 
 # ─── API Endpoints ───────────────────────────────────────────────────
@@ -1981,6 +2308,7 @@ def get_apt_profiles(request: Request):
     GET /api/v1/apt/profiles
     """
     from attribution.apt_profiles import load_apt_profiles, get_profile_summaries
+    require_role(request, "viewer")
     profiles = load_apt_profiles()
     summaries = get_profile_summaries(profiles)
     audit_log(request, "apt_profiles.listed", None, {"count": len(summaries)})
@@ -2042,6 +2370,10 @@ async def get_audit_log(
     investigation_id: Optional[str] = None,
 ):
     """List recent append-only audit entries."""
+    if investigation_id:
+        ensure_investigation_access(request, investigation_id, "viewer")
+    else:
+        require_role(request, "admin")
     entries = list_audit_entries(limit=limit, investigation_id=investigation_id)
     audit_log(request, "audit.viewed", investigation_id, {"limit": limit})
     return AuditLogResponse(entries=[AuditEntry(**entry) for entry in entries], total_count=len(entries))
@@ -2055,6 +2387,7 @@ def get_cisa_kev(
     refresh: bool = False,
 ):
     """Fetch and cache the public CISA KEV catalog."""
+    require_role(request, "viewer")
     payload = fetch_cisa_kev(refresh=refresh)
     vulnerabilities = payload.get("vulnerabilities", [])
     if query:
@@ -2085,6 +2418,7 @@ def get_cisa_kev(
 @app.post("/api/v1/threat-feeds/cisa-kev/sync", response_model=CisaKevResponse)
 def sync_cisa_kev(request: Request):
     """Force refresh the CISA KEV catalog cache."""
+    require_role(request, "analyst")
     payload = fetch_cisa_kev(refresh=True)
     vulnerabilities = payload.get("vulnerabilities", [])
     audit_log(
@@ -2107,12 +2441,15 @@ def sync_cisa_kev(request: Request):
 @app.post("/api/v1/ingest/elasticsearch/poll", response_model=ElasticPollResponse)
 def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
     """Poll Elasticsearch once and queue any returned events as an investigation."""
+    principal = require_role(request, "analyst")
     response = run_elasticsearch_poll_once(
         query=payload.query,
         time_range_start=payload.time_range_start,
         time_range_end=payload.time_range_end,
         case_name=payload.case_name,
         apt_filters=payload.apt_filters,
+        owner_id=principal.get("user_id") or principal.get("actor"),
+        tenant_id=principal.get("tenant_id", "default"),
     )
     audit_log(
         request,
@@ -2126,6 +2463,7 @@ def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
 @app.get("/api/v1/ingest/elasticsearch/status", response_model=ElasticPollStatus)
 async def get_elasticsearch_poll_status(request: Request):
     """Return the simple Elasticsearch poller state."""
+    require_role(request, "viewer")
     state = get_elastic_poll_state()
     audit_log(request, "elasticsearch.poll_status.viewed", None, {})
     return ElasticPollStatus(
@@ -2160,7 +2498,11 @@ async def health_check():
         "timestamp": _utcnow(),
         "subsystems": {
             "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
-            "sqlite": {"status": sqlite_status, "detail": "query ok" if sqlite_status == "healthy" else "query failed"},
+            "database": {
+                "status": sqlite_status,
+                "backend": RAPTOR_DB_ENGINE,
+                "detail": "query ok" if sqlite_status == "healthy" else "query failed",
+            },
         },
     }
 
@@ -2170,10 +2512,27 @@ async def metrics(request: Request):
     """Prometheus-compatible operational counters."""
     require_role(request, "viewer")
     uptime = max(0, time.time() - METRICS["started_at"])
+    latency_count = max(1, int(METRICS["request_latency_seconds_count"]))
+    latency_avg = METRICS["request_latency_seconds_sum"] / latency_count
     lines = [
         "# HELP raptor_requests_total Total API requests seen by middleware",
         "# TYPE raptor_requests_total counter",
         f"raptor_requests_total {METRICS['requests_total']}",
+        "# HELP raptor_requests_by_status_total Total API requests by HTTP status",
+        "# TYPE raptor_requests_by_status_total counter",
+        *[
+            f'raptor_requests_by_status_total{{status="{status}"}} {count}'
+            for status, count in sorted(METRICS["requests_by_status"].items())
+        ],
+        "# HELP raptor_request_latency_seconds_sum Total request latency seconds",
+        "# TYPE raptor_request_latency_seconds_sum counter",
+        f"raptor_request_latency_seconds_sum {METRICS['request_latency_seconds_sum']:.6f}",
+        "# HELP raptor_request_latency_seconds_count Count of measured requests",
+        "# TYPE raptor_request_latency_seconds_count counter",
+        f"raptor_request_latency_seconds_count {METRICS['request_latency_seconds_count']}",
+        "# HELP raptor_request_latency_seconds_avg Average request latency seconds",
+        "# TYPE raptor_request_latency_seconds_avg gauge",
+        f"raptor_request_latency_seconds_avg {latency_avg:.6f}",
         "# HELP raptor_auth_failures_total Authentication failures",
         "# TYPE raptor_auth_failures_total counter",
         f"raptor_auth_failures_total {METRICS['auth_failures_total']}",
@@ -2192,6 +2551,9 @@ async def metrics(request: Request):
         "# HELP raptor_uptime_seconds Process uptime",
         "# TYPE raptor_uptime_seconds gauge",
         f"raptor_uptime_seconds {uptime:.0f}",
+        "# HELP raptor_db_backend Database backend in use",
+        "# TYPE raptor_db_backend gauge",
+        f'raptor_db_backend{{backend="{RAPTOR_DB_ENGINE}"}} 1',
     ]
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
@@ -2225,7 +2587,7 @@ async def health_check_detailed():
     """Bounded subsystem health for API/UI degraded-mode visibility."""
     checks = {
         "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
-        "sqlite": {"status": "healthy", "detail": ""},
+        "database": {"status": "healthy", "backend": RAPTOR_DB_ENGINE, "detail": ""},
         "auth": {"status": "healthy", "detail": "API key auth enabled" if RAPTOR_API_KEY else "API key missing"},
         "evidence": {"status": "healthy", "detail": ""},
         "evidence_encryption": {"status": "healthy", "detail": ""},
@@ -2237,14 +2599,14 @@ async def health_check_detailed():
         "llm": {"status": "degraded", "detail": "OPENROUTER_API_KEY missing"},
     }
 
-    # SQLite
+    # Runtime metadata database
     try:
         conn = db_connect(timeout=1)
         conn.execute("SELECT 1")
         conn.close()
-        checks["sqlite"] = {"status": "healthy", "detail": "query ok"}
+        checks["database"] = {"status": "healthy", "backend": RAPTOR_DB_ENGINE, "detail": "query ok"}
     except Exception as e:
-        checks["sqlite"] = {"status": "degraded", "detail": str(e)}
+        checks["database"] = {"status": "degraded", "backend": RAPTOR_DB_ENGINE, "detail": str(e)}
 
     # Evidence store
     try:
