@@ -19,7 +19,7 @@ Implemented today:
 - Normalized event schema with timestamps, hosts, IPs, event type, raw evidence, Sigma matches, and preliminary IoC score.
 - Local Sigma-style detection signatures mapped to MITRE ATT&CK technique IDs.
 - RAG-oriented analysis pipeline that retrieves ATT&CK and threat-report context from Weaviate when available.
-- OpenRouter-compatible LLM analysis with fallback model support.
+- OpenAI-compatible LLM analysis with NVIDIA NIM/GLM defaults and fallback model support.
 - Deterministic local fallback analysis when the LLM, embeddings, retrieval, or report generation path cannot complete.
 - MITRE ATT&CK STIX validation for technique IDs.
 - APT profile loading from the cached Enterprise ATT&CK STIX bundle.
@@ -190,7 +190,7 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-2. Edit `.env`, replace the `NEO4J_PASSWORD`, `RAPTOR_API_KEY`, and bootstrap admin placeholders. Set `OPENROUTER_API_KEY` and `RAPTOR_ALLOW_EXTERNAL_LLM=true` only when your data policy permits live LLM calls.
+2. Edit `.env`, replace the `NEO4J_PASSWORD`, `RAPTOR_API_KEY`, and bootstrap admin placeholders. Set `NVIDIA_API_KEY` and `RAPTOR_ALLOW_EXTERNAL_LLM=true` only when your data policy permits live LLM calls.
 
 3. Start the stack.
 
@@ -278,6 +278,8 @@ Hybrid helper scripts are available:
 ```bash
 bash scripts/hybrid/install_linux.sh
 ```
+
+The Linux hybrid helper validates Docker access, dependency presence, service health, and the backend/frontend HTTP ports before reporting success. If Docker infrastructure is already running and you only need to restart the local backend/frontend, run `RAPTOR_SKIP_INFRA=true bash scripts/hybrid/install_linux.sh`. If the helper reports Docker daemon access errors, start Docker and either run `sudo -v` before the script or add your user to the Docker group for non-root Docker access.
 
 ## Backend Pipeline
 
@@ -446,11 +448,20 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENROUTER_API_KEY` | empty | Enables live LLM calls. Fallback analysis works without it. |
-| `OPENROUTER_BASE_URL` | configured in `backend/config.py` | OpenRouter-compatible API base URL. |
-| `LLM_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | Primary model for analysis and generation. |
-| `LLM_FALLBACK_MODEL` | `qwen/qwen3-coder:free` | Secondary model if the primary call fails. |
+| `LLM_PROVIDER` | `nvidia` | Main OpenAI-compatible provider profile. Use `openrouter` to keep the legacy route. |
+| `NVIDIA_API_KEY` | empty | NVIDIA NIM API key for live LLM calls. Fallback analysis works without it. |
+| `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NVIDIA OpenAI-compatible API base URL. |
+| `OPENROUTER_API_KEY` | empty | Legacy OpenRouter API key used when `LLM_PROVIDER=openrouter`. |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter-compatible API base URL. |
+| `LLM_MODEL` | `z-ai/glm-5.1` | Primary model for analysis and generation. |
+| `LLM_FALLBACK_MODEL` | `z-ai/glm-5.1` | Secondary model if the primary call fails. |
+| `LLM_MAX_TOKENS` | `32768` | Maximum generated tokens for LLM requests. |
+| `LLM_TEMPERATURE` | `1` | Sampling temperature for LLM requests. |
+| `LLM_TOP_P` | `1` | Nucleus sampling value for LLM requests. |
 | `LLM_TIMEOUT_SECONDS` | `30` | Timeout for LLM requests. |
+| `LLM_STREAM_RESPONSES` | `true` | Streams chat completions and collects content while discarding reasoning chunks. |
+| `LLM_ENABLE_THINKING` | `true` | Sends GLM chat-template thinking options for `z-ai/*` models. |
+| `LLM_CLEAR_THINKING` | `false` | Controls the provider `clear_thinking` chat-template option. |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt connection string. |
 | `NEO4J_USER` | `neo4j` | Neo4j username. |
 | `NEO4J_PASSWORD` | `change_me_neo4j_password` | Local Neo4j password placeholder. Change before running shared environments. |
