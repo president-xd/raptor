@@ -26,6 +26,7 @@ class PersistenceConnectorTests(unittest.TestCase):
             "ELASTIC_POLL_WINDOW_MINUTES": app_main.ELASTIC_POLL_WINDOW_MINUTES,
             "RAPTOR_API_KEY": app_main.RAPTOR_API_KEY,
             "RAPTOR_ALLOW_AUTH_DISABLED": app_main.RAPTOR_ALLOW_AUTH_DISABLED,
+            "CORS_ALLOW_ORIGINS": app_main.CORS_ALLOW_ORIGINS,
         }
         root = Path(self.tmp.name)
         app_main.DB_PATH = root / "raptor.db"
@@ -140,6 +141,46 @@ class PersistenceConnectorTests(unittest.TestCase):
         allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
 
         self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(allowed, "allowed")
+
+    def test_api_key_middleware_keeps_cors_headers_on_auth_challenge(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+        app_main.CORS_ALLOW_ORIGINS = ["http://ui.local"]
+
+        class FakeURL:
+            path = "/api/v1/investigations"
+
+        class FakeRequest:
+            method = "GET"
+            url = FakeURL()
+            headers = {"origin": "http://ui.local"}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        blocked = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+
+        self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(blocked.headers["access-control-allow-origin"], "http://ui.local")
+
+    def test_api_key_middleware_allows_cors_preflight(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+
+        class FakeURL:
+            path = "/api/v1/investigations"
+
+        class FakeRequest:
+            method = "OPTIONS"
+            url = FakeURL()
+            headers = {"origin": "http://ui.local"}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+
         self.assertEqual(allowed, "allowed")
 
 
