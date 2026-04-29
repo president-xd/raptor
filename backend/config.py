@@ -11,19 +11,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 # ─── LLM Configuration ───────────────────────────────────────────────
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nvidia").lower()
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+LLM_BASE_URL = os.getenv(
+    "LLM_BASE_URL",
+    OPENROUTER_BASE_URL if LLM_PROVIDER == "openrouter" else NVIDIA_BASE_URL,
+)
+LLM_API_KEY = os.getenv(
+    "LLM_API_KEY",
+    OPENROUTER_API_KEY if LLM_PROVIDER == "openrouter" else NVIDIA_API_KEY,
+)
 RAPTOR_ALLOW_EXTERNAL_LLM = os.getenv("RAPTOR_ALLOW_EXTERNAL_LLM", "false").lower() == "true"
-LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
-LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "qwen/qwen3-coder:free")
-LLM_MAX_TOKENS = 4096  # Increased — new models support much larger context windows
-LLM_TEMPERATURE = 0.1  # Low temp for deterministic security analysis
+LLM_MODEL = os.getenv("LLM_MODEL", "z-ai/glm-5.1")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "z-ai/glm-5.1")
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "32768"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "1"))
+LLM_TOP_P = float(os.getenv("LLM_TOP_P", "1"))
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+LLM_STREAM_RESPONSES = os.getenv("LLM_STREAM_RESPONSES", "true").lower() == "true"
+LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "true").lower() == "true"
+LLM_CLEAR_THINKING = os.getenv("LLM_CLEAR_THINKING", "false").lower() == "true"
 
 # Context window capabilities for model-aware batching
 MODEL_CONTEXT_WINDOWS = {
     "qwen/qwen3-coder:free": 131072,           # 128K context
     "nvidia/nemotron-3-super-120b-a12b:free": 131072,  # 128K context
+    "z-ai/glm-5.1": 131072,
     "google/gemini-flash-1.5": 1048576,        # 1M context
     "anthropic/claude-3-haiku-20240307": 200000,
     "anthropic/claude-3-sonnet-20240229": 200000,
