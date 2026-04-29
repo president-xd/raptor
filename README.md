@@ -34,10 +34,10 @@ Implemented today:
 - Prometheus-compatible operational counters at `/api/v1/metrics`.
 - React SOC console backed by the API for investigation creation, polling, reports, graphs, raw evidence metadata, audit log review, manual Elasticsearch polling, attribution, simulation, natural-language query, APT profiles, MITRE findings, report download, and subsystem health.
 - Investigation metadata in the backend list API, including case name, source, upload size, host count, top candidate, confidence score, and confidence label.
-- Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, content type, encryption state, and retention expiry.
+- Persistent raw evidence storage under `data/evidence/{investigation_id}/` with SQLite metadata for path, hash, size, source, content type, AES-256-GCM encryption state, and retention expiry.
 - Append-only SQLite audit logging with a database-level update/delete guard and per-entry hash chain for investigation creation, report/graph/evidence viewing, natural-language queries, simulations, threat-feed access, and Elasticsearch poller actions.
 - Server-side browser sessions, API-key service access, local bootstrap admin credentials, role checks, tenant scoping, and case ownership enforcement.
-- SQLite-backed investigation job queue with retry tracking, stale-claim recovery, and worker isolation from request handlers.
+- SQLite-backed investigation job queue with retry tracking, stale-claim recovery, and separate API/worker process roles for hardened single-node deployments.
 - CISA Known Exploited Vulnerabilities connector with file cache and Redis JSON cache when Redis is reachable.
 - Optional interval-based Elasticsearch poller that queues matching events as investigations.
 - Redis health plus lightweight CISA KEV cache usage.
@@ -198,7 +198,7 @@ Copy-Item .env.example .env
 docker compose up -d --build
 ```
 
-For a hardened single-node deployment profile, apply the production overlay after setting real secrets:
+For a hardened deployment profile, apply the production overlay after setting real secrets. The overlay runs separate API and worker containers, switches runtime metadata to PostgreSQL, and enables production startup validation:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
@@ -471,6 +471,8 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `API_PORT` | `8000` | Backend port. |
 | `FRONTEND_PORT` | `3100` | Frontend port. |
 | `LOCAL_BIND_ADDRESS` | `127.0.0.1` | Host address Docker Compose publishes service ports on. |
+| `RAPTOR_ENV` | `development` | Set to `production` to enable fail-fast startup validation for unsafe lab defaults. |
+| `RAPTOR_PROCESS_ROLE` | `all` | Use `api` for the web process and `worker` for the background job process in production. |
 | `RAPTOR_API_KEY` | `change_me_raptor_api_key` in `.env.example` | Enables service API-key authentication when non-empty. |
 | `RAPTOR_AUTH_EXEMPT_HEALTH` | `true` | Leaves `/api/v1/health` public when API-key auth is enabled. |
 | `RAPTOR_ALLOW_AUTH_DISABLED` | `false` | Allows protected API routes without auth only when explicitly set to `true` for local development. |
@@ -485,8 +487,12 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `MAX_UPLOAD_BYTES` | `10485760` | Maximum upload or pasted input size. |
 | `CORS_ALLOW_ORIGINS` | localhost frontend origins | Browser origins allowed by FastAPI CORS. |
 | `CORS_ALLOW_CREDENTIALS` | `true` | CORS credential behavior. |
+| `CSRF_TRUSTED_ORIGINS` | localhost frontend origins | Origins/Referers trusted for browser-session mutating API requests. |
+| `RAPTOR_DB_ENGINE` | `sqlite` | Runtime metadata database backend: `sqlite` for local development, `postgresql` for production. |
+| `RAPTOR_DATABASE_URL` | empty | PostgreSQL connection URL used when `RAPTOR_DB_ENGINE=postgresql`. |
 | `RAPTOR_DB_PATH` | `data/raptor.db` | SQLite runtime database path for local job state and investigation results. |
-| `EVIDENCE_ENCRYPTION_KEY` | empty | Base64 or raw key used to encrypt stored evidence bytes. Must be set for protected evidence storage. |
+| `RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS` | `false` | Must be set to `true` only when deliberately running SQLite in production. The production compose overlay uses PostgreSQL instead. |
+| `EVIDENCE_ENCRYPTION_KEY` | empty | Base64 or raw key used for AES-256-GCM evidence encryption. Must be set for production. |
 | `EVIDENCE_RETENTION_DAYS` | `90` | Retention window recorded for evidence metadata and operational cleanup. |
 | `RAG_AUTO_INDEX` | `false` | When explicitly enabled, attempts one-time Weaviate indexing if required collections are missing. Leave disabled on request-serving deployments and run indexing as an operational setup task. |
 | `RAG_LOCAL_FALLBACK_ENABLED` | `true` | Uses cached ATT&CK STIX and local report files when Weaviate or embeddings are unavailable. |
@@ -497,7 +503,7 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 
 Docker Compose overrides service URLs inside the backend container so it can reach `neo4j`, `weaviate`, `elasticsearch`, and `redis` by service name.
 
-Backend containers install from `backend/requirements.lock` for reproducible builds. Review and refresh that lock file deliberately after dependency scanning.
+Backend containers install from `backend/requirements.lock` for reproducible builds, pin the CPU Torch wheel path to avoid accidental CUDA payloads, and run `pip check` during image/CI dependency installation. CI also runs a PostgreSQL-backed runtime metadata integration test. Review and refresh that lock file deliberately after dependency scanning.
 
 ## Data
 
