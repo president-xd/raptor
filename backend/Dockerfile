@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY backend/requirements.txt /app/backend/requirements.txt
 COPY backend/requirements.lock /app/backend/requirements.lock
-RUN pip install --no-cache-dir -r /app/backend/requirements.lock
+RUN pip install --no-cache-dir -r /app/backend/requirements.lock \
+    && pip check
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin raptor
 
