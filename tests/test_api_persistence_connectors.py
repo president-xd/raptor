@@ -27,6 +27,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             "RAPTOR_REQUIRE_RBAC": app_main.RAPTOR_REQUIRE_RBAC,
             "RAPTOR_BOOTSTRAP_ADMIN_USERNAME": app_main.RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
             "RAPTOR_BOOTSTRAP_ADMIN_PASSWORD": app_main.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
+            "CORS_ALLOW_ORIGINS": app_main.CORS_ALLOW_ORIGINS,
             "EVIDENCE_ENCRYPTION_KEY": app_main.EVIDENCE_ENCRYPTION_KEY,
             "ELASTIC_POLL_ENABLED": app_main.ELASTIC_POLL_ENABLED,
             "ELASTIC_POLL_QUERY": app_main.ELASTIC_POLL_QUERY,
@@ -73,6 +74,47 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
 
         self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(allowed, "allowed")
+
+    def test_api_key_middleware_keeps_cors_headers_on_auth_challenge(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+        app_main.CORS_ALLOW_ORIGINS = ["http://ui.local"]
+
+        class FakeURL:
+            path = "/api/v1/investigations"
+
+        class FakeRequest:
+            method = "GET"
+            url = FakeURL()
+            headers = {"origin": "http://ui.local"}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        blocked = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+
+        self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(blocked.headers["access-control-allow-origin"], "http://ui.local")
+        self.assertEqual(blocked.headers["access-control-allow-credentials"], "true")
+
+    def test_api_key_middleware_allows_cors_preflight(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+
+        class FakeURL:
+            path = "/api/v1/investigations"
+
+        class FakeRequest:
+            method = "OPTIONS"
+            url = FakeURL()
+            headers = {"origin": "http://ui.local"}
+            cookies = {}
+
+        async def call_next(_request):
+            return "allowed"
+
+        allowed = asyncio.run(app_main.optional_api_key_auth(FakeRequest(), call_next))
+
         self.assertEqual(allowed, "allowed")
 
     def test_evidence_endpoint_lists_persisted_raw_upload_metadata(self):
@@ -345,6 +387,10 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             app_main.ensure_investigation_access(FakeRequest(), "case-owned", "viewer")
 
     def test_cisa_kev_connector_uses_file_cache_and_filters(self):
+        original_redis_get = app_main.redis_get_json
+        original_redis_set = app_main.redis_set_json
+        app_main.redis_get_json = lambda _key: None
+        app_main.redis_set_json = lambda *_args, **_kwargs: False
         app_main.CISA_KEV_CACHE_PATH.write_text(
             json.dumps(
                 {
@@ -384,7 +430,11 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        response = app_main.get_cisa_kev(None, query="gateway", limit=5)
+        try:
+            response = app_main.get_cisa_kev(None, query="gateway", limit=5)
+        finally:
+            app_main.redis_get_json = original_redis_get
+            app_main.redis_set_json = original_redis_set
 
         payload = response
         self.assertEqual(payload["count"], 1)
