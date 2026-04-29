@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: raptor-postgres
+    environment:
+      POSTGRES_DB: raptor
+      POSTGRES_USER: raptor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raptor -d raptor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   neo4j:
     ports: !reset []
     environment:
@@ -26,13 +45,89 @@ services:
 
   backend:
     ports: !reset []
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
+      - RAPTOR_ENV=production
+      - RAPTOR_PROCESS_ROLE=api
+      - RAPTOR_DB_ENGINE=postgresql
+      - RAPTOR_DATABASE_URL=postgresql://raptor:${POSTGRES_PASSWORD:?set_POSTGRES_PASSWORD}@postgres:5432/raptor
       - RAPTOR_ALLOW_AUTH_DISABLED=false
       - RAPTOR_REQUIRE_RBAC=true
+      - RAPTOR_SESSION_COOKIE_SECURE=true
       - RAPTOR_ALLOW_EXTERNAL_LLM=false
+      - RAPTOR_API_KEY=${RAPTOR_API_KEY:?set_RAPTOR_API_KEY}
+      - RAPTOR_BOOTSTRAP_ADMIN_PASSWORD=${RAPTOR_BOOTSTRAP_ADMIN_PASSWORD:?set_RAPTOR_BOOTSTRAP_ADMIN_PASSWORD}
+      - EVIDENCE_ENCRYPTION_KEY=${EVIDENCE_ENCRYPTION_KEY:?set_EVIDENCE_ENCRYPTION_KEY}
+      - CORS_ALLOW_ORIGINS=${RAPTOR_FRONTEND_ORIGIN:?set_RAPTOR_FRONTEND_ORIGIN}
+      - CSRF_TRUSTED_ORIGINS=${RAPTOR_FRONTEND_ORIGIN:?set_RAPTOR_FRONTEND_ORIGIN}
+      - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?set_NEO4J_PASSWORD}
+      - ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}@elasticsearch:9200
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: raptor-worker
+    env_file:
+      - .env
+    environment:
+      - RAPTOR_ENV=production
+      - RAPTOR_PROCESS_ROLE=worker
+      - RAPTOR_DB_ENGINE=postgresql
+      - RAPTOR_DATABASE_URL=postgresql://raptor:${POSTGRES_PASSWORD:?set_POSTGRES_PASSWORD}@postgres:5432/raptor
+      - RAPTOR_ALLOW_AUTH_DISABLED=false
+      - RAPTOR_REQUIRE_RBAC=true
+      - RAPTOR_SESSION_COOKIE_SECURE=true
+      - RAPTOR_ALLOW_EXTERNAL_LLM=false
+      - RAPTOR_API_KEY=${RAPTOR_API_KEY:?set_RAPTOR_API_KEY}
+      - RAPTOR_BOOTSTRAP_ADMIN_PASSWORD=${RAPTOR_BOOTSTRAP_ADMIN_PASSWORD:?set_RAPTOR_BOOTSTRAP_ADMIN_PASSWORD}
+      - EVIDENCE_ENCRYPTION_KEY=${EVIDENCE_ENCRYPTION_KEY:?set_EVIDENCE_ENCRYPTION_KEY}
+      - CORS_ALLOW_ORIGINS=${RAPTOR_FRONTEND_ORIGIN:?set_RAPTOR_FRONTEND_ORIGIN}
+      - CSRF_TRUSTED_ORIGINS=${RAPTOR_FRONTEND_ORIGIN:?set_RAPTOR_FRONTEND_ORIGIN}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?set_NEO4J_PASSWORD}
+      - WEAVIATE_URL=http://weaviate:8080
+      - WEAVIATE_GRPC_URL=weaviate:50051
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
       - ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}@elasticsearch:9200
+      - REDIS_URL=redis://redis:6379
+    command: ["python", "worker.py"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
 
   frontend:
     ports: !reset []
     read_only: true
+
+volumes:
+  postgres_data:
