@@ -22,7 +22,8 @@
 |---|---|
 | Unauthorized case access | RBAC, tenant metadata, case ownership metadata, API/session enforcement |
 | Session theft | HttpOnly cookies, server-side session store, revocation, secure-cookie production setting |
-| Evidence disclosure | Evidence encryption, retention metadata, runtime artifact ignores, production backup controls |
+| Browser CSRF against session-authenticated users | Trusted Origin/Referer enforcement on mutating API routes |
+| Evidence disclosure | AES-256-GCM evidence encryption, retention metadata, runtime artifact ignores, production backup controls |
 | Prompt or telemetry leakage | External LLM disabled by default, telemetry redaction before prompts |
 | Generated graph-query abuse | Allowlisted deterministic graph queries, regex sanitizer retained only as defense-in-depth utility |
 | Audit tampering | Append-only triggers plus hash chaining |
@@ -32,6 +33,5 @@
 ## Residual Risks
 
 - SQLite is still a single-node embedded database. Use a managed relational database adapter before horizontally scaling backend workers.
-- Evidence encryption is application-managed. Use KMS-backed object storage for regulated environments.
+- Evidence encryption is application-managed. Use KMS-backed object storage for regulated environments and centralized key rotation.
 - Local bootstrap users are suitable for controlled deployments; large enterprises should integrate SSO/OIDC at the ingress or API layer.
-
