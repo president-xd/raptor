@@ -52,6 +52,12 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 REDIS_CACHE_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "3600"))
 
 # ─── API ──────────────────────────────────────────────────────────────
+RAPTOR_ENV = os.getenv("RAPTOR_ENV", "development").lower()
+RAPTOR_PRODUCTION = RAPTOR_ENV in {"production", "prod"}
+RAPTOR_PROCESS_ROLE = os.getenv("RAPTOR_PROCESS_ROLE", "all").lower()
+RAPTOR_DB_ENGINE = os.getenv("RAPTOR_DB_ENGINE", "sqlite").lower()
+RAPTOR_DATABASE_URL = os.getenv("RAPTOR_DATABASE_URL", "")
+RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS = os.getenv("RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS", "false").lower() == "true"
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 RAPTOR_API_KEY = os.getenv("RAPTOR_API_KEY", "")
@@ -73,6 +79,11 @@ CORS_ALLOW_ORIGINS = [
   if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+CSRF_TRUSTED_ORIGINS = [
+  origin.strip()
+  for origin in os.getenv("CSRF_TRUSTED_ORIGINS", ",".join(CORS_ALLOW_ORIGINS)).split(",")
+  if origin.strip()
+]
 
 # ─── RAG Configuration ───────────────────────────────────────────────
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
@@ -227,3 +238,50 @@ Graph Summary:
 {graph_summary}
 
 Write the report in markdown format. Be specific and cite evidence."""
+
+
+def _is_placeholder(value: str) -> bool:
+    lowered = str(value or "").lower()
+    return not lowered or lowered.startswith("change_me") or "placeholder" in lowered
+
+
+def validate_startup_config() -> None:
+    """Fail fast when production mode is requested with unsafe lab defaults."""
+    if RAPTOR_PROCESS_ROLE not in {"api", "worker", "all"}:
+        raise RuntimeError("RAPTOR_PROCESS_ROLE must be one of: api, worker, all")
+    if RAPTOR_DB_ENGINE not in {"sqlite", "postgresql"}:
+        raise RuntimeError("RAPTOR_DB_ENGINE must be one of: sqlite, postgresql")
+
+    if not RAPTOR_PRODUCTION:
+        return
+
+    failures = []
+    if RAPTOR_DB_ENGINE == "postgresql" and _is_placeholder(RAPTOR_DATABASE_URL):
+        failures.append("RAPTOR_DATABASE_URL must be set when RAPTOR_DB_ENGINE=postgresql")
+    if RAPTOR_DB_ENGINE == "sqlite" and not RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS:
+        failures.append(
+            "SQLite is a single-node runtime store; set RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS=true "
+            "only for a deliberately single-node production deployment"
+        )
+    if _is_placeholder(RAPTOR_API_KEY):
+        failures.append("RAPTOR_API_KEY must be set to a non-placeholder secret")
+    if RAPTOR_ALLOW_AUTH_DISABLED:
+        failures.append("RAPTOR_ALLOW_AUTH_DISABLED must be false")
+    if not RAPTOR_REQUIRE_RBAC:
+        failures.append("RAPTOR_REQUIRE_RBAC must be true")
+    if not RAPTOR_SESSION_COOKIE_SECURE:
+        failures.append("RAPTOR_SESSION_COOKIE_SECURE must be true behind TLS")
+    if _is_placeholder(RAPTOR_BOOTSTRAP_ADMIN_PASSWORD):
+        failures.append("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD must be set to a non-placeholder secret")
+    if _is_placeholder(EVIDENCE_ENCRYPTION_KEY):
+        failures.append("EVIDENCE_ENCRYPTION_KEY must be set to a non-placeholder 32-byte/base64 key")
+    if _is_placeholder(NEO4J_PASSWORD):
+        failures.append("NEO4J_PASSWORD must be set to a non-placeholder secret")
+    if "localhost" in ",".join(CORS_ALLOW_ORIGINS) or "127.0.0.1" in ",".join(CORS_ALLOW_ORIGINS):
+        failures.append("CORS_ALLOW_ORIGINS must be set to production frontend origins")
+    if RAPTOR_PROCESS_ROLE == "all":
+        failures.append("RAPTOR_PROCESS_ROLE=all is for local development; use separate api and worker processes")
+
+    if failures:
+        joined = "; ".join(failures)
+        raise RuntimeError(f"Unsafe RAPTOR production configuration: {joined}")
