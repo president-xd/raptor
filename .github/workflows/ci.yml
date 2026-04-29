@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock
+          pip install pytest
+          pip check
+
+      - name: Run backend tests
+        run: pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run e2e
+
+      - name: Validate production compose overlay
+        env:
+          RAPTOR_API_KEY: ci_raptor_api_key_with_enough_entropy
+          RAPTOR_BOOTSTRAP_ADMIN_PASSWORD: ci_bootstrap_admin_password_with_enough_entropy
+          EVIDENCE_ENCRYPTION_KEY: ci_evidence_key_with_enough_entropy_32_bytes
+          NEO4J_PASSWORD: ci_neo4j_password_with_enough_entropy
+          WEAVIATE_API_KEY: ci_weaviate_api_key_with_enough_entropy
+          ELASTIC_PASSWORD: ci_elastic_password_with_enough_entropy
+          POSTGRES_PASSWORD: ci_postgres_password_with_enough_entropy
+          RAPTOR_FRONTEND_ORIGIN: https://raptor.example.invalid
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: raptor
+          POSTGRES_USER: raptor
+          POSTGRES_PASSWORD: raptor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U raptor -d raptor"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock
+          pip install pytest
+          pip check
+
+      - name: Run PostgreSQL runtime metadata integration test
+        env:
+          RAPTOR_DB_ENGINE: postgresql
+          RAPTOR_DATABASE_URL: postgresql://raptor:raptor@localhost:5432/raptor
+          RAPTOR_API_KEY: ci_raptor_api_key_with_enough_entropy
+          RAPTOR_ALLOW_AUTH_DISABLED: "false"
+          RAPTOR_BOOTSTRAP_ADMIN_PASSWORD: ci_bootstrap_admin_password_with_enough_entropy
+          EVIDENCE_ENCRYPTION_KEY: ci_evidence_key_with_enough_entropy_32_bytes
+          NEO4J_PASSWORD: ci_neo4j_password_with_enough_entropy
+          CORS_ALLOW_ORIGINS: http://localhost:3100
+        run: pytest -q tests/test_postgres_runtime_integration.py
