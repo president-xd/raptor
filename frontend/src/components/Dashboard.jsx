@@ -2471,7 +2471,7 @@ function healthRows(health, healthError) {
     return [{ name: 'RAPTOR API', status: 'degraded', detail: healthError, online: false }];
   }
   const subsystems = health?.subsystems || {};
-  const names = ['api', 'auth', 'sqlite', 'evidence', 'neo4j', 'weaviate', 'elasticsearch', 'redis', 'cisa_kev', 'llm'];
+  const names = ['api', 'auth', 'database', 'evidence', 'neo4j', 'weaviate', 'elasticsearch', 'redis', 'cisa_kev', 'llm'];
   return names.map((name) => {
     const entry = subsystems[name] || { status: 'unknown', detail: 'not checked' };
     return {
