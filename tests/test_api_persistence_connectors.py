@@ -10,6 +10,7 @@ from starlette.responses import Response
 
 from helpers import BACKEND_DIR  # noqa: F401
 from models import AuthSessionRequest
+import config as app_config
 import main as app_main
 
 
@@ -103,10 +104,51 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         stored_bytes = Path(summary["stored_path"]).read_bytes()
         self.assertTrue(summary["encrypted"])
         self.assertNotEqual(stored_bytes, content)
+        self.assertEqual(app_main.decrypt_evidence(stored_bytes), content)
+        self.assertIn("aes-256-gcm", summary["encryption_key_id"])
         self.assertEqual(summary["sha256"], app_main.hashlib.sha256(content).hexdigest())
         self.assertTrue(summary["retention_expires_at"])
 
+    def test_csrf_guard_blocks_untrusted_browser_session_mutation(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+
+        class FakeURL:
+            path = "/api/v1/investigate/text"
+
+        class FakeRequest:
+            method = "POST"
+            url = FakeURL()
+            headers = {"origin": "https://evil.example"}
+            cookies = {"raptor_session": "session-token"}
+
+        async def call_next(_request):
+            return "allowed"
+
+        blocked = asyncio.run(app_main.csrf_guard(FakeRequest(), call_next))
+
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_csrf_guard_allows_api_key_service_mutation(self):
+        app_main.RAPTOR_API_KEY = "test-secret"
+
+        class FakeURL:
+            path = "/api/v1/investigate/text"
+
+        class FakeRequest:
+            method = "POST"
+            url = FakeURL()
+            headers = {"authorization": "Bearer test-secret"}
+            cookies = {"raptor_session": "session-token"}
+
+        async def call_next(_request):
+            return "allowed"
+
+        allowed = asyncio.run(app_main.csrf_guard(FakeRequest(), call_next))
+
+        self.assertEqual(allowed, "allowed")
+
     def test_audit_log_endpoint_returns_structured_details(self):
+        app_main.db_create("case-1", {"case_name": "Case One", "source": "test"}, input_bytes=1)
         app_main.audit_log(None, "query.asked", "case-1", {"question": "Which hosts?"})
 
         response = asyncio.run(app_main.get_audit_log(None, investigation_id="case-1"))
@@ -115,6 +157,95 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         self.assertGreaterEqual(payload["total_count"], 1)
         self.assertEqual(payload["entries"][0]["action"], "query.asked")
         self.assertEqual(payload["entries"][0]["detail"]["question"], "Which hosts?")
+
+    def test_global_audit_log_requires_admin_role(self):
+        class State:
+            principal = app_main._principal("viewer", ["viewer"], "default", "viewer-1")
+
+        class FakeRequest:
+            state = State()
+
+        with self.assertRaises(HTTPException):
+            asyncio.run(app_main.get_audit_log(FakeRequest()))
+
+    def test_sensitive_connector_mutations_require_analyst_role(self):
+        class State:
+            principal = app_main._principal("viewer", ["viewer"], "default", "viewer-1")
+
+        class FakeRequest:
+            state = State()
+
+        with self.assertRaises(HTTPException):
+            app_main.sync_cisa_kev(FakeRequest())
+        with self.assertRaises(HTTPException):
+            app_main.poll_elasticsearch(FakeRequest(), app_main.ElasticPollRequest(query="*"))
+
+    def test_elasticsearch_poll_endpoint_scopes_created_case_to_actor(self):
+        class State:
+            principal = app_main._principal("analyst", ["analyst"], "tenant-a", "user-a")
+
+        class FakeRequest:
+            state = State()
+
+        captured = {}
+        original_poll = app_main.run_elasticsearch_poll_once
+        app_main.run_elasticsearch_poll_once = lambda **kwargs: captured.update(kwargs) or app_main.ElasticPollResponse(
+            status="no_events",
+            message="none",
+            event_bytes=0,
+        )
+        try:
+            app_main.poll_elasticsearch(FakeRequest(), app_main.ElasticPollRequest(query="powershell"))
+        finally:
+            app_main.run_elasticsearch_poll_once = original_poll
+
+        self.assertEqual(captured["owner_id"], "user-a")
+        self.assertEqual(captured["tenant_id"], "tenant-a")
+
+    def test_production_startup_requires_sqlite_limit_acknowledgement(self):
+        originals = {
+            "RAPTOR_PRODUCTION": app_config.RAPTOR_PRODUCTION,
+            "RAPTOR_PROCESS_ROLE": app_config.RAPTOR_PROCESS_ROLE,
+            "RAPTOR_DB_ENGINE": app_config.RAPTOR_DB_ENGINE,
+            "RAPTOR_DATABASE_URL": app_config.RAPTOR_DATABASE_URL,
+            "RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS": app_config.RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS,
+            "RAPTOR_API_KEY": app_config.RAPTOR_API_KEY,
+            "RAPTOR_ALLOW_AUTH_DISABLED": app_config.RAPTOR_ALLOW_AUTH_DISABLED,
+            "RAPTOR_REQUIRE_RBAC": app_config.RAPTOR_REQUIRE_RBAC,
+            "RAPTOR_SESSION_COOKIE_SECURE": app_config.RAPTOR_SESSION_COOKIE_SECURE,
+            "RAPTOR_BOOTSTRAP_ADMIN_PASSWORD": app_config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
+            "EVIDENCE_ENCRYPTION_KEY": app_config.EVIDENCE_ENCRYPTION_KEY,
+            "NEO4J_PASSWORD": app_config.NEO4J_PASSWORD,
+            "CORS_ALLOW_ORIGINS": app_config.CORS_ALLOW_ORIGINS,
+        }
+        try:
+            app_config.RAPTOR_PRODUCTION = True
+            app_config.RAPTOR_PROCESS_ROLE = "api"
+            app_config.RAPTOR_DB_ENGINE = "sqlite"
+            app_config.RAPTOR_DATABASE_URL = ""
+            app_config.RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS = False
+            app_config.RAPTOR_API_KEY = "production-api-key"
+            app_config.RAPTOR_ALLOW_AUTH_DISABLED = False
+            app_config.RAPTOR_REQUIRE_RBAC = True
+            app_config.RAPTOR_SESSION_COOKIE_SECURE = True
+            app_config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = "production-admin-password"
+            app_config.EVIDENCE_ENCRYPTION_KEY = "production-evidence-key"
+            app_config.NEO4J_PASSWORD = "production-neo4j-password"
+            app_config.CORS_ALLOW_ORIGINS = ["https://raptor.example.com"]
+
+            with self.assertRaisesRegex(RuntimeError, "SQLite is a single-node runtime store"):
+                app_config.validate_startup_config()
+
+            app_config.RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS = True
+            app_config.validate_startup_config()
+
+            app_config.RAPTOR_DB_ENGINE = "postgresql"
+            app_config.RAPTOR_DATABASE_URL = "postgresql://raptor:secret@postgres:5432/raptor"
+            app_config.RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS = False
+            app_config.validate_startup_config()
+        finally:
+            for name, value in originals.items():
+                setattr(app_config, name, value)
 
     def test_audit_actor_ignores_spoofable_identity_headers(self):
         app_main.RAPTOR_API_KEY = "test-secret"
