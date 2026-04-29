@@ -25,7 +25,10 @@ Use `EVIDENCE_RETENTION_DAYS` for evidence retention metadata. Deletion jobs sho
 3. Delete evidence blobs.
 4. Preserve deletion audit entries.
 
+## Evidence Encryption
+
+Uploaded evidence is encrypted locally when `EVIDENCE_ENCRYPTION_KEY` is configured. Production mode refuses to start without this key. Prefer a 32-byte base64 value prefixed with `base64:` and source it from a secrets manager. Regulated deployments should move evidence to object storage and use KMS-backed envelope encryption.
+
 ## Audit
 
 Audit entries are append-only at the database level and include a hash chain. Export audit records to immutable storage for compliance programs that require independent tamper evidence.
-
