@@ -105,6 +105,12 @@ stop_existing_apps() {
   pkill -f "npm run dev" >/dev/null 2>&1 || true
 }
 
+stop_docker_app_containers() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker info >/dev/null 2>&1 || return 0
+  docker stop raptor-frontend raptor-backend >/dev/null 2>&1 || true
+}
+
 start_detached() {
   local log_path=$1
   local workdir=$2
@@ -154,18 +160,56 @@ fi
 
 echo "[3/6] Checking Backend Python dependencies..."
 cd "$ROOT_DIR/backend"
-if ! python3 -c "import fastapi, uvicorn, openai, neo4j, weaviate, elasticsearch, loguru" >/dev/null 2>&1; then
+if ! python3 - <<'PY'
+import re
+import sys
+from importlib.metadata import PackageNotFoundError, distribution
+
+try:
+    from packaging.requirements import Requirement
+except Exception:
+    Requirement = None
+
+missing = []
+with open("requirements.txt", encoding="utf-8") as requirements:
+    for raw in requirements:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        requirement = None
+        if Requirement is not None:
+            try:
+                requirement = Requirement(line)
+                name = requirement.name
+            except Exception:
+                name = re.split(r"[<>=;\s\[]", line, 1)[0]
+        else:
+            name = re.split(r"[<>=;\s\[]", line, 1)[0]
+        if not name:
+            continue
+        try:
+            installed = distribution(name)
+        except PackageNotFoundError:
+            missing.append(name)
+            continue
+        if requirement is not None and requirement.specifier and installed.version not in requirement.specifier:
+            missing.append(f"{name} {installed.version} does not satisfy {requirement.specifier}")
+
+if missing:
+    print("Missing Python packages: " + ", ".join(sorted(set(missing))))
+    sys.exit(1)
+PY
+then
   python3 -m pip install -r requirements.txt
 fi
 
-echo "[4/6] Checking Frontend dependencies..."
+echo "[4/6] Installing Frontend dependencies..."
 cd "$ROOT_DIR/frontend"
-if [ ! -d node_modules ]; then
-  npm install
-fi
+npm install
 
 echo "[5/6] Starting Backend API (FastAPI on :$API_PORT)..."
 stop_existing_apps
+stop_docker_app_containers
 start_detached "$BACKEND_LOG" "$ROOT_DIR/backend" python3 -m uvicorn main:app --host 0.0.0.0 --port "$API_PORT"
 wait_for_http "Backend API" "http://localhost:$API_PORT/api/v1/health" "$BACKEND_LOG"
 
