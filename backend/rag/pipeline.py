@@ -19,6 +19,7 @@ from config import (
     LOG_ANALYSIS_SYSTEM_PROMPT, RAG_RERANK_K,
 )
 from schema import RaptorEvent, Finding, AnalysisResult
+from attribution.attack_catalog import get_technique_metadata
 from rag.retriever import HybridRetriever
 from rag.reranker import rerank_technique_results, rerank_report_results
 
@@ -162,8 +163,9 @@ def build_augmented_prompt(events: List[RaptorEvent], context: Dict[str, List[Di
     # Format retrieved ATT&CK context (cap description at 120 chars)
     technique_context = []
     for t in context.get("techniques", []):
+        tactic_text = ", ".join(t.get("tactics") or [t.get("kill_chain_phase", "")])
         technique_context.append(
-            f"- {t.get('technique_id', '')}: {t.get('name', '')} ({t.get('kill_chain_phase', '')})"
+            f"- {t.get('technique_id', '')}: {t.get('name', '')} ({tactic_text})"
             f" — {t.get('description', '')[:120]}"
         )
 
@@ -202,33 +204,26 @@ def redact_sensitive_text(value: str) -> str:
 
 
 def _phase_for_technique(technique_id: str) -> str:
-    """Best-effort ATT&CK tactic mapping for local fallback analysis."""
-    mapping = {
-        "T1566": "initial-access",
-        "T1059": "execution",
-        "T1105": "c2",
-        "T1071": "c2",
-        "T1547": "persistence",
-        "T1053": "persistence",
-        "T1543": "persistence",
-        "T1003": "credential-access",
-        "T1558": "credential-access",
-        "T1087": "discovery",
-        "T1082": "discovery",
-        "T1018": "discovery",
-        "T1069": "discovery",
-        "T1021": "lateral-movement",
-        "T1047": "lateral-movement",
-        "T1560": "collection",
-        "T1048": "exfiltration",
-        "T1041": "exfiltration",
-        "T1070": "defense-evasion",
-        "T1036": "defense-evasion",
-        "T1027": "defense-evasion",
-        "T1486": "impact",
-    }
-    base = technique_id.split(".")[0]
-    return mapping.get(base, "unknown")
+    """Canonical ATT&CK tactic for local fallback analysis."""
+    metadata = get_technique_metadata(technique_id)
+    if not metadata:
+        return "unknown"
+    tactics = metadata.get("tactics") or []
+    return tactics[0] if tactics else "unknown"
+
+
+def _tactics_for_technique(technique_id: str) -> List[str]:
+    metadata = get_technique_metadata(technique_id)
+    if not metadata:
+        return []
+    return list(metadata.get("tactics") or [])
+
+
+def _name_for_technique(technique_id: str, fallback: str = "") -> str:
+    metadata = get_technique_metadata(technique_id)
+    if metadata and metadata.get("name"):
+        return metadata["name"]
+    return fallback or technique_id
 
 
 def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -> AnalysisResult:
@@ -247,13 +242,15 @@ def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -
                 attack_sequence.append(technique_id)
 
             signature = SIGMA_SIGNATURES.get(technique_id, {})
+            tactics = _tactics_for_technique(technique_id)
             finding = findings_by_tid.get(technique_id)
             if not finding:
                 findings_by_tid[technique_id] = Finding(
                     event_ids=[],
                     technique_id=technique_id,
-                    technique_name=signature.get("name", technique_id),
-                    kill_chain_phase=_phase_for_technique(technique_id),
+                    technique_name=_name_for_technique(technique_id, signature.get("name", technique_id)),
+                    tactics=tactics,
+                    kill_chain_phase=tactics[0] if tactics else _phase_for_technique(technique_id),
                     confidence="high" if event.ioc_score >= 0.5 else "medium",
                     evidence_summary=f"Matched local detection signatures in {event.event_type} telemetry.",
                     apt_indicators=[],
@@ -378,6 +375,7 @@ def parse_llm_response(response: str) -> AnalysisResult:
             event_ids=f.get("event_ids", []),
             technique_id=f.get("technique_id", ""),
             technique_name=f.get("technique_name", ""),
+            tactics=f.get("tactics", []),
             kill_chain_phase=f.get("kill_chain_phase", ""),
             confidence=f.get("confidence", "low"),
             evidence_summary=f.get("evidence_summary", ""),

@@ -88,6 +88,7 @@ from models import (
     PrincipalResponse,
     AuditEntry, AuditLogResponse,
     CisaKevVulnerability, CisaKevResponse,
+    MitreMatrixResponse,
     ElasticPollRequest, ElasticPollResponse, ElasticPollStatus,
 )
 
@@ -2195,6 +2196,11 @@ async def get_report(request: Request, investigation_id: str):
     if record.get("findings_json"):
         for f in json.loads(record["findings_json"]):
             findings.append(Finding(**f))
+    try:
+        from attribution.attack_catalog import canonicalize_findings
+        findings = canonicalize_findings(findings)
+    except Exception as e:
+        logger.warning(f"Could not canonicalize report findings for {investigation_id}: {e}")
 
     attribution = []
     if record.get("attribution_json"):
@@ -2330,21 +2336,61 @@ def simulate(request: Request, payload: SimulateRequest):
 
 
 @app.get("/api/v1/apt/profiles", response_model=APTProfileListResponse)
-def get_apt_profiles(request: Request):
+def get_apt_profiles(request: Request, include_techniques: bool = False):
     """
     List all APT group profiles with TTP counts.
     GET /api/v1/apt/profiles
+    Optional: include_techniques=true to include full technique arrays.
     """
     from attribution.apt_profiles import load_apt_profiles, get_profile_summaries
     require_role(request, "viewer")
     profiles = load_apt_profiles()
-    summaries = get_profile_summaries(profiles)
+    summaries = get_profile_summaries(profiles, include_techniques=include_techniques)
     audit_log(request, "apt_profiles.listed", None, {"count": len(summaries)})
 
     return APTProfileListResponse(
         profiles=[APTProfileSummary(**s) for s in summaries],
         total_count=len(summaries),
     )
+
+
+@app.get("/api/v1/apt/profiles/{apt_name}", response_model=APTProfileSummary)
+def get_apt_profile(request: Request, apt_name: str):
+    """
+    Get a single APT profile with full techniques.
+    GET /api/v1/apt/profiles/{apt_name}
+    """
+    from attribution.apt_profiles import load_apt_profiles, get_profile_summary
+    require_role(request, "viewer")
+    profiles = load_apt_profiles()
+    profile = profiles.get(apt_name)
+    if not profile:
+        raise HTTPException(status_code=404, detail="APT profile not found")
+    return APTProfileSummary(**get_profile_summary(apt_name, profile, include_techniques=True))
+
+
+@app.get("/api/v1/mitre/matrix", response_model=MitreMatrixResponse)
+def get_mitre_matrix(request: Request, investigation_id: Optional[str] = None):
+    """Return the canonical Enterprise ATT&CK matrix with optional investigation overlays."""
+    require_role(request, "viewer")
+    findings = []
+    if investigation_id:
+        record = ensure_investigation_access(request, investigation_id, "viewer")
+        for item in json.loads(record.get("findings_json") or "[]"):
+            findings.append(Finding(**item))
+
+    from attribution.attack_catalog import build_matrix
+    matrix = build_matrix(findings)
+    audit_log(
+        request,
+        "mitre_matrix.viewed",
+        investigation_id,
+        {
+            "observed_count": matrix.get("observed_count", 0),
+            "active_technique_count": matrix.get("source", {}).get("active_technique_count", 0),
+        },
+    )
+    return MitreMatrixResponse(**matrix)
 
 
 @app.post("/api/v1/query", response_model=QueryResponse)

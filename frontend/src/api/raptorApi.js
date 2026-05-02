@@ -93,6 +93,11 @@ export function getInvestigationGraph(investigationId) {
   return request(`/investigate/${encodeURIComponent(investigationId)}/graph`);
 }
 
+export function getMitreMatrix(investigationId = '') {
+  const query = investigationId ? `?investigation_id=${encodeURIComponent(investigationId)}` : '';
+  return request(`/mitre/matrix${query}`, { timeoutMs: 60000 });
+}
+
 export function getInvestigationEvidence(investigationId) {
   return request(`/investigate/${encodeURIComponent(investigationId)}/evidence`);
 }
@@ -132,8 +137,15 @@ export function askInvestigationQuestion(payload) {
   });
 }
 
-export function listAptProfiles() {
-  return request('/apt/profiles', { timeoutMs: 60000 });
+export function listAptProfiles({ includeTechniques = false } = {}) {
+  const params = new URLSearchParams();
+  if (includeTechniques) params.set('include_techniques', 'true');
+  const query = params.toString();
+  return request(`/apt/profiles${query ? `?${query}` : ''}`, { timeoutMs: 60000 });
+}
+
+export function getAptProfile(name) {
+  return request(`/apt/profiles/${encodeURIComponent(name)}`, { timeoutMs: 60000 });
 }
 
 export function getDetailedHealth() {

@@ -66,6 +66,35 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/investigate/case-e2e-1/evidence', (route) => route.fulfill({
     json: { investigation_id: 'case-e2e-1', evidence: [], total_count: 0 },
   }));
+  await page.route('**/api/v1/mitre/matrix**', (route) => route.fulfill({
+    json: {
+      source: {
+        active_technique_count: 1,
+        cache_sha256: 'abcdef1234567890',
+        latest_object_modified: '2026-04-29T00:00:00Z',
+      },
+      tactic_order: ['initial-access'],
+      observed_count: 1,
+      matrix: [
+        {
+          tactic: 'initial-access',
+          techniques: [
+            {
+              technique_id: 'T1078',
+              name: 'Valid Accounts',
+              description: 'Adversaries may obtain and abuse credentials.',
+              tactics: ['initial-access', 'persistence'],
+              platforms: ['Windows'],
+              observed: true,
+              confidence: 'high',
+              evidence_summary: 'Observed valid account abuse.',
+              url: 'https://attack.mitre.org/techniques/T1078/',
+            },
+          ],
+        },
+      ],
+    },
+  }));
   await page.route('**/api/v1/threat-feeds/cisa-kev**', (route) => route.fulfill({
     json: {
       title: 'Known Exploited Vulnerabilities Catalog',
@@ -104,4 +133,8 @@ test('loads the SOC console and navigates core production surfaces', async ({ pa
   await page.getByRole('button', { name: /Subsystems/i }).click();
   await expect(page.getByText('Backend Subsystems')).toBeVisible();
   await expect(page.getByRole('main').getByText('Database')).toBeVisible();
+
+  await page.getByRole('button', { name: /MITRE ATT&CK/i }).click();
+  await expect(page.getByText('Enterprise ATT&CK')).toBeVisible();
+  await expect(page.getByRole('button', { name: /T1078 Valid Accounts/i })).toBeVisible();
 });

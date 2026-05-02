@@ -45,6 +45,7 @@ class Finding(BaseModel):
     event_ids: List[str] = Field(default_factory=list)
     technique_id: str = ""
     technique_name: str = ""
+    tactics: List[str] = Field(default_factory=list)
     kill_chain_phase: str = ""
     confidence: str = "low"  # high | medium | low
     evidence_summary: str = ""

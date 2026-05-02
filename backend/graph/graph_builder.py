@@ -128,6 +128,7 @@ class GraphBuilder:
                     "id": finding.technique_id,
                     "name": finding.technique_name,
                     "tactic": finding.kill_chain_phase,
+                    "tactics": finding.tactics or ([finding.kill_chain_phase] if finding.kill_chain_phase else []),
                     "kill_chain_phase": finding.kill_chain_phase,
                 })
         return techniques
@@ -171,10 +172,12 @@ class GraphBuilder:
             self.neo4j.run_write(
                 """MERGE (t:Technique {id: $id, investigation_id: $inv_id})
                 SET t.name = $name, t.tactic = $tactic,
+                    t.tactics = $tactics,
                     t.kill_chain_phase = $phase""",
                 {
                     "id": tech["id"], "name": tech["name"],
                     "tactic": tech.get("tactic", ""),
+                    "tactics": tech.get("tactics", []),
                     "phase": tech.get("kill_chain_phase", ""),
                     "inv_id": self.investigation_id,
                 }
@@ -327,7 +330,7 @@ class GraphBuilder:
                 id=node_id, label=f"{tech['id']}\n{tech['name']}", node_type="technique",
                 color=colors["technique"], size=12,
                 x=self._stable_position(node_id, "x"), y=self._stable_position(node_id, "y"),
-                metadata={"tactic": tech.get("tactic", ""), "phase": tech.get("kill_chain_phase", "")},
+                metadata={"tactic": tech.get("tactic", ""), "tactics": tech.get("tactics", []), "phase": tech.get("kill_chain_phase", "")},
             ))
             node_map[tech['id']] = node_id
 

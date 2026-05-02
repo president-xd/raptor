@@ -138,7 +138,11 @@ EVIDENCE_DIR.mkdir(exist_ok=True)
 INTEL_DIR.mkdir(exist_ok=True)
 
 # ─── ATT&CK STIX Source ──────────────────────────────────────────────
-ATTACK_STIX_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
+ATTACK_STIX_URL = os.getenv(
+    "ATTACK_STIX_URL",
+    "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json",
+)
+ATTACK_STIX_SHA256 = os.getenv("ATTACK_STIX_SHA256", "")
 CISA_KEV_URL = os.getenv(
     "CISA_KEV_URL",
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
@@ -160,7 +164,8 @@ Output schema:
       "event_ids": ["uuid", ...],
       "technique_id": "T1XXX.YYY",
       "technique_name": "string",
-      "kill_chain_phase": "recon|resource-dev|initial-access|execution|persistence|privilege-esc|defense-evasion|credential-access|discovery|lateral-movement|collection|c2|exfiltration|impact",
+      "tactics": ["reconnaissance|resource-development|initial-access|execution|persistence|privilege-escalation|defense-evasion|credential-access|discovery|lateral-movement|collection|command-and-control|exfiltration|impact"],
+      "kill_chain_phase": "primary tactic from tactics",
       "confidence": "high|medium|low",
       "evidence_summary": "string (max 100 words)",
       "apt_indicators": ["string", ...]

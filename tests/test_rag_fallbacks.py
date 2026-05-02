@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from helpers import BACKEND_DIR  # noqa: F401
+from attribution import attack_catalog
 from rag import pipeline, reranker, retriever
 
 
@@ -86,12 +87,12 @@ class RagFallbackTests(unittest.TestCase):
     def test_local_retriever_returns_attack_context_without_weaviate(self):
         with tempfile.TemporaryDirectory() as tmp:
             original_corpus = retriever._LOCAL_CORPUS
-            original_stix_dir = retriever.STIX_DIR
+            original_stix_dir = attack_catalog.STIX_DIR
             try:
                 retriever._LOCAL_CORPUS = None
-                retriever.STIX_DIR = Path(tmp)
-                retriever.STIX_DIR.mkdir(parents=True, exist_ok=True)
-                (retriever.STIX_DIR / "enterprise-attack.json").write_text(
+                attack_catalog.STIX_DIR = Path(tmp)
+                attack_catalog.STIX_DIR.mkdir(parents=True, exist_ok=True)
+                (attack_catalog.STIX_DIR / "enterprise-attack.json").write_text(
                     """
                     {
                       "objects": [
@@ -100,7 +101,7 @@ class RagFallbackTests(unittest.TestCase):
                           "id": "attack-pattern--1",
                           "name": "Command and Scripting Interpreter",
                           "description": "Adversaries may abuse PowerShell for execution.",
-                          "kill_chain_phases": [{"phase_name": "execution"}],
+                          "kill_chain_phases": [{"kill_chain_name": "mitre-attack", "phase_name": "execution"}],
                           "external_references": [{"source_name": "mitre-attack", "external_id": "T1059"}]
                         }
                       ]
@@ -115,9 +116,10 @@ class RagFallbackTests(unittest.TestCase):
                 results = local.search_techniques("PowerShell execution", limit=3)
             finally:
                 retriever._LOCAL_CORPUS = original_corpus
-                retriever.STIX_DIR = original_stix_dir
+                attack_catalog.STIX_DIR = original_stix_dir
 
         self.assertEqual(results[0]["technique_id"], "T1059")
+        self.assertEqual(results[0]["tactics"], ["execution"])
         self.assertEqual(results[0]["_retrieval_backend"], "local-stix")
 
 

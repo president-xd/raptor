@@ -13,15 +13,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     APT_REPORTS_DIR,
-    ATTACK_STIX_URL,
     RAG_HYBRID_ALPHA,
     RAG_LOCAL_FALLBACK_ENABLED,
     RAG_RETRIEVAL_K,
-    STIX_DIR,
     WEAVIATE_API_KEY,
     WEAVIATE_GRPC_URL,
     WEAVIATE_URL,
 )
+from attribution.attack_catalog import is_active_attack_pattern, load_stix_bundle
 from rag.embeddings import embed_query
 
 
@@ -73,18 +72,7 @@ def _tokenize(text: str) -> set[str]:
 
 
 def _load_stix_bundle() -> dict:
-    cache_path = STIX_DIR / "enterprise-attack.json"
-    if cache_path.exists():
-        with open(cache_path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    import requests
-    response = requests.get(ATTACK_STIX_URL, timeout=120)
-    response.raise_for_status()
-    bundle = response.json()
-    STIX_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(bundle), encoding="utf-8")
-    return bundle
+    return load_stix_bundle()
 
 
 def _load_local_threat_reports(groups: list[dict]) -> list[dict]:
@@ -161,7 +149,7 @@ def _build_local_corpus() -> dict[str, list[dict]]:
     for obj in bundle.get("objects", []):
         if obj.get("type") == "intrusion-set":
             groups.append(obj)
-        if obj.get("type") != "attack-pattern" or obj.get("revoked") or obj.get("x_mitre_deprecated"):
+        if not is_active_attack_pattern(obj):
             continue
         technique_id = ""
         for ref in obj.get("external_references", []):
@@ -170,14 +158,19 @@ def _build_local_corpus() -> dict[str, list[dict]]:
                 break
         if not technique_id:
             continue
-        phase = ""
-        kill_chain = obj.get("kill_chain_phases", [])
-        if kill_chain:
-            phase = kill_chain[0].get("phase_name", "")
+        tactics = []
+        for phase_obj in obj.get("kill_chain_phases", []):
+            if phase_obj.get("kill_chain_name") != "mitre-attack":
+                continue
+            tactic = phase_obj.get("phase_name", "")
+            if tactic and tactic not in tactics:
+                tactics.append(tactic)
+        phase = tactics[0] if tactics else ""
         techniques.append({
             "technique_id": technique_id,
             "name": obj.get("name", ""),
             "description": obj.get("description", ""),
+            "tactics": tactics,
             "tactic": phase.replace("-", " ").title() if phase else "",
             "kill_chain_phase": phase,
             "detection": "",
@@ -268,7 +261,7 @@ class HybridRetriever:
     def search_techniques(self, query: str, limit: int = RAG_RETRIEVAL_K) -> List[Dict[str, Any]]:
         """Hybrid search in the Technique collection."""
         return self._hybrid_search("Technique", query, limit, [
-            "technique_id", "name", "description", "tactic", "kill_chain_phase", "detection"
+            "technique_id", "name", "description", "tactics", "tactic", "kill_chain_phase", "detection"
         ])
 
     def search_reports(self, query: str, limit: int = RAG_RETRIEVAL_K) -> List[Dict[str, Any]]:

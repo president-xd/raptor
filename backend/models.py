@@ -87,6 +87,35 @@ class InvestigationListResponse(BaseModel):
     total_count: int = 0
 
 
+class MitreTechniqueCell(BaseModel):
+    """Canonical ATT&CK matrix technique cell, optionally overlaid with investigation evidence."""
+    technique_id: str
+    name: str = ""
+    description: str = ""
+    tactics: List[str] = Field(default_factory=list)
+    kill_chain_phase: str = ""
+    platforms: List[str] = Field(default_factory=list)
+    is_subtechnique: bool = False
+    parent_technique_id: str = ""
+    url: str = ""
+    observed: bool = False
+    confidence: str = ""
+    evidence_summary: str = ""
+    event_ids: List[str] = Field(default_factory=list)
+
+
+class MitreTacticColumn(BaseModel):
+    tactic: str
+    techniques: List[MitreTechniqueCell] = Field(default_factory=list)
+
+
+class MitreMatrixResponse(BaseModel):
+    source: Dict[str, Any] = Field(default_factory=dict)
+    tactic_order: List[str] = Field(default_factory=list)
+    matrix: List[MitreTacticColumn] = Field(default_factory=list)
+    observed_count: int = 0
+
+
 class EvidenceFileSummary(BaseModel):
     """Stored raw evidence metadata."""
     id: int = 0

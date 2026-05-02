@@ -4,7 +4,7 @@ Indexes ATT&CK STIX objects and threat reports into Weaviate.
 Classes: Technique, ThreatReport, Vulnerability (per spec Section 3.3).
 """
 import json
-import requests
+import uuid
 from typing import List, Dict, Optional
 from loguru import logger
 
@@ -15,12 +15,11 @@ from config import (
     WEAVIATE_API_KEY,
     WEAVIATE_URL,
     WEAVIATE_GRPC_URL,
-    ATTACK_STIX_URL,
-    STIX_DIR,
     RAG_CHUNK_SIZE,
     RAG_CHUNK_OVERLAP,
 )
-from rag.embeddings import embed_document, get_embedding_dimension
+from attribution.attack_catalog import is_active_attack_pattern, load_stix_bundle
+from rag.embeddings import embed_document
 
 
 def _split_host_port(endpoint: str, default_port: int) -> tuple[str, int]:
@@ -69,6 +68,7 @@ def setup_weaviate_schema(client) -> None:
             wc.Property(name="technique_id", data_type=wc.DataType.TEXT),
             wc.Property(name="name", data_type=wc.DataType.TEXT),
             wc.Property(name="description", data_type=wc.DataType.TEXT),
+            wc.Property(name="tactics", data_type=wc.DataType.TEXT_ARRAY),
             wc.Property(name="tactic", data_type=wc.DataType.TEXT),
             wc.Property(name="kill_chain_phase", data_type=wc.DataType.TEXT),
             wc.Property(name="detection", data_type=wc.DataType.TEXT),
@@ -106,27 +106,13 @@ def setup_weaviate_schema(client) -> None:
 
 def download_attack_stix() -> dict:
     """Download ATT&CK STIX bundle."""
-    cache_path = STIX_DIR / "enterprise-attack.json"
-    if cache_path.exists():
-        logger.info(f"Loading cached STIX bundle from {cache_path}")
-        with open(cache_path, 'r') as f:
-            return json.load(f)
-
-    logger.info(f"Downloading ATT&CK STIX bundle from {ATTACK_STIX_URL}")
-    resp = requests.get(ATTACK_STIX_URL, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-
-    with open(cache_path, 'w') as f:
-        json.dump(data, f)
-    logger.info(f"Saved STIX bundle to {cache_path} ({len(data.get('objects', []))} objects)")
-    return data
+    return load_stix_bundle()
 
 
 def index_attack_techniques(client, stix_bundle: dict) -> int:
     """Index ATT&CK techniques into Weaviate Technique collection."""
     objects = stix_bundle.get("objects", [])
-    techniques = [o for o in objects if o.get("type") == "attack-pattern"]
+    techniques = [o for o in objects if is_active_attack_pattern(o)]
 
     collection = client.collections.get("Technique")
     count = 0
@@ -143,9 +129,14 @@ def index_attack_techniques(client, stix_bundle: dict) -> int:
         if not tech_id:
             continue
 
-        # Extract kill chain phase
-        kill_chain = tech.get("kill_chain_phases", [])
-        phase = kill_chain[0].get("phase_name", "") if kill_chain else ""
+        tactics = []
+        for phase_obj in tech.get("kill_chain_phases", []):
+            if phase_obj.get("kill_chain_name") != "mitre-attack":
+                continue
+            tactic_name = phase_obj.get("phase_name", "")
+            if tactic_name and tactic_name not in tactics:
+                tactics.append(tactic_name)
+        phase = tactics[0] if tactics else ""
         tactic = phase.replace("-", " ").title() if phase else ""
 
         # Build description
@@ -165,10 +156,12 @@ def index_attack_techniques(client, stix_bundle: dict) -> int:
 
         try:
             collection.data.insert(
+                uuid=str(uuid.uuid5(uuid.NAMESPACE_URL, f"raptor:attack-technique:{tech_id}")),
                 properties={
                     "technique_id": tech_id,
                     "name": name,
                     "description": description[:2000],
+                    "tactics": tactics,
                     "tactic": tactic,
                     "kill_chain_phase": phase,
                     "detection": detection[:1000],

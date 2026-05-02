@@ -9,6 +9,14 @@ from loguru import logger
 
 
 # Sigma-derived detection signatures: maps keywords/patterns to ATT&CK technique IDs
+SIGMA_RULE_SCHEMA_VERSION = "raptor-sigma-lite-v2"
+DEFAULT_RULE_METADATA = {
+    "status": "stable",
+    "level": "medium",
+    "logsource": {"product": "generic"},
+    "false_positives": [],
+}
+
 SIGMA_SIGNATURES: Dict[str, dict] = {
     # Execution
     "T1059.001": {
@@ -156,18 +164,77 @@ class SigmaMatcher:
         # Pre-compile all regex patterns
         self.compiled_sigs: Dict[str, dict] = {}
         for tid, sig in SIGMA_SIGNATURES.items():
+            metadata = {**DEFAULT_RULE_METADATA, **{k: v for k, v in sig.items() if k != "patterns"}}
             self.compiled_sigs[tid] = {
                 "name": sig["name"],
-                "patterns": [re.compile(p, re.IGNORECASE) for p in sig["patterns"]],
+                "rule_id": sig.get("rule_id", f"raptor-{tid.lower().replace('.', '-')}"),
+                "schema_version": SIGMA_RULE_SCHEMA_VERSION,
+                "version": sig.get("version", 1),
+                "level": metadata.get("level", "medium"),
+                "status": metadata.get("status", "stable"),
+                "logsource": metadata.get("logsource", {"product": "generic"}),
+                "false_positives": metadata.get("false_positives", []),
+                "patterns": [self._compile_pattern(p) for p in sig["patterns"]],
             }
         logger.info(f"SigmaMatcher initialized with {len(self.compiled_sigs)} technique signatures")
 
+    @staticmethod
+    def _compile_pattern(pattern):
+        if isinstance(pattern, dict):
+            return {
+                "field": pattern.get("field", "raw"),
+                "regex": re.compile(pattern.get("pattern", ""), re.IGNORECASE),
+            }
+        return {"field": "raw", "regex": re.compile(pattern, re.IGNORECASE)}
+
+    @staticmethod
+    def _field_value(event: Dict, field: str) -> str:
+        if field == "raw":
+            return str(event.get("raw", ""))
+        return str(event.get(field, ""))
+
+    def match_event_details(self, raw_log: str, event: Dict = None) -> List[Dict]:
+        """Return matched rule metadata for a normalized event dictionary."""
+        event_data = dict(event or {})
+        event_data.setdefault("raw", raw_log)
+        details = []
+        for tid, sig in self.compiled_sigs.items():
+            matched_pattern = None
+            for pattern in sig["patterns"]:
+                if pattern["regex"].search(self._field_value(event_data, pattern["field"])):
+                    matched_pattern = pattern["regex"].pattern
+                    break
+            if matched_pattern:
+                details.append({
+                    "technique_id": tid,
+                    "technique_name": sig["name"],
+                    "rule_id": sig["rule_id"],
+                    "version": sig["version"],
+                    "schema_version": sig["schema_version"],
+                    "level": sig["level"],
+                    "status": sig["status"],
+                    "logsource": sig["logsource"],
+                    "false_positives": sig["false_positives"],
+                    "matched_pattern": matched_pattern,
+                })
+        return details
+
     def match_event(self, raw_log: str) -> List[str]:
         """Match a single raw log line against all signatures. Returns list of technique IDs."""
+        return [item["technique_id"] for item in self.match_event_details(raw_log)]
+
+    def match_event_dict(self, event: Dict) -> List[str]:
+        """Match an event dictionary with raw and optional structured fields."""
+        return [item["technique_id"] for item in self.match_event_details(event.get("raw", ""), event)]
+
+    def match_event_detail_dict(self, event: Dict) -> List[Dict]:
+        return self.match_event_details(event.get("raw", ""), event)
+
+    def _legacy_match_event(self, raw_log: str) -> List[str]:
         matches = []
         for tid, sig in self.compiled_sigs.items():
             for pattern in sig["patterns"]:
-                if pattern.search(raw_log):
+                if pattern["regex"].search(raw_log):
                     matches.append(tid)
                     break  # One match per technique is enough
         return matches
@@ -176,9 +243,10 @@ class SigmaMatcher:
         """Enrich a list of parsed events with sigma_matches field."""
         total_matches = 0
         for event in events:
-            raw = event.get('raw', '')
-            sigma_matches = self.match_event(raw)
+            sigma_details = self.match_event_detail_dict(event)
+            sigma_matches = [item["technique_id"] for item in sigma_details]
             event['sigma_matches'] = sigma_matches
+            event['sigma_match_details'] = sigma_details
             total_matches += len(sigma_matches)
         logger.info(f"Sigma matching complete: {total_matches} matches across {len(events)} events")
         return events

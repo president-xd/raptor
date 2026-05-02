@@ -31,6 +31,7 @@ def generate_report(
         findings_data.append({
             "technique_id": f.technique_id,
             "technique_name": f.technique_name,
+            "tactics": f.tactics,
             "kill_chain_phase": f.kill_chain_phase,
             "confidence": f.confidence,
             "evidence_summary": f.evidence_summary,
@@ -101,9 +102,10 @@ def _build_fallback_report(
     ])
     if analysis.findings:
         for finding in analysis.findings:
+            tactics = ", ".join(finding.tactics or [finding.kill_chain_phase])
             lines.append(
                 f"- `{finding.technique_id}` **{finding.technique_name}** "
-                f"({finding.kill_chain_phase}, {finding.confidence}): "
+                f"({tactics}, {finding.confidence}): "
                 f"{finding.evidence_summary}"
             )
     else:

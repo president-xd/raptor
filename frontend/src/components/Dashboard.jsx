@@ -47,11 +47,13 @@ import {
   API_BASE,
   askInvestigationQuestion,
   createAuthSession,
+  getAptProfile,
   getDetailedHealth,
   getElasticsearchPollStatus,
   getInvestigationEvidence,
   getInvestigationGraph,
   getInvestigationReport,
+  getMitreMatrix,
   listAuditEntries,
   listCisaKev,
   listAptProfiles,
@@ -113,6 +115,8 @@ const detailTabs = [
 ];
 
 const tacticOrder = [
+  'reconnaissance',
+  'resource-development',
   'initial-access',
   'execution',
   'persistence',
@@ -122,11 +126,37 @@ const tacticOrder = [
   'discovery',
   'lateral-movement',
   'collection',
-  'c2',
+  'command-and-control',
   'exfiltration',
   'impact',
   'unknown',
 ];
+
+const graphLanes = [
+  { label: 'Identity', x: 32, width: 188 },
+  { label: 'Technique', x: 246, width: 258 },
+  { label: 'Asset', x: 530, width: 248 },
+  { label: 'Objective', x: 804, width: 204 },
+];
+
+const graphViewModes = [
+  { id: 'priority', label: 'Priority', icon: Target },
+  { id: 'risk', label: 'Risk', icon: ShieldAlert },
+  { id: 'all', label: 'Expanded', icon: Gauge },
+];
+
+const graphLimits = {
+  priority: { nodes: 84, edges: 180 },
+  risk: { nodes: 96, edges: 190 },
+  all: { nodes: 180, edges: 320 },
+};
+
+const graphLayout = {
+  minHeight: 460,
+  laneTop: 88,
+  laneBottom: 92,
+  nodeStep: 58,
+};
 
 export default function Dashboard() {
   const [activePage, setActivePage] = useState('dashboard');
@@ -138,6 +168,9 @@ export default function Dashboard() {
   const [reportCache, setReportCache] = useState({});
   const [graphCache, setGraphCache] = useState({});
   const [evidenceCache, setEvidenceCache] = useState({});
+  const [mitreMatrixCache, setMitreMatrixCache] = useState({});
+  const [mitreMatrixLoading, setMitreMatrixLoading] = useState(false);
+  const [mitreMatrixError, setMitreMatrixError] = useState('');
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [artifactError, setArtifactError] = useState('');
   const [simulationCache, setSimulationCache] = useState({});
@@ -170,7 +203,9 @@ export default function Dashboard() {
     }
   }, []);
 
-  const loadInvestigations = useCallback(async (quiet = false) => {
+  const loadInvestigations = useCallback(async (options = false) => {
+    const config = typeof options === 'boolean' ? { quiet: options } : options;
+    const { quiet = false, preferredSelectedId = '' } = config || {};
     if (!quiet) setInvestigationsLoading(true);
     try {
       const response = await listInvestigations(100);
@@ -178,12 +213,15 @@ export default function Dashboard() {
       setInvestigations(mapped);
       setInvestigationsError('');
       setSelectedInvestigationId((current) => {
-        if (current && mapped.some((item) => item.id === current)) return current;
+        const preferred = preferredSelectedId || current;
+        if (preferred && mapped.some((item) => item.id === preferred)) return preferred;
         return mapped[0]?.id || '';
       });
+      return mapped;
     } catch (error) {
       setInvestigationsError(error.message || 'Failed to load investigations');
       if (error.status === 401 || error.status === 503) setAuthDialogOpen(true);
+      return [];
     } finally {
       if (!quiet) setInvestigationsLoading(false);
     }
@@ -227,25 +265,62 @@ export default function Dashboard() {
     setArtifactLoading(false);
   }, []);
 
-  const loadAptProfiles = useCallback(async () => {
-    if (aptLoading || aptProfiles.length) return;
+  const loadMitreMatrix = useCallback(async (investigationId = '') => {
+    const cacheKey = investigationId || '__global';
+    setMitreMatrixLoading(true);
+    setMitreMatrixError('');
+    try {
+      const response = await getMitreMatrix(investigationId);
+      setMitreMatrixCache((current) => ({ ...current, [cacheKey]: response }));
+    } catch (error) {
+      setMitreMatrixError(error.message || 'Failed to load ATT&CK matrix');
+    } finally {
+      setMitreMatrixLoading(false);
+    }
+  }, []);
+
+  const loadAptProfiles = useCallback(async (force = false) => {
+    if (aptLoading || (!force && aptProfiles.length)) return;
     setAptLoading(true);
     setAptError('');
     try {
-      const response = await listAptProfiles();
+      const response = await listAptProfiles({ includeTechniques: false });
       setAptProfiles(response?.profiles || []);
     } catch (error) {
       setAptError(error.message || 'Failed to load APT profiles');
+      if (error.status === 401 || error.status === 503) setAuthDialogOpen(true);
     } finally {
       setAptLoading(false);
     }
   }, [aptLoading, aptProfiles.length]);
 
+  const loadAptProfileDetail = useCallback(async (name) => {
+    try {
+      return await getAptProfile(name);
+    } catch (error) {
+      setAptError(error.message || 'Failed to load APT profile');
+      if (error.status === 401 || error.status === 503) setAuthDialogOpen(true);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     loadHealth();
     loadInvestigations();
     const healthTimer = window.setInterval(loadHealth, 15000);
-    return () => window.clearInterval(healthTimer);
+    const investigationTimer = window.setInterval(() => loadInvestigations({ quiet: true }), 15000);
+    const refreshOnFocus = () => loadInvestigations({ quiet: true });
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') loadInvestigations({ quiet: true });
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.clearInterval(healthTimer);
+      window.clearInterval(investigationTimer);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
   }, [loadHealth, loadInvestigations]);
 
   useEffect(() => {
@@ -262,12 +337,18 @@ export default function Dashboard() {
   const selectedReport = selectedInvestigation ? reportCache[selectedInvestigation.id] : null;
   const selectedGraph = selectedInvestigation ? graphCache[selectedInvestigation.id] : null;
   const selectedEvidence = selectedInvestigation ? evidenceCache[selectedInvestigation.id] : null;
+  const selectedMitreMatrix = selectedInvestigation ? mitreMatrixCache[selectedInvestigation.id] : mitreMatrixCache.__global || null;
   const selectedSimulation = selectedInvestigation ? simulationCache[selectedInvestigation.id] : null;
 
   useEffect(() => {
     if (!selectedInvestigation?.id) return;
     loadArtifacts(selectedInvestigation.id);
   }, [selectedInvestigation?.id, selectedInvestigation?.statusRaw, selectedInvestigation?.progress, loadArtifacts]);
+
+  useEffect(() => {
+    if (activePage !== 'mitre') return;
+    loadMitreMatrix(selectedInvestigation?.id || '');
+  }, [activePage, selectedInvestigation?.id, selectedInvestigation?.statusRaw, selectedInvestigation?.progress, loadMitreMatrix]);
 
   useEffect(() => {
     if (activePage === 'apt-library') loadAptProfiles();
@@ -302,9 +383,11 @@ export default function Dashboard() {
           apt_filters: payload.aptFilters || [],
         });
       showToast(`Investigation ${shortId(response.investigation_id)} queued by backend`);
+      const queuedInvestigation = makeQueuedInvestigation(response, payload);
+      setInvestigations((current) => upsertInvestigation(current, queuedInvestigation));
       setSelectedInvestigationId(response.investigation_id);
       setActivePage('investigations');
-      await loadInvestigations(true);
+      await loadInvestigations({ quiet: true, preferredSelectedId: response.investigation_id });
     } catch (error) {
       showToast(error.message || 'Investigation submission failed');
       throw error;
@@ -407,8 +490,9 @@ export default function Dashboard() {
               error={aptError}
               onRefresh={() => {
                 setAptProfiles([]);
-                loadAptProfiles();
+                loadAptProfiles(true);
               }}
+              onLoadProfile={loadAptProfileDetail}
             />
           )}
           {activePage === 'query' && (
@@ -437,7 +521,15 @@ export default function Dashboard() {
               onRun={() => executeSimulation(selectedInvestigation?.id)}
             />
           )}
-          {activePage === 'mitre' && <MitrePage report={selectedReport} />}
+          {activePage === 'mitre' && (
+            <MitrePage
+              report={selectedReport}
+              matrix={selectedMitreMatrix}
+              loading={mitreMatrixLoading}
+              error={mitreMatrixError}
+              onRefresh={() => loadMitreMatrix(selectedInvestigation?.id || '')}
+            />
+          )}
           {activePage === 'reports' && (
             <ReportsPage
               investigations={investigations}
@@ -1055,9 +1147,19 @@ function InvestigationDetailPage({
 }
 
 function AttackGraphTab({ graph, report }) {
-  const normalized = useMemo(() => normalizeGraph(graph), [graph]);
+  const [graphMode, setGraphMode] = useState('priority');
+  const normalized = useMemo(() => normalizeGraph(graph, graphMode), [graph, graphMode]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const selectedNode = normalized.nodes.find((node) => node.id === selectedNodeId) || normalized.nodes[0] || null;
+  const graphStats = useMemo(() => {
+    const compromised = normalized.nodes.filter((node) => node.status === 'compromised' || node.status === 'crown').length;
+    return [
+      { label: 'Visible', value: `${normalized.nodes.length}/${normalized.totalNodes}` },
+      { label: 'Edges', value: `${normalized.edges.length}/${normalized.totalEdges}` },
+      { label: 'Compromised', value: compromised },
+      { label: 'Hidden', value: normalized.hiddenNodes },
+    ];
+  }, [normalized]);
 
   useEffect(() => {
     if (normalized.nodes.length && !normalized.nodes.some((node) => node.id === selectedNodeId)) {
@@ -1082,15 +1184,21 @@ function AttackGraphTab({ graph, report }) {
       <div className="graph-workspace">
         <div className="graph-toolbar">
           <div className="toolbar-group">
-            <button type="button" className="tool-button active" title="Live backend graph">
-              <Target size={16} />
-            </button>
-            <button type="button" className="tool-button" title="Compromised hosts">
-              <ShieldAlert size={16} />
-            </button>
-            <button type="button" className="tool-button" title="Graph export">
-              <Gauge size={16} />
-            </button>
+            {graphViewModes.map((mode) => {
+              const Icon = mode.icon;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={`tool-button ${graphMode === mode.id ? 'active' : ''}`}
+                  title={`${mode.label} graph view`}
+                  aria-label={`${mode.label} graph view`}
+                  onClick={() => setGraphMode(mode.id)}
+                >
+                  <Icon size={16} />
+                </button>
+              );
+            })}
           </div>
           <div className="graph-legend">
             <span><i className="legend-dot compromised" />Compromised</span>
@@ -1100,13 +1208,50 @@ function AttackGraphTab({ graph, report }) {
           </div>
         </div>
 
+        <div className="graph-metrics" aria-label="Graph metrics">
+          {graphStats.map((stat) => (
+            <div className="graph-metric" key={stat.label}>
+              <strong>{stat.value}</strong>
+              <span>{stat.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {(normalized.hiddenNodes > 0 || normalized.hiddenEdges > 0) && (
+          <div className="graph-notice">
+            <strong>{normalized.hiddenNodes} nodes and {normalized.hiddenEdges} edges summarized</strong>
+            <span>Showing the highest-signal investigation graph for readable analysis.</span>
+          </div>
+        )}
+
         <div className="graph-canvas">
-          <svg viewBox="0 0 1040 430" role="img" aria-label="RAPTOR attack graph">
+          <svg
+            className={normalized.isDense ? 'dense-graph' : ''}
+            viewBox={`0 0 1040 ${normalized.viewHeight}`}
+            style={{ height: `${normalized.viewHeight}px` }}
+            role="img"
+            aria-label="RAPTOR attack graph"
+          >
             <defs>
+              <pattern id="graph-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+                <path d="M 32 0 L 0 0 0 32" />
+              </pattern>
+              <filter id="node-shadow" x="-45%" y="-45%" width="190%" height="190%">
+                <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#10100e" floodOpacity="0.16" />
+              </filter>
               <marker id="graph-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 z" />
               </marker>
             </defs>
+            <rect className="graph-grid-fill" x="0" y="0" width="1040" height={normalized.viewHeight} />
+            <g className="graph-lanes" aria-hidden="true">
+              {graphLanes.map((lane) => (
+                <g key={lane.label}>
+                  <rect x={lane.x} y="28" width={lane.width} height={normalized.viewHeight - 118} />
+                  <text x={lane.x + 12} y="54">{lane.label}</text>
+                </g>
+              ))}
+            </g>
             {normalized.edges.map((edge, index) => {
               const source = nodesById[edge.source];
               const target = nodesById[edge.target];
@@ -1114,17 +1259,17 @@ function AttackGraphTab({ graph, report }) {
               const id = `edge-${index}`;
               const midX = (source.x + target.x) / 2;
               const midY = (source.y + target.y) / 2;
-              const curve = edge.edge_type?.includes('lateral') ? 48 : edge.edge_type?.includes('observed') ? -34 : 0;
-              const path = `M${source.x},${source.y} Q${midX},${midY + curve} ${target.x},${target.y}`;
+              const curve = edgeCurve(edge, source, target, index);
+              const path = `M${source.x},${source.y} C${midX},${source.y + curve} ${midX},${target.y - curve} ${target.x},${target.y}`;
               return (
-                <g className={`graph-edge ${edge.edge_type || 'observed'}`} key={edge.id || id}>
+                <g className={`graph-edge ${edgeClassName(edge)}`} key={edge.id || id}>
                   <path id={id} d={path} markerEnd="url(#graph-arrow)" />
                   <circle r="4" className="edge-particle">
                     <animateMotion dur={`${3 + (index % 3)}s`} repeatCount="indefinite">
                       <mpath href={`#${id}`} />
                     </animateMotion>
                   </circle>
-                  <text x={midX} y={midY + curve / 2 - 8}>{edge.label || edge.edge_type}</text>
+                  <text x={midX} y={midY + curve * 0.16 - 10}>{truncate(compactGraphText(edge.label || edge.edge_type), 18)}</text>
                 </g>
               );
             })}
@@ -1140,10 +1285,18 @@ function AttackGraphTab({ graph, report }) {
                   if (event.key === 'Enter' || event.key === ' ') setSelectedNodeId(node.id);
                 }}
               >
-                <circle className="node-halo" r={node.kind === 'dc' ? 46 : 39} />
-                <circle className="node-core" r={node.kind === 'dc' ? 28 : 24} />
-                <text className="node-label" y={node.kind === 'dc' ? 50 : 46}>{truncate(node.label, 18)}</text>
-                <text className="node-subtitle" y={node.kind === 'dc' ? 67 : 63}>{truncate(node.subtitle, 22)}</text>
+                <circle className="node-halo" r={node.haloRadius} />
+                <circle className="node-ring" r={node.ringRadius} />
+                <circle className="node-core" r={node.radius} />
+                <text className="node-glyph" y="5">{nodeGlyph(node)}</text>
+                {!node.compact && (
+                  <>
+                    <rect className="node-chip" x="-22" y="-34" width="44" height="14" rx="0" />
+                    <text className="node-chip-text" y="-24">{nodeChip(node)}</text>
+                  </>
+                )}
+                <text className="node-label" y={node.compact ? 28 : 33}>{truncate(node.displayLabel, node.compact ? 13 : 18)}</text>
+                {!node.compact && <text className="node-subtitle" y="46">{truncate(node.subtitle, 22)}</text>}
               </g>
             ))}
           </svg>
@@ -1204,7 +1357,7 @@ function NodeSidePanel({ node, onClose }) {
     );
   }
 
-  const iconMap = { host: Server, user: Users, technique: Layers3, dc: Lock, external: Globe };
+  const iconMap = { host: Server, user: Users, technique: Layers3, dc: Lock, external: Globe, aggregate: Network };
   const Icon = iconMap[node.kind] || Cpu;
   const metadataEntries = Object.entries(node.metadata || {})
     .filter(([key, value]) => value !== null && value !== undefined && typeof value !== 'object' && key !== 'labels')
@@ -1605,11 +1758,33 @@ function EvidencePanel({ finding, evidenceFiles = [] }) {
   );
 }
 
-function AptLibraryPage({ profiles, loading, error, onRefresh }) {
+function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) {
   const [region, setRegion] = useState('All');
   const [selectedActor, setSelectedActor] = useState(null);
+  const [selectedActorLoading, setSelectedActorLoading] = useState(false);
   const regions = useMemo(() => ['All', ...Array.from(new Set(profiles.map((profile) => profile.nation_state || 'Unknown'))).sort()], [profiles]);
   const actors = profiles.filter((actor) => region === 'All' || (actor.nation_state || 'Unknown') === region);
+
+  const handleRefresh = () => {
+    setSelectedActor(null);
+    setSelectedActorLoading(false);
+    if (onRefresh) onRefresh();
+  };
+
+  const handleActorOpen = async (actor) => {
+    setSelectedActor(actor);
+    const needsDetail = !actor.techniques?.length || actor.techniques.length < (actor.technique_count || 0);
+    if (!needsDetail || !onLoadProfile) return;
+    setSelectedActorLoading(true);
+    try {
+      const detail = await onLoadProfile(actor.name);
+      if (detail) {
+        setSelectedActor((current) => (current && current.name === actor.name ? detail : current));
+      }
+    } finally {
+      setSelectedActorLoading(false);
+    }
+  };
 
   return (
     <div className="page-panel library-page">
@@ -1626,7 +1801,7 @@ function AptLibraryPage({ profiles, loading, error, onRefresh }) {
             </button>
           ))}
         </div>
-        <button type="button" className="secondary-button" onClick={onRefresh}>
+        <button type="button" className="secondary-button" onClick={handleRefresh}>
           <RefreshCcw size={15} />
           Refresh Profiles
         </button>
@@ -1646,7 +1821,7 @@ function AptLibraryPage({ profiles, loading, error, onRefresh }) {
             type="button"
             className={`apt-card region-${slug(actor.nation_state || 'unknown')}`}
             key={actor.name}
-            onClick={() => setSelectedActor(actor)}
+            onClick={() => handleActorOpen(actor)}
           >
             <div className="apt-card-top">
               <span>{actor.nation_state || 'Unknown'}</span>
@@ -1657,18 +1832,26 @@ function AptLibraryPage({ profiles, loading, error, onRefresh }) {
             <div className="apt-card-meta">
               <span>{actor.technique_count} known TTPs</span>
             </div>
-            <div className="ttp-stack inline">
-              {(actor.techniques || []).slice(0, 5).map((ttp) => <code key={ttp}>{ttp}</code>)}
-            </div>
+            {!!(actor.techniques || []).length && (
+              <div className="ttp-stack inline">
+                {(actor.techniques || []).slice(0, 5).map((ttp) => <code key={ttp}>{ttp}</code>)}
+              </div>
+            )}
           </button>
         ))}
       </div>
-      {selectedActor && <ActorModal actor={selectedActor} onClose={() => setSelectedActor(null)} />}
+      {selectedActor && (
+        <ActorModal
+          actor={selectedActor}
+          loading={selectedActorLoading}
+          onClose={() => setSelectedActor(null)}
+        />
+      )}
     </div>
   );
 }
 
-function ActorModal({ actor, onClose }) {
+function ActorModal({ actor, onClose, loading }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="actor-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
@@ -1688,30 +1871,55 @@ function ActorModal({ actor, onClose }) {
         </div>
         <div className="modal-section">
           <span>Known TTPs</span>
-          <div className="ttp-stack inline">
-            {(actor.techniques || []).map((ttp) => <code key={ttp}>{ttp}</code>)}
-          </div>
+          {loading ? (
+            <p>Loading techniques...</p>
+          ) : (actor.techniques || []).length ? (
+            <div className="ttp-stack inline">
+              {(actor.techniques || []).map((ttp) => <code key={ttp}>{ttp}</code>)}
+            </div>
+          ) : (
+            <p>No techniques returned for this actor.</p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function MitrePage({ report }) {
-  const cells = useMemo(() => buildMitreCells(report?.findings || []), [report]);
+function MitrePage({ report, matrix, loading, error, onRefresh }) {
+  const cells = useMemo(() => normalizeMitreMatrix(matrix, report?.findings || []), [matrix, report]);
   const [selected, setSelected] = useState(null);
 
   useEffect(() => {
-    setSelected(cells.flatMap((column) => column.techniques)[0] || null);
+    const techniques = cells.flatMap((column) => column.techniques);
+    setSelected((current) => {
+      if (current && techniques.some((technique) => technique.id === current.id && technique.tactic === current.tactic)) return current;
+      return techniques.find((technique) => technique.observed) || techniques[0] || null;
+    });
   }, [cells]);
+
+  const observedCount = matrix?.observed_count ?? (report?.findings || []).length;
+  const activeCount = matrix?.source?.active_technique_count || cells.reduce((sum, column) => sum + column.techniques.length, 0);
 
   return (
     <div className="page-panel mitre-page">
-      {!cells.some((column) => column.techniques.length) && (
+      <div className="matrix-toolbar">
+        <div>
+          <span>Enterprise ATT&CK</span>
+          <strong>{observedCount} observed / {activeCount} active techniques</strong>
+          <small>{matrix?.source?.cache_sha256 ? `STIX ${shortId(matrix.source.cache_sha256)} · ${matrix.source.latest_object_modified || 'cached'}` : 'Canonical matrix loads from backend STIX'}</small>
+        </div>
+        <button type="button" className="icon-button" onClick={onRefresh} aria-label="Refresh ATT&CK matrix">
+          <RefreshCcw size={17} />
+        </button>
+      </div>
+      {error && <InlineError message={error} />}
+      {loading && <div className="matrix-state">Loading canonical ATT&CK matrix...</div>}
+      {!loading && !cells.some((column) => column.techniques.length) && (
         <EmptyState
           icon={Layers3}
           title="No ATT&CK findings in selected investigation"
-          detail="Run an investigation and open a completed case to populate this matrix from backend findings."
+          detail="The backend matrix endpoint did not return techniques for this case."
         />
       )}
       <div className="matrix-grid">
@@ -1722,7 +1930,7 @@ function MitrePage({ report }) {
               <button
                 key={`${column.tactic}-${technique.id}`}
                 type="button"
-                className={`matrix-cell detected ${selected?.id === technique.id ? 'active' : ''}`}
+                className={`matrix-cell ${technique.observed ? 'detected' : ''} ${selected?.id === technique.id && selected?.tactic === column.tactic ? 'active' : ''}`}
                 onClick={() => setSelected({ ...technique, tactic: column.tactic })}
               >
                 <code>{technique.id}</code>
@@ -1736,9 +1944,19 @@ function MitrePage({ report }) {
         <span>Technique Detail</span>
         <h2>{selected?.id || 'None'}</h2>
         <p>{selected?.name || 'No observed technique selected.'}</p>
+        {selected?.description && <p>{truncate(selected.description, 260)}</p>}
         <div className={`matrix-state ${selected ? 'detected' : ''}`}>
-          {selected ? 'Detected in selected backend investigation' : 'Not populated'}
+          {selected?.observed ? `Detected in selected investigation (${selected.confidence || 'unknown'})` : 'Not observed in selected investigation'}
         </div>
+        {selected?.tactics?.length > 0 && <Row label="Tactics" value={selected.tactics.map(formatPhase).join(', ')} />}
+        {selected?.platforms?.length > 0 && <Row label="Platforms" value={selected.platforms.slice(0, 6).join(', ')} />}
+        {selected?.evidence_summary && <p>{selected.evidence_summary}</p>}
+        {selected?.url && (
+          <a href={selected.url} target="_blank" rel="noreferrer" className="secondary-button mitre-link">
+            <ExternalLink size={15} />
+            Open MITRE ATT&CK
+          </a>
+        )}
       </aside>
     </div>
   );
@@ -2324,6 +2542,7 @@ function mapInvestigation(item) {
     duration: formatDuration(item.created_at, item.completed_at, item.status, item.progress),
     status,
     statusRaw: String(item.status || '').toLowerCase(),
+    createdAtRaw: item.created_at || '',
     date: formatDate(item.created_at),
     completedAt: item.completed_at ? formatDate(item.completed_at) : '',
     confidence,
@@ -2332,6 +2551,34 @@ function mapInvestigation(item) {
     currentPhase: item.current_phase || '',
     error: item.error || '',
   };
+}
+
+function makeQueuedInvestigation(response, payload) {
+  const investigationId = response?.investigation_id || '';
+  const now = new Date().toISOString();
+  return mapInvestigation({
+    investigation_id: investigationId,
+    name: payload.caseName || `Investigation ${shortId(investigationId)}`,
+    source: payload.mode || 'backend',
+    status: response?.status || 'queued',
+    progress: 0,
+    current_phase: 'Queued for backend analysis',
+    event_count: 0,
+    technique_count: 0,
+    host_count: 0,
+    input_bytes: payload.mode === 'file' ? payload.file?.size || 0 : new Blob([payload.logContent || payload.elasticQuery || '']).size,
+    created_at: now,
+    completed_at: null,
+  });
+}
+
+function upsertInvestigation(items, nextItem) {
+  if (!nextItem?.id) return items;
+  const exists = items.some((item) => item.id === nextItem.id);
+  const merged = exists
+    ? items.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
+    : [nextItem, ...items];
+  return merged.sort((a, b) => new Date(b.createdAtRaw || 0).getTime() - new Date(a.createdAtRaw || 0).getTime());
 }
 
 function buildMetrics(investigations, graph) {
@@ -2382,8 +2629,8 @@ function buildOperationFeed(investigations, health, investigationsError, healthE
 function buildCoverage(findings = []) {
   const counts = new Map();
   findings.forEach((finding) => {
-    const phase = normalizePhase(finding.kill_chain_phase);
-    counts.set(phase, (counts.get(phase) || 0) + 1);
+    const phases = (finding.tactics?.length ? finding.tactics : [finding.kill_chain_phase]).map(normalizePhase);
+    phases.forEach((phase) => counts.set(phase, (counts.get(phase) || 0) + 1));
   });
   const max = Math.max(1, ...counts.values());
   return tacticOrder.map((phase) => {
@@ -2398,15 +2645,41 @@ function buildCoverage(findings = []) {
   });
 }
 
+function normalizeMitreMatrix(matrix, findings = []) {
+  if (matrix?.matrix?.length) {
+    return matrix.matrix.map((column) => ({
+      tactic: normalizePhase(column.tactic),
+      techniques: (column.techniques || []).map((technique) => ({
+        id: technique.technique_id,
+        name: technique.name || technique.technique_id,
+        description: technique.description || '',
+        tactics: (technique.tactics || []).map(normalizePhase),
+        platforms: technique.platforms || [],
+        observed: Boolean(technique.observed),
+        confidence: technique.confidence || '',
+        evidence_summary: technique.evidence_summary || '',
+        url: technique.url || '',
+        tactic: normalizePhase(column.tactic),
+      })),
+    }));
+  }
+  return buildMitreCells(findings);
+}
+
 function buildMitreCells(findings) {
   const grouped = Object.fromEntries(tacticOrder.map((phase) => [phase, []]));
   findings.forEach((finding) => {
-    const phase = normalizePhase(finding.kill_chain_phase);
-    grouped[phase] = grouped[phase] || [];
-    grouped[phase].push({
-      id: finding.technique_id,
-      name: finding.technique_name || finding.technique_id,
-      confidence: finding.confidence,
+    const phases = (finding.tactics?.length ? finding.tactics : [finding.kill_chain_phase]).map(normalizePhase);
+    phases.forEach((phase) => {
+      grouped[phase] = grouped[phase] || [];
+      grouped[phase].push({
+        id: finding.technique_id,
+        name: finding.technique_name || finding.technique_id,
+        tactics: phases,
+        confidence: finding.confidence,
+        observed: true,
+        evidence_summary: finding.evidence_summary || '',
+      });
     });
   });
   return tacticOrder.map((tactic) => ({
@@ -2415,21 +2688,33 @@ function buildMitreCells(findings) {
   }));
 }
 
-function normalizeGraph(graph) {
+function normalizeGraph(graph, mode = 'priority') {
   const nodes = graph?.nodes || [];
   const edges = graph?.edges || [];
-  if (!nodes.length) return { nodes: [], edges: [] };
+  if (!nodes.length) {
+    return {
+      nodes: [],
+      edges: [],
+      totalNodes: 0,
+      totalEdges: 0,
+      hiddenNodes: 0,
+      hiddenEdges: 0,
+      viewHeight: graphLayout.minHeight,
+      isDense: false,
+    };
+  }
 
-  const xs = nodes.map((node) => Number(node.x || 0));
-  const ys = nodes.map((node) => Number(node.y || 0));
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const xSpan = maxX - minX || 1;
-  const ySpan = maxY - minY || 1;
+  const adjacency = edges.reduce((acc, edge) => {
+    acc.incoming[edge.target] = (acc.incoming[edge.target] || 0) + 1;
+    acc.outgoing[edge.source] = (acc.outgoing[edge.source] || 0) + 1;
+    acc.neighbors[edge.source] = acc.neighbors[edge.source] || new Set();
+    acc.neighbors[edge.target] = acc.neighbors[edge.target] || new Set();
+    acc.neighbors[edge.source].add(edge.target);
+    acc.neighbors[edge.target].add(edge.source);
+    return acc;
+  }, { incoming: {}, outgoing: {}, neighbors: {} });
 
-  const mappedNodes = nodes.map((node) => {
+  const enrichedNodes = nodes.map((node) => {
     const metadata = node.metadata || {};
     const type = node.node_type || 'unknown';
     const isDc = Boolean(metadata.is_dc) || /dc|domain/i.test(node.label || '');
@@ -2441,17 +2726,211 @@ function normalizeGraph(graph) {
     if (metadata.tactic) techniques.push(metadata.tactic);
     return {
       ...node,
-      x: 80 + ((Number(node.x || 0) - minX) / xSpan) * 880,
-      y: 70 + ((Number(node.y || 0) - minY) / ySpan) * 280,
       kind,
       status,
+      displayLabel: compactGraphText(node.label),
       subtitle: metadata.ip || metadata.phase || metadata.tactic || type,
       summary: summarizeNode(node),
       techniques: techniques.filter((item) => /^T\d+/.test(item)),
+      graphWeight: (adjacency.incoming[node.id] || 0) + (adjacency.outgoing[node.id] || 0),
     };
   });
+  const nodeMap = Object.fromEntries(enrichedNodes.map((node) => [node.id, node]));
+  const limits = graphLimits[mode] || graphLimits.priority;
+  const visibleIds = selectGraphNodeIds(enrichedNodes, edges, adjacency, mode, limits.nodes);
+  const hiddenNodes = enrichedNodes.filter((node) => !visibleIds.has(node.id));
+  const hiddenByLane = hiddenNodes.reduce((counts, node) => {
+    const lane = graphLaneForNode(node);
+    counts[lane] = (counts[lane] || 0) + 1;
+    return counts;
+  }, {});
+  const aggregateNodes = Object.entries(hiddenByLane).map(([laneIndex, count]) => ({
+    id: `aggregate_hidden_${laneIndex}`,
+    label: `${count} hidden`,
+    node_type: 'aggregate',
+    kind: 'aggregate',
+    status: 'aggregate',
+    displayLabel: `+${count} more`,
+    subtitle: graphLanes[Number(laneIndex)]?.label || 'entities',
+    summary: `${count} lower-priority graph entities are summarized in this lane.`,
+    techniques: [],
+    metadata: { hidden_count: count, lane_index: Number(laneIndex), lane: graphLanes[Number(laneIndex)]?.label || 'unknown' },
+    graphWeight: 0,
+    compact: true,
+    radius: 10,
+    ringRadius: 14,
+    haloRadius: 20,
+  }));
 
-  return { nodes: mappedNodes, edges };
+  const visibleNodes = enrichedNodes.filter((node) => visibleIds.has(node.id));
+  const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
+  const visibleEdges = sortGraphEdges(
+    edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
+    nodeMap,
+  ).slice(0, limits.edges);
+  const hiddenEdges = Math.max(0, edges.length - visibleEdges.length);
+  const layoutNodes = [...visibleNodes, ...aggregateNodes];
+  const isDense = layoutNodes.length > 64 || Math.max(...graphLanes.map((_, laneIndex) => layoutNodes.filter((node) => graphLaneForNode(node) === laneIndex).length)) > 18;
+
+  const laneGroups = layoutNodes.reduce((groups, node) => {
+    const lane = graphLaneForNode(node);
+    groups[lane] = groups[lane] || [];
+    groups[lane].push(node);
+    return groups;
+  }, {});
+
+  const mappedNodes = [];
+  const maxLaneCount = Math.max(1, ...graphLanes.map((_, laneIndex) => (laneGroups[laneIndex] || []).length));
+  const viewHeight = Math.max(
+    graphLayout.minHeight,
+    graphLayout.laneTop + graphLayout.laneBottom + Math.max(0, maxLaneCount - 1) * graphLayout.nodeStep,
+  );
+  graphLanes.forEach((lane, laneIndex) => {
+    const group = (laneGroups[laneIndex] || [])
+      .sort((a, b) => {
+        if (a.kind === 'aggregate') return 1;
+        if (b.kind === 'aggregate') return -1;
+        const tacticA = tacticOrder.indexOf(String(a.metadata?.tactic || a.metadata?.phase || 'unknown'));
+        const tacticB = tacticOrder.indexOf(String(b.metadata?.tactic || b.metadata?.phase || 'unknown'));
+        return (tacticA === -1 ? 999 : tacticA) - (tacticB === -1 ? 999 : tacticB)
+          || b.graphWeight - a.graphWeight
+          || String(a.label).localeCompare(String(b.label));
+      });
+
+    group.forEach((node, index) => {
+      const compact = isDense || node.kind === 'aggregate';
+      mappedNodes.push({
+        ...node,
+        compact,
+        radius: node.radius || (node.kind === 'dc' ? 15 : node.status === 'compromised' ? 14 : 12),
+        ringRadius: node.ringRadius || (node.kind === 'dc' ? 20 : 17),
+        haloRadius: node.haloRadius || (node.kind === 'dc' ? 27 : 23),
+        x: lane.x + lane.width / 2 + stableOffset(node.id, compact ? 12 : 18),
+        y: graphLayout.laneTop + index * graphLayout.nodeStep,
+      });
+    });
+  });
+
+  return {
+    nodes: mappedNodes,
+    edges: visibleEdges,
+    totalNodes: nodes.length,
+    totalEdges: edges.length,
+    hiddenNodes: Math.max(0, nodes.length - visibleNodes.length),
+    hiddenEdges,
+    viewHeight,
+    isDense,
+  };
+}
+
+function selectGraphNodeIds(nodes, edges, adjacency, mode, limit) {
+  if (nodes.length <= limit) return new Set(nodes.map((node) => node.id));
+
+  if (mode === 'risk') {
+    const riskIds = new Set();
+    nodes.forEach((node) => {
+      if (node.status === 'compromised' || node.status === 'crown') {
+        riskIds.add(node.id);
+        (adjacency.neighbors[node.id] || []).forEach((neighbor) => riskIds.add(neighbor));
+      }
+    });
+    if (riskIds.size) {
+      return new Set(sortGraphNodes(nodes.filter((node) => riskIds.has(node.id))).slice(0, limit).map((node) => node.id));
+    }
+  }
+
+  const sorted = sortGraphNodes(nodes);
+  if (mode === 'all') {
+    return new Set(sorted.slice(0, limit).map((node) => node.id));
+  }
+  return new Set(sorted.slice(0, limit).map((node) => node.id));
+}
+
+function sortGraphNodes(nodes) {
+  return [...nodes].sort((a, b) => graphNodeScore(b) - graphNodeScore(a) || String(a.label).localeCompare(String(b.label)));
+}
+
+function graphNodeScore(node) {
+  const tacticIndex = tacticOrder.indexOf(normalizePhase(node.metadata?.tactic || node.metadata?.phase || 'unknown'));
+  const tacticScore = tacticIndex === -1 ? 0 : Math.max(0, 40 - tacticIndex);
+  const typeScore = {
+    dc: 900,
+    host: node.status === 'compromised' ? 760 : 220,
+    technique: 520,
+    user: 300,
+    network: 240,
+    process: 180,
+    file: 120,
+  }[node.kind] || 100;
+  const statusScore = node.status === 'crown' ? 400 : node.status === 'compromised' ? 320 : node.status === 'warning' ? 120 : 0;
+  return typeScore + statusScore + tacticScore + node.graphWeight * 28;
+}
+
+function sortGraphEdges(edges, nodeMap) {
+  return [...edges].sort((a, b) => graphEdgeScore(b, nodeMap) - graphEdgeScore(a, nodeMap));
+}
+
+function graphEdgeScore(edge, nodeMap) {
+  const type = String(edge.edge_type || '').toLowerCase();
+  const typeScore = type.includes('lateral') ? 900
+    : type.includes('sequence') ? 820
+      : type.includes('credential') ? 760
+        : type.includes('observed') ? 420
+          : 200;
+  const source = nodeMap[edge.source];
+  const target = nodeMap[edge.target];
+  return typeScore + (source ? graphNodeScore(source) * 0.08 : 0) + (target ? graphNodeScore(target) * 0.08 : 0);
+}
+
+function graphLaneForNode(node) {
+  if (node.kind === 'aggregate') return Number.isFinite(Number(node.metadata?.lane_index)) ? Number(node.metadata.lane_index) : 0;
+  if (node.kind === 'dc') return 3;
+  if (node.node_type === 'host') return node.status === 'compromised' ? 2 : 3;
+  if (node.node_type === 'technique') return 1;
+  if (node.node_type === 'user' || node.node_type === 'network') return 0;
+  return 2;
+}
+
+function stableOffset(value, range) {
+  let hash = 0;
+  for (let index = 0; index < String(value).length; index += 1) {
+    hash = ((hash << 5) - hash + String(value).charCodeAt(index)) | 0;
+  }
+  return ((Math.abs(hash) % (range * 2 + 1)) - range);
+}
+
+function edgeClassName(edge) {
+  const type = String(edge.edge_type || 'observed').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  if (type.includes('lateral') || type.includes('credential')) return `${type} warning-flow`;
+  if (type.includes('sequence') || type.includes('exfil') || type.includes('initial')) return `${type} danger-flow`;
+  if (type.includes('discovery') || type.includes('observed')) return `${type} observed-flow`;
+  return `${type} neutral-flow`;
+}
+
+function edgeCurve(edge, source, target, index) {
+  const type = String(edge.edge_type || '');
+  const base = type.includes('lateral') || source.x > target.x ? 54 : type.includes('observed') ? -42 : 32;
+  return base + ((index % 3) - 1) * 14;
+}
+
+function nodeGlyph(node) {
+  if (node.kind === 'dc') return 'DC';
+  if (node.kind === 'technique') return 'T';
+  if (node.kind === 'user') return 'U';
+  if (node.status === 'compromised') return '!';
+  return 'H';
+}
+
+function nodeChip(node) {
+  if (node.kind === 'dc') return 'CROWN';
+  if (node.kind === 'technique') return 'TTP';
+  if (node.kind === 'user') return 'USER';
+  if (node.status === 'compromised') return 'RISK';
+  return 'HOST';
+}
+
+function compactGraphText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 function summarizeNode(node) {
@@ -2556,9 +3035,10 @@ function normalizePhase(value) {
   const phase = String(value || 'unknown').toLowerCase().replace(/_/g, '-');
   const aliases = {
     'privilege-esc': 'privilege-escalation',
-    'command-and-control': 'c2',
+    c2: 'command-and-control',
     exfil: 'exfiltration',
-    recon: 'initial-access',
+    recon: 'reconnaissance',
+    'resource-dev': 'resource-development',
   };
   return aliases[phase] || phase || 'unknown';
 }

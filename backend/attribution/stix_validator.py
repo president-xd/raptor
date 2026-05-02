@@ -4,14 +4,13 @@ Per spec Section 9.4: "After every LLM call, validate all technique IDs
 in the output against the STIX bundle. Reject any ID not found."
 This is a REQUIRED post-processing step, not optional.
 """
-import json
 from typing import List, Set, Optional
 from loguru import logger
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import STIX_DIR
 from schema import Finding, AnalysisResult
+from attribution.attack_catalog import canonicalize_finding, get_valid_technique_ids
 
 
 # Cache of valid technique IDs
@@ -19,27 +18,18 @@ _valid_ids: Optional[Set[str]] = None
 
 
 def load_valid_technique_ids() -> Set[str]:
-    """Load all valid ATT&CK technique IDs from the STIX bundle."""
+    """Load all active, non-revoked, non-deprecated ATT&CK technique IDs."""
     global _valid_ids
     if _valid_ids is not None:
         return _valid_ids
 
-    cache_path = STIX_DIR / "enterprise-attack.json"
-    if not cache_path.exists():
-        logger.warning("STIX bundle not found, cannot validate technique IDs")
+    try:
+        _valid_ids = get_valid_technique_ids()
+    except Exception as e:
+        logger.warning(f"STIX catalog unavailable, cannot validate technique IDs: {e}")
         return set()
 
-    with open(cache_path, 'r') as f:
-        bundle = json.load(f)
-
-    _valid_ids = set()
-    for obj in bundle.get("objects", []):
-        if obj.get("type") == "attack-pattern":
-            for ref in obj.get("external_references", []):
-                if ref.get("source_name") == "mitre-attack":
-                    _valid_ids.add(ref.get("external_id", ""))
-
-    logger.info(f"Loaded {len(_valid_ids)} valid ATT&CK technique IDs for validation")
+    logger.info(f"Loaded {len(_valid_ids)} active ATT&CK technique IDs for validation")
     return _valid_ids
 
 
@@ -67,11 +57,12 @@ def validate_findings(findings: List[Finding]) -> List[Finding]:
 
     for finding in findings:
         tid = finding.technique_id
-        if tid in valid_ids:
-            validated.append(finding)
+        canonical = canonicalize_finding(finding) if tid in valid_ids else None
+        if canonical:
+            validated.append(canonical)
         else:
             rejected_count += 1
-            logger.warning(f"Rejected hallucinated technique ID: {tid} "
+            logger.warning(f"Rejected inactive or hallucinated technique ID: {tid} "
                           f"(claimed: {finding.technique_name})")
 
     if rejected_count > 0:
