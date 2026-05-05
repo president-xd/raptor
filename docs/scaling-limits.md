@@ -25,9 +25,9 @@ This supports controlled production deployments with cleaner process isolation. 
 4. Add Prometheus scraping of `/api/v1/metrics`.
 5. Add ingress-level rate limiting, WAF rules, and SSO.
 6. Add queue-depth, worker-latency, parser-error, and investigation-failure alerts.
-7. Replace in-process rate limiting with Redis-backed or ingress-native limits before horizontal API scaling.
-8. Add schema migration tooling before independent API/worker version rollouts.
-9. Run load tests for upload, queue-claim, report, graph, and query endpoints before increasing worker concurrency.
+7. Use `RAPTOR_RATE_LIMIT_BACKEND=redis` plus ingress-native limits before horizontal API scaling.
+8. Track runtime schema status with `schema_migrations` and `scripts/ops/schema_status.py` before independent API/worker version rollouts.
+9. Run `scripts/ops/smoke_load.py` and larger load tests for upload, queue-claim, report, graph, and query endpoints before increasing worker concurrency.
 
 ## Release Readiness Checks
 
@@ -37,3 +37,5 @@ This supports controlled production deployments with cleaner process isolation. 
 - Backup and restore drill completed for the target environment.
 - Evidence key rotation dry-run completed.
 - Audit hash chain verified on a backup copy.
+- Runtime schema status recorded before and after deployment.
+- Smoke/load probe completed against the deployed ingress.
