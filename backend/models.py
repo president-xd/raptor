@@ -13,20 +13,20 @@ from schema import (
 
 class InvestigateRequest(BaseModel):
     """Request body for POST /api/v1/investigate"""
-    time_range_start: Optional[str] = None
-    time_range_end: Optional[str] = None
+    time_range_start: Optional[str] = Field(default=None, max_length=64)
+    time_range_end: Optional[str] = Field(default=None, max_length=64)
 
 
 class InvestigateTextRequest(BaseModel):
     """Request body for text/query based investigations."""
-    case_name: str = ""
-    log_content: str = ""
-    source: str = "paste"
-    elastic_query: Optional[str] = None
-    time_range_start: Optional[str] = None
-    time_range_end: Optional[str] = None
-    sensitivity: str = "medium"
-    apt_filters: List[str] = Field(default_factory=list)
+    case_name: str = Field(default="", max_length=200)
+    log_content: str = Field(default="", max_length=10_485_760)
+    source: str = Field(default="paste", max_length=64)
+    elastic_query: Optional[str] = Field(default=None, max_length=1000)
+    time_range_start: Optional[str] = Field(default=None, max_length=64)
+    time_range_end: Optional[str] = Field(default=None, max_length=64)
+    sensitivity: str = Field(default="medium", max_length=32)
+    apt_filters: List[str] = Field(default_factory=list, max_length=50)
 
 
 class InvestigateResponse(BaseModel):
@@ -121,7 +121,6 @@ class EvidenceFileSummary(BaseModel):
     id: int = 0
     investigation_id: str
     original_filename: str = ""
-    stored_path: str = ""
     sha256: str = ""
     size_bytes: int = 0
     content_type: str = ""
@@ -157,9 +156,9 @@ class AuditLogResponse(BaseModel):
 
 class AuthSessionRequest(BaseModel):
     """Runtime browser authentication request."""
-    api_key: str = ""
-    username: str = ""
-    password: str = ""
+    api_key: str = Field(default="", max_length=256)
+    username: str = Field(default="", max_length=128)
+    password: str = Field(default="", max_length=256)
 
 
 class AuthSessionResponse(BaseModel):
@@ -204,11 +203,11 @@ class CisaKevResponse(BaseModel):
 
 class ElasticPollRequest(BaseModel):
     """Request body for manually polling Elasticsearch."""
-    query: str = "*"
-    time_range_start: Optional[str] = None
-    time_range_end: Optional[str] = None
-    case_name: str = ""
-    apt_filters: List[str] = Field(default_factory=list)
+    query: str = Field(default="*", min_length=1, max_length=1000)
+    time_range_start: Optional[str] = Field(default=None, max_length=64)
+    time_range_end: Optional[str] = Field(default=None, max_length=64)
+    case_name: str = Field(default="", max_length=200)
+    apt_filters: List[str] = Field(default_factory=list, max_length=50)
 
 
 class ElasticPollResponse(BaseModel):
@@ -235,8 +234,8 @@ class ElasticPollStatus(BaseModel):
 
 class SimulateRequest(BaseModel):
     """Request body for POST /api/v1/simulate"""
-    investigation_id: str
-    apt_group: Optional[str] = None
+    investigation_id: str = Field(..., max_length=64)
+    apt_group: Optional[str] = Field(default=None, max_length=200)
 
 
 class SimulationResponse(BaseModel):
@@ -251,8 +250,8 @@ class SimulationResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     """Request body for POST /api/v1/query"""
-    question: str
-    investigation_id: str
+    question: str = Field(..., min_length=1, max_length=2000)
+    investigation_id: str = Field(..., max_length=64)
 
 
 class QueryResponse(BaseModel):
