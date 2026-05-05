@@ -49,6 +49,7 @@ Implemented today:
 - CI security gates for Python dependencies, frontend dependencies, secret scanning, filesystem scanning, and backend/frontend container image scanning.
 - Operational tooling for backup/restore, audit hash-chain verification, audit export, expired evidence cleanup, and evidence encryption key rotation.
 - Prometheus alert rules, a starter Grafana dashboard, and an observability runbook for production monitoring.
+- Redis-backed production rate limiting, trusted ingress SSO/OIDC header support, schema migration version tracking, and smoke/load drill tooling.
 
 Operational boundaries:
 
@@ -181,6 +182,8 @@ FastAPI backend
 | Weaviate gRPC | `localhost:50051` | Weaviate v4 client transport |
 | Elasticsearch | `http://localhost:9200` | Optional investigation source |
 | Redis | `localhost:6379` | Lightweight connector cache and health check |
+
+Production deployments should set `RAPTOR_RATE_LIMIT_BACKEND=redis` so API rate limits are shared across API processes. Local development defaults to the in-memory limiter.
 
 ## Quick Start With Docker
 
@@ -500,6 +503,12 @@ Copy `.env.example` to `.env` before running Docker or the backend locally.
 | `RAPTOR_AUTH_EXEMPT_HEALTH` | `true` | Leaves `/api/v1/health` public when API-key auth is enabled. |
 | `RAPTOR_ALLOW_AUTH_DISABLED` | `false` | Allows protected API routes without auth only when explicitly set to `true` for local development. |
 | `RAPTOR_REQUIRE_RBAC` | `true` | Enforces endpoint role checks, tenant scoping, and case ownership. |
+| `RAPTOR_RATE_LIMIT_BACKEND` | `memory` | Rate-limit backend: `memory` for local development, `redis` for production multi-process deployments. |
+| `RAPTOR_TRUSTED_SSO_ENABLED` | `false` | Trust identity headers from an authenticated ingress or identity-aware proxy. |
+| `RAPTOR_TRUSTED_PROXY_CIDRS` | `127.0.0.1/32,::1/128` | CIDR allowlist for proxies permitted to assert SSO headers. |
+| `RAPTOR_SSO_USER_HEADER` | `x-forwarded-user` | Header containing the authenticated user from trusted ingress. |
+| `RAPTOR_SSO_ROLES_HEADER` | `x-forwarded-roles` | Header containing comma/space-separated `viewer`, `analyst`, or `admin` roles. |
+| `RAPTOR_SSO_TENANT_HEADER` | `x-forwarded-tenant` | Header containing the tenant identifier from trusted ingress. |
 | `RAPTOR_BOOTSTRAP_ADMIN_USERNAME` | `admin` | Local bootstrap admin username created during database initialization when a password is set. |
 | `RAPTOR_BOOTSTRAP_ADMIN_PASSWORD` | empty | Bootstrap admin password. Set a strong value before creating the runtime database. |
 | `RAPTOR_AUTH_MAX_FAILURES` | `5` | Failed login count before temporary lockout. |
@@ -565,6 +574,8 @@ RAPTOR includes baseline operational artifacts for teams running beyond a privat
 | Audit export | `scripts/ops/export_audit_log.py` |
 | Evidence retention | `scripts/ops/cleanup_expired_evidence.py` |
 | Evidence key rotation | `scripts/ops/rotate_evidence_key.py` |
+| Schema status | `scripts/ops/schema_status.py` |
+| Smoke/load drill | `scripts/ops/smoke_load.py` |
 
 Recommended release gate:
 
@@ -585,6 +596,12 @@ python scripts/ops/export_audit_log.py --db data/raptor.db --out exports/audit-l
 
 # Preview expired evidence cleanup before approval
 python scripts/ops/cleanup_expired_evidence.py --db data/raptor.db
+
+# Check recorded runtime schema migrations
+python scripts/ops/schema_status.py --db data/raptor.db
+
+# Run a lightweight health smoke/load probe against a running backend
+python scripts/ops/smoke_load.py --base-url http://127.0.0.1:8000/api/v1
 
 # Back up local runtime artifacts
 scripts/ops/backup.sh backups/$(date -u +%Y%m%dT%H%M%SZ)
@@ -652,6 +669,8 @@ curl http://localhost:8000/api/v1/health/detailed
 - The backend emits a Content Security Policy and redacts detailed subsystem health for non-admin/service users.
 - CI includes dependency scanning, secret scanning, filesystem scanning, and container scanning. Treat failures as release blockers unless explicitly risk-accepted.
 - In-process rate limiting is a defensive guardrail. Put ingress-level or Redis-backed rate limiting in front of multi-node deployments.
+- Set `RAPTOR_RATE_LIMIT_BACKEND=redis` in production so limits are shared across API processes; keep ingress-level limits as defense in depth.
+- Trusted SSO headers are accepted only when `RAPTOR_TRUSTED_SSO_ENABLED=true` and the request source matches `RAPTOR_TRUSTED_PROXY_CIDRS`; never expose those headers directly to clients.
 - Evidence API responses expose metadata, not internal filesystem paths. Do not add raw evidence download endpoints without explicit entitlement and audit requirements.
 - Use bootstrap credentials only to create the first administrator, then rotate secrets and issue named operator accounts through the database-backed identity model.
 - Do not embed API keys into frontend builds. The React console uses an HttpOnly session cookie created at runtime.
