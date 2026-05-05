@@ -1889,6 +1889,7 @@ function ActorModal({ actor, onClose, loading }) {
 function MitrePage({ report, matrix, loading, error, onRefresh }) {
   const cells = useMemo(() => normalizeMitreMatrix(matrix, report?.findings || []), [matrix, report]);
   const [selected, setSelected] = useState(null);
+  const selectedUrl = safeMitreUrl(selected?.url);
 
   useEffect(() => {
     const techniques = cells.flatMap((column) => column.techniques);
@@ -1951,8 +1952,8 @@ function MitrePage({ report, matrix, loading, error, onRefresh }) {
         {selected?.tactics?.length > 0 && <Row label="Tactics" value={selected.tactics.map(formatPhase).join(', ')} />}
         {selected?.platforms?.length > 0 && <Row label="Platforms" value={selected.platforms.slice(0, 6).join(', ')} />}
         {selected?.evidence_summary && <p>{selected.evidence_summary}</p>}
-        {selected?.url && (
-          <a href={selected.url} target="_blank" rel="noreferrer" className="secondary-button mitre-link">
+        {selectedUrl && (
+          <a href={selectedUrl} target="_blank" rel="noreferrer" className="secondary-button mitre-link">
             <ExternalLink size={15} />
             Open MITRE ATT&CK
           </a>
@@ -2977,12 +2978,26 @@ function downloadMarkdown(report, showToast) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${report.investigation_id || 'raptor-report'}.md`;
+  anchor.download = `${safeDownloadName(report.investigation_id || 'raptor-report')}.md`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
   showToast?.('Report downloaded from backend response');
+}
+
+function safeMitreUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (parsed.protocol === 'https:' && parsed.hostname === 'attack.mitre.org') return parsed.toString();
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function safeDownloadName(value) {
+  return String(value || 'raptor-report').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120) || 'raptor-report';
 }
 
 function techniquePhase(report, techniqueId) {
