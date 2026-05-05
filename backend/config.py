@@ -81,6 +81,16 @@ RAPTOR_AUTH_EXEMPT_HEALTH = os.getenv("RAPTOR_AUTH_EXEMPT_HEALTH", "true").lower
 RAPTOR_ALLOW_AUTH_DISABLED = os.getenv("RAPTOR_ALLOW_AUTH_DISABLED", "false").lower() == "true"
 RAPTOR_SESSION_COOKIE_SECURE = os.getenv("RAPTOR_SESSION_COOKIE_SECURE", "false").lower() == "true"
 RAPTOR_REQUIRE_RBAC = os.getenv("RAPTOR_REQUIRE_RBAC", "true").lower() == "true"
+RAPTOR_RATE_LIMIT_BACKEND = os.getenv("RAPTOR_RATE_LIMIT_BACKEND", "memory").lower()
+RAPTOR_TRUSTED_SSO_ENABLED = os.getenv("RAPTOR_TRUSTED_SSO_ENABLED", "false").lower() == "true"
+RAPTOR_TRUSTED_PROXY_CIDRS = [
+  item.strip()
+  for item in os.getenv("RAPTOR_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128").split(",")
+  if item.strip()
+]
+RAPTOR_SSO_USER_HEADER = os.getenv("RAPTOR_SSO_USER_HEADER", "x-forwarded-user").lower()
+RAPTOR_SSO_ROLES_HEADER = os.getenv("RAPTOR_SSO_ROLES_HEADER", "x-forwarded-roles").lower()
+RAPTOR_SSO_TENANT_HEADER = os.getenv("RAPTOR_SSO_TENANT_HEADER", "x-forwarded-tenant").lower()
 RAPTOR_BOOTSTRAP_ADMIN_USERNAME = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_USERNAME", "admin")
 RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD", "")
 RAPTOR_AUTH_MAX_FAILURES = int(os.getenv("RAPTOR_AUTH_MAX_FAILURES", "5"))
@@ -272,6 +282,8 @@ def validate_startup_config() -> None:
         raise RuntimeError("RAPTOR_PROCESS_ROLE must be one of: api, worker, all")
     if RAPTOR_DB_ENGINE not in {"sqlite", "postgresql"}:
         raise RuntimeError("RAPTOR_DB_ENGINE must be one of: sqlite, postgresql")
+    if RAPTOR_RATE_LIMIT_BACKEND not in {"memory", "redis"}:
+        raise RuntimeError("RAPTOR_RATE_LIMIT_BACKEND must be one of: memory, redis")
 
     if not RAPTOR_PRODUCTION:
         return
@@ -302,6 +314,10 @@ def validate_startup_config() -> None:
         failures.append("CORS_ALLOW_ORIGINS must be set to production frontend origins")
     if RAPTOR_PROCESS_ROLE == "all":
         failures.append("RAPTOR_PROCESS_ROLE=all is for local development; use separate api and worker processes")
+    if RAPTOR_RATE_LIMIT_BACKEND != "redis":
+        failures.append("RAPTOR_RATE_LIMIT_BACKEND=redis is required for production multi-process rate limiting")
+    if RAPTOR_TRUSTED_SSO_ENABLED and not RAPTOR_TRUSTED_PROXY_CIDRS:
+        failures.append("RAPTOR_TRUSTED_PROXY_CIDRS must be set when trusted SSO headers are enabled")
 
     if failures:
         joined = "; ".join(failures)
