@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -67,6 +68,13 @@ def _verify_expected_sha256(actual: str) -> None:
         )
 
 
+def _validate_attack_stix_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "raw.githubusercontent.com":
+        raise ValueError("ATTACK_STIX_URL must be HTTPS and hosted on raw.githubusercontent.com")
+    return url
+
+
 def load_stix_bundle(download_if_missing: bool = True) -> dict:
     """Load the cached Enterprise ATT&CK STIX bundle with optional download."""
     path = _cache_path()
@@ -80,10 +88,13 @@ def load_stix_bundle(download_if_missing: bool = True) -> dict:
         raise FileNotFoundError(f"ATT&CK STIX bundle not found at {path}")
 
     import requests
-    logger.info(f"Downloading Enterprise ATT&CK STIX bundle from {ATTACK_STIX_URL}")
-    response = requests.get(ATTACK_STIX_URL, timeout=120)
+    feed_url = _validate_attack_stix_url(ATTACK_STIX_URL)
+    logger.info(f"Downloading Enterprise ATT&CK STIX bundle from {feed_url}")
+    response = requests.get(feed_url, timeout=120)
     response.raise_for_status()
     raw = response.content
+    if len(raw) > 250 * 1024 * 1024:
+        raise ValueError("ATT&CK STIX bundle response is unexpectedly large")
     digest = _sha256_bytes(raw)
     _verify_expected_sha256(digest)
     STIX_DIR.mkdir(parents=True, exist_ok=True)
