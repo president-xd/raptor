@@ -17,6 +17,7 @@ Production deployments must provide:
 - `RAPTOR_API_KEY`, `RAPTOR_BOOTSTRAP_ADMIN_PASSWORD`, and `EVIDENCE_ENCRYPTION_KEY` from a secrets manager.
 - `RAPTOR_ALLOW_AUTH_DISABLED=false`.
 - `RAPTOR_REQUIRE_RBAC=true`.
+- `RAPTOR_RATE_LIMIT_BACKEND=redis` so API rate limits work across API processes.
 - `RAPTOR_SESSION_COOKIE_SECURE=true`.
 - Production `CORS_ALLOW_ORIGINS` and `CSRF_TRUSTED_ORIGINS` values matching the deployed frontend origin.
 - `RAPTOR_ALLOW_EXTERNAL_LLM=false` unless telemetry export is explicitly approved.
@@ -28,6 +29,8 @@ Production deployments must provide:
 ## Identity And Access
 
 RAPTOR supports server-side sessions, local bootstrap admin, roles, tenants, and case ownership metadata. Use the bootstrap admin only to create or rotate operational credentials, then manage access through a trusted identity layer or a hardened user-provisioning path.
+
+For SSO/OIDC, terminate authentication at a trusted ingress or identity-aware proxy and set `RAPTOR_TRUSTED_SSO_ENABLED=true`. Only proxies in `RAPTOR_TRUSTED_PROXY_CIDRS` may assert `RAPTOR_SSO_USER_HEADER`, `RAPTOR_SSO_ROLES_HEADER`, and `RAPTOR_SSO_TENANT_HEADER`; strip those headers from all client-originated requests at the ingress.
 
 Roles:
 
@@ -64,6 +67,7 @@ Investigations are queued in `job_queue` in the runtime metadata database. In pr
 - `job_queue.status`
 - `investigations.status`
 - `parser_errors`
+- `schema_migrations`
 
 ## Deployment Gate
 
@@ -121,6 +125,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml config
 ```
 
 CI additionally runs PostgreSQL integration, secret scanning, filesystem vulnerability scanning, and container scanning.
+
+Before and after rollout, record runtime schema status and run a lightweight smoke/load probe:
+
+```bash
+python scripts/ops/schema_status.py --db data/raptor.db
+python scripts/ops/smoke_load.py --base-url https://raptor.example.com/api/v1 --api-key "$RAPTOR_API_KEY"
+```
 
 ## Incident Response
 
