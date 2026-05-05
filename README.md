@@ -45,6 +45,10 @@ Implemented today:
 - Docker Compose ports bind to `127.0.0.1` by default through `LOCAL_BIND_ADDRESS`.
 - Windows and Linux helper scripts for Docker and hybrid local runs.
 - Regression tests for parser behavior, persistence helpers, graph scoping/export, connector state, and natural-language query safety guards.
+- Production security hardening for bounded request models, CSP headers, feed URL allowlists, redacted health details, and safer evidence metadata exposure.
+- CI security gates for Python dependencies, frontend dependencies, secret scanning, filesystem scanning, and backend/frontend container image scanning.
+- Operational tooling for backup/restore, audit hash-chain verification, audit export, expired evidence cleanup, and evidence encryption key rotation.
+- Prometheus alert rules, a starter Grafana dashboard, and an observability runbook for production monitoring.
 
 Operational boundaries:
 
@@ -112,6 +116,8 @@ FastAPI backend
 | Frontend | React 18, Vite 5, Tailwind CSS, lucide-react |
 | Frontend serving | Vite in development, Nginx in Docker |
 | Deployment | Docker Compose plus optional local hybrid scripts |
+| Security scanning | pip-audit, npm audit, Gitleaks, Trivy |
+| Observability | Prometheus-compatible metrics, Grafana dashboard seed, alert rules |
 
 ## Repository Layout
 
@@ -142,13 +148,19 @@ FastAPI backend
 |   `-- Dockerfile
 |-- docs/
 |   |-- production-runbook.md      # Deployment, backup, operations, and incident procedures
+|   |-- observability.md           # Metrics, alerts, logs, and operational review cadence
 |   |-- threat-model.md            # Trust boundaries, abuse paths, and required controls
 |   |-- data-governance.md         # Evidence, telemetry, LLM, retention, and audit policy
 |   `-- scaling-limits.md          # Scale limits and migration path
+|-- observability/
+|   |-- prometheus-rules.yml       # Starter production alert rules
+|   `-- grafana-dashboard.json     # Starter Grafana dashboard JSON
 |-- scripts/
 |   |-- docker/                    # Full Docker launch helpers
-|   `-- hybrid/                    # Docker infrastructure plus local app helpers
+|   |-- hybrid/                    # Docker infrastructure plus local app helpers
+|   `-- ops/                       # Backup, restore, audit, retention, and key-rotation tools
 |-- tests/                         # Top-level offline regression suite
+|-- Makefile                       # Local validation and production readiness targets
 |-- docker-compose.yml
 |-- docker-compose.prod.yml
 |-- .env.example
@@ -538,7 +550,59 @@ Runtime state:
 
 Treat runtime databases, cached intelligence, and uploaded logs as sensitive investigation artifacts.
 
+## Production Operations
+
+RAPTOR includes baseline operational artifacts for teams running beyond a private workstation:
+
+| Area | Artifact |
+|---|---|
+| Release validation | `Makefile` targets: `make validate`, `make security-scan`, `make compose-config` |
+| Metrics and alerts | `observability/prometheus-rules.yml` and `/api/v1/metrics` |
+| Dashboard seed | `observability/grafana-dashboard.json` |
+| Observability runbook | `docs/observability.md` |
+| Backup and restore | `scripts/ops/backup.sh`, `scripts/ops/restore.sh` |
+| Audit integrity | `scripts/ops/verify_audit_chain.py` |
+| Audit export | `scripts/ops/export_audit_log.py` |
+| Evidence retention | `scripts/ops/cleanup_expired_evidence.py` |
+| Evidence key rotation | `scripts/ops/rotate_evidence_key.py` |
+
+Recommended release gate:
+
+```bash
+make validate
+make security-scan
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config
+```
+
+Recommended recurring drills:
+
+```bash
+# Verify a backup copy of the audit chain
+python scripts/ops/verify_audit_chain.py --db data/raptor.db
+
+# Export audit records to JSONL for immutable storage
+python scripts/ops/export_audit_log.py --db data/raptor.db --out exports/audit-log.jsonl
+
+# Preview expired evidence cleanup before approval
+python scripts/ops/cleanup_expired_evidence.py --db data/raptor.db
+
+# Back up local runtime artifacts
+scripts/ops/backup.sh backups/$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+For production PostgreSQL deployments, pair these filesystem helpers with a `pg_dump`/restore workflow and run restore drills in an isolated environment before relying on backups.
+
 ## Testing And Verification
+
+Convenience targets:
+
+```bash
+make setup
+make validate
+make security-scan
+```
+
+`make validate` runs backend tests, the frontend production build, and production Compose config validation. `make security-scan` runs local dependency audits when `pip-audit` and npm dependencies are installed.
 
 Top-level offline regression suite:
 
@@ -569,7 +633,7 @@ npm run build
 Docker Compose validation:
 
 ```bash
-docker compose config --quiet
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config
 ```
 
 Health check after startup:
@@ -584,6 +648,11 @@ curl http://localhost:8000/api/v1/health/detailed
 - Replace the `.env.example` placeholder values before using the stack beyond local development.
 - Docker Compose publishes service ports on `127.0.0.1` by default. Keep that binding for local work, or run with `docker-compose.prod.yml` behind a TLS-terminating ingress.
 - Tighten `CORS_ALLOW_ORIGINS` for any non-local deployment.
+- Production mode disables public OpenAPI docs, requires non-placeholder secrets, requires secure cookies, and refuses unsafe lab defaults.
+- The backend emits a Content Security Policy and redacts detailed subsystem health for non-admin/service users.
+- CI includes dependency scanning, secret scanning, filesystem scanning, and container scanning. Treat failures as release blockers unless explicitly risk-accepted.
+- In-process rate limiting is a defensive guardrail. Put ingress-level or Redis-backed rate limiting in front of multi-node deployments.
+- Evidence API responses expose metadata, not internal filesystem paths. Do not add raw evidence download endpoints without explicit entitlement and audit requirements.
 - Use bootstrap credentials only to create the first administrator, then rotate secrets and issue named operator accounts through the database-backed identity model.
 - Do not embed API keys into frontend builds. The React console uses an HttpOnly session cookie created at runtime.
 - Audit logging is append-only at the SQLite table level and hash-chained per entry. Export audit records to immutable external storage when regulatory retention requires out-of-process custody.
@@ -591,7 +660,7 @@ curl http://localhost:8000/api/v1/health/detailed
 - External LLM calls are disabled unless `RAPTOR_ALLOW_EXTERNAL_LLM=true`; prompts redact common secrets before provider submission.
 - LLM output is validated and has fallbacks, but attribution and simulation should be treated as analyst-supporting evidence, not automatic truth.
 - Uploaded telemetry can contain credentials, hostnames, usernames, IP addresses, file paths, and other sensitive data.
-- Read `docs/production-runbook.md`, `docs/threat-model.md`, `docs/data-governance.md`, and `docs/scaling-limits.md` before operating the stack outside a private workstation.
+- Read `docs/production-runbook.md`, `docs/observability.md`, `docs/threat-model.md`, `docs/data-governance.md`, and `docs/scaling-limits.md` before operating the stack outside a private workstation.
 
 ## Roadmap
 
@@ -605,6 +674,8 @@ Likely next engineering steps:
 - Add report export to PDF or DOCX.
 - Add frontend component, accessibility, and API integration tests.
 - Add Helm or Kubernetes manifests for teams that do not deploy with Compose.
+- Refactor `backend/main.py` into routers/services/repositories and split `Dashboard.jsx` into feature components/hooks.
+- Replace local filesystem evidence storage with object storage and KMS for regulated multi-node deployments.
 
 ## License
 
