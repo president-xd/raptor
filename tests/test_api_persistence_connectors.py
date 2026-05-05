@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from starlette.responses import Response
 
 from helpers import BACKEND_DIR  # noqa: F401
@@ -33,6 +34,8 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             "ELASTIC_POLL_QUERY": app_main.ELASTIC_POLL_QUERY,
             "ELASTIC_POLL_INTERVAL_SECONDS": app_main.ELASTIC_POLL_INTERVAL_SECONDS,
             "ELASTIC_POLL_WINDOW_MINUTES": app_main.ELASTIC_POLL_WINDOW_MINUTES,
+            "CISA_KEV_URL": app_main.CISA_KEV_URL,
+            "RATE_LIMIT_BUCKETS": dict(app_main.RATE_LIMIT_BUCKETS),
         }
         app_main.DB_PATH = self.root / "raptor.db"
         app_main.EVIDENCE_DIR = self.root / "evidence"
@@ -48,11 +51,16 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         app_main.ELASTIC_POLL_QUERY = "*"
         app_main.ELASTIC_POLL_INTERVAL_SECONDS = 300
         app_main.ELASTIC_POLL_WINDOW_MINUTES = 5
+        app_main.RATE_LIMIT_BUCKETS.clear()
         app_main.init_db()
 
     def tearDown(self):
         for name, value in self.originals.items():
-            setattr(app_main, name, value)
+            if name == "RATE_LIMIT_BUCKETS":
+                app_main.RATE_LIMIT_BUCKETS.clear()
+                app_main.RATE_LIMIT_BUCKETS.update(value)
+            else:
+                setattr(app_main, name, value)
         self.tmp.cleanup()
 
     def test_api_key_middleware_allows_docs_and_guards_api(self):
@@ -132,6 +140,25 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         self.assertEqual(payload["total_count"], 1)
         self.assertEqual(payload["evidence"][0]["original_filename"], "raw.json")
         self.assertEqual(payload["evidence"][0]["source"], "file")
+        self.assertNotIn("stored_path", payload["evidence"][0])
+
+    def test_public_evidence_summary_model_does_not_expose_stored_path(self):
+        summary = app_main.EvidenceFileSummary(
+            investigation_id="case-1",
+            original_filename="raw.json",
+            stored_path="/secret/internal/path/raw.json",
+            sha256="abc",
+        )
+
+        self.assertNotIn("stored_path", summary.model_dump())
+
+    def test_request_models_reject_oversized_security_sensitive_fields(self):
+        with self.assertRaises(ValidationError):
+            app_main.AuthSessionRequest(username="u", password="x" * 300)
+        with self.assertRaises(ValidationError):
+            app_main.QueryRequest(investigation_id="case-1", question="q" * 2500)
+        with self.assertRaises(ValidationError):
+            app_main.ElasticPollRequest(query="q" * 1200)
 
     def test_evidence_encryption_records_metadata_and_hides_plaintext(self):
         app_main.EVIDENCE_ENCRYPTION_KEY = "test-evidence-key-with-enough-length"
@@ -309,6 +336,48 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
 
         self.assertEqual(entry["actor"], "api-key")
 
+    def test_audit_actor_uses_authenticated_principal_when_available(self):
+        class State:
+            principal = app_main._principal("alice", ["analyst"], "default", "user-1")
+
+        class Client:
+            host = "127.0.0.1"
+
+        class FakeRequest:
+            state = State()
+            headers = {"x-raptor-actor": "spoofed-admin"}
+            cookies = {}
+            client = Client()
+
+        app_main.audit_log(FakeRequest(), "report.viewed", "case-1", {})
+        entry = app_main.list_audit_entries(investigation_id="case-1")[0]
+
+        self.assertEqual(entry["actor"], "alice")
+
+    def test_dynamic_update_helpers_reject_unknown_columns(self):
+        with self.assertRaises(ValueError):
+            app_main.db_update("case-1", **{"status = 'complete' --": "x"})
+        with self.assertRaises(ValueError):
+            app_main.update_elastic_poll_state(**{"enabled = 1 --": 1})
+
+    def test_external_feed_url_allowlist_blocks_internal_hosts(self):
+        app_main.CISA_KEV_URL = "http://127.0.0.1:8000/secrets"
+
+        with self.assertRaises(RuntimeError):
+            app_main.fetch_cisa_kev(refresh=True)
+
+    def test_rate_limit_enforcement_blocks_after_configured_threshold(self):
+        app_main.RATE_LIMIT_BUCKETS.clear()
+        app_main.RATE_LIMIT_RULES["auth"] = (2, 60)
+        try:
+            app_main.enforce_rate_limit(None, "auth")
+            app_main.enforce_rate_limit(None, "auth")
+            with self.assertRaises(HTTPException) as ctx:
+                app_main.enforce_rate_limit(None, "auth")
+            self.assertEqual(ctx.exception.status_code, 429)
+        finally:
+            app_main.RATE_LIMIT_RULES["auth"] = (10, 60)
+
     def test_audit_table_rejects_update_and_delete(self):
         app_main.audit_log(None, "report.viewed", "case-1", {"status": "complete"})
 
@@ -342,10 +411,18 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
     def test_auth_session_creates_server_side_record(self):
         response = Response()
 
+        class Client:
+            host = "127.0.0.1"
+
+        class FakeRequest:
+            state = type("State", (), {})()
+            client = Client()
+
         payload = asyncio.run(
             app_main.create_auth_session(
                 AuthSessionRequest(username="admin", password="admin-secret"),
                 response,
+                FakeRequest(),
             )
         )
 
