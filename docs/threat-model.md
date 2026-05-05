@@ -29,9 +29,15 @@
 | Audit tampering | Append-only triggers plus hash chaining |
 | Worker loss | Durable `job_queue`, retry state, stale-lock recovery |
 | Infrastructure exposure | Localhost-bound compose defaults, production overlay removes infrastructure ports |
+| Vulnerable dependencies or images | CI dependency audit, npm audit, Trivy filesystem/container scans |
+| Secret leakage in repository | Gitleaks secret scan in CI and local artifact ignores |
+| Retention overrun | Evidence retention metadata plus `scripts/ops/cleanup_expired_evidence.py` |
+| Backup tampering | Backup checksums plus audit-chain verification before export |
 
 ## Residual Risks
 
 - SQLite is still a single-node embedded database. Use a managed relational database adapter before horizontally scaling backend workers.
 - Evidence encryption is application-managed. Use KMS-backed object storage for regulated environments and centralized key rotation.
 - Local bootstrap users are suitable for controlled deployments; large enterprises should integrate SSO/OIDC at the ingress or API layer.
+- In-memory API rate limits are a single-process guardrail. Put production ingress or Redis-backed rate limiting in front of horizontally scaled deployments.
+- Local filesystem evidence storage is acceptable for controlled single-node or mounted-volume deployments. Regulated multi-node deployments should use object storage and KMS.
