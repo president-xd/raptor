@@ -105,6 +105,9 @@ app = FastAPI(
     description="Retrieval-Augmented Persistent Threat Orchestration and Reasoning",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if RAPTOR_PRODUCTION else "/docs",
+    redoc_url=None if RAPTOR_PRODUCTION else "/redoc",
+    openapi_url=None if RAPTOR_PRODUCTION else "/openapi.json",
 )
 
 app.add_middleware(
@@ -135,6 +138,56 @@ METRICS = {
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 REQUEST_ID_RE = re.compile(r"[^A-Za-z0-9_.:-]")
+RATE_LIMIT_BUCKETS: dict[tuple[str, str], list[float]] = {}
+RATE_LIMIT_RULES = {
+    "auth": (10, 60),
+    "upload": (20, 300),
+    "query": (60, 300),
+    "connector": (30, 300),
+}
+ALLOWED_FEED_HOSTS = {
+    "www.cisa.gov",
+    "cisa.gov",
+    "raw.githubusercontent.com",
+}
+ALLOWED_INVESTIGATION_UPDATE_COLUMNS = {
+    "status", "progress", "current_phase", "error", "findings_json",
+    "attack_sequence_json", "anomalies_json", "attribution_json", "graph_json",
+    "narrative_report", "event_count", "technique_count", "completed_at",
+}
+ALLOWED_ELASTIC_POLL_UPDATE_COLUMNS = {
+    "enabled", "query", "interval_seconds", "window_minutes", "last_polled_at",
+    "last_status", "last_error", "investigation_count",
+}
+
+
+def _client_rate_key(request: Optional[Request]) -> str:
+    if request is None:
+        return "system"
+    principal = getattr(getattr(request, "state", None), "principal", None)
+    if principal and principal.get("user_id"):
+        return f"user:{principal['user_id']}"
+    client = getattr(request, "client", None)
+    return f"ip:{getattr(client, 'host', 'unknown')}"
+
+
+def enforce_rate_limit(request: Optional[Request], bucket: str) -> None:
+    limit, window = RATE_LIMIT_RULES.get(bucket, (60, 60))
+    key = (_client_rate_key(request), bucket)
+    now = time.time()
+    recent = [item for item in RATE_LIMIT_BUCKETS.get(key, []) if now - item < window]
+    if len(recent) >= limit:
+        METRICS["auth_failures_total"] += 1 if bucket == "auth" else 0
+        raise HTTPException(status_code=429, detail="Rate limit exceeded; retry later")
+    recent.append(now)
+    RATE_LIMIT_BUCKETS[key] = recent
+
+
+def validate_feed_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_FEED_HOSTS:
+        raise RuntimeError("External feed URL must be HTTPS and on the approved allowlist")
+    return url
 
 
 def _request_id_from_headers(request: Request) -> str:
@@ -190,6 +243,17 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "object-src 'none'",
+    )
     if RAPTOR_PRODUCTION:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
@@ -593,7 +657,9 @@ def authenticate_user(username: str, password: str) -> dict:
 async def optional_api_key_auth(request: Request, call_next):
     """Require an API key when RAPTOR_API_KEY is configured."""
     path = request.url.path
-    public_paths = {"/", "/docs", "/redoc", "/openapi.json", "/api/v1/auth/session"}
+    public_paths = {"/", "/api/v1/auth/session"}
+    if not RAPTOR_PRODUCTION:
+        public_paths.update({"/docs", "/redoc", "/openapi.json"})
     if getattr(request, "method", "GET") == "OPTIONS":
         return await call_next(request)
     if path in public_paths:
@@ -618,7 +684,10 @@ async def optional_api_key_auth(request: Request, call_next):
         return await call_next(request)
 
     if RAPTOR_ALLOW_AUTH_DISABLED and not RAPTOR_API_KEY:
-        _set_request_principal(request, _principal("anonymous", ["admin"], "default"))
+        client = getattr(request, "client", None)
+        if getattr(client, "host", "") not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+            return _json_auth_error(request, 401, {"detail": "Auth-disabled mode is restricted to local development"})
+        _set_request_principal(request, _principal("anonymous", ["analyst", "viewer"], "default"))
         return await call_next(request)
 
     METRICS["auth_failures_total"] += 1
@@ -868,6 +937,9 @@ def ensure_investigation_access(request: Request, inv_id: str, role: str = "view
 
 
 def db_update(inv_id: str, **kwargs):
+    invalid = set(kwargs) - ALLOWED_INVESTIGATION_UPDATE_COLUMNS
+    if invalid:
+        raise ValueError(f"Unsupported investigation update columns: {', '.join(sorted(invalid))}")
     conn = db_connect()
     sets = ", ".join(f"{k} = ?" for k in kwargs.keys())
     values = list(kwargs.values()) + [inv_id]
@@ -1019,7 +1091,7 @@ def list_evidence_files(investigation_id: str) -> list[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT id, investigation_id, original_filename, stored_path, sha256,
+        SELECT id, investigation_id, original_filename, sha256,
                size_bytes, content_type, source, encrypted, retention_expires_at, created_at
         FROM evidence_files
         WHERE investigation_id = ?
@@ -1078,6 +1150,9 @@ def audit_log(
 
 def _authenticated_actor(request: Request) -> str:
     """Derive audit actor from trusted authentication state, not user-supplied identity headers."""
+    principal = getattr(getattr(request, "state", None), "principal", None)
+    if principal and principal.get("actor"):
+        return str(principal.get("actor"))
     if not RAPTOR_API_KEY:
         return "local-auth-disabled" if RAPTOR_ALLOW_AUTH_DISABLED else "unauthenticated"
 
@@ -1219,6 +1294,10 @@ def fetch_elasticsearch_logs(
     """Fetch matching Elasticsearch documents and serialize them as JSON lines."""
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Elasticsearch query is required")
+    if len(query) > 1000:
+        raise HTTPException(status_code=400, detail="Elasticsearch query is too long")
+    if re.search(r'(^|\s)[*?]{2,}|/[^\"]{80,}/', query):
+        raise HTTPException(status_code=400, detail="Elasticsearch query is too broad or expensive")
 
     try:
         from elasticsearch import Elasticsearch
@@ -1238,7 +1317,7 @@ def fetch_elasticsearch_logs(
             body={
                 "query": {
                     "bool": {
-                        "must": [{"query_string": {"query": query}}],
+                        "must": [{"simple_query_string": {"query": query, "default_operator": "and"}}],
                         "filter": filters,
                     }
                 },
@@ -1370,12 +1449,15 @@ def fetch_cisa_kev(refresh: bool = False) -> dict:
 
     try:
         import requests
+        feed_url = validate_feed_url(CISA_KEV_URL)
         response = requests.get(
-            CISA_KEV_URL,
+            feed_url,
             timeout=30,
             headers={"User-Agent": "RAPTOR/1.0 threat-intel-connector"},
         )
         response.raise_for_status()
+        if len(response.content) > 25 * 1024 * 1024:
+            raise ValueError("CISA KEV feed response is unexpectedly large")
         payload = response.json()
     except Exception as e:
         if CISA_KEV_CACHE_PATH.exists():
@@ -1426,6 +1508,9 @@ def db_list(limit: int = 25, principal: Optional[dict] = None) -> list[dict]:
 def update_elastic_poll_state(**kwargs):
     if not kwargs:
         return
+    invalid = set(kwargs) - ALLOWED_ELASTIC_POLL_UPDATE_COLUMNS
+    if invalid:
+        raise ValueError(f"Unsupported Elasticsearch poll state columns: {', '.join(sorted(invalid))}")
     conn = db_connect()
     sets = ", ".join(f"{key} = ?" for key in kwargs)
     values = list(kwargs.values()) + ["default"]
@@ -1980,8 +2065,9 @@ def run_worker_process():
 # ─── API Endpoints ───────────────────────────────────────────────────
 
 @app.post("/api/v1/auth/session", response_model=AuthSessionResponse)
-async def create_auth_session(payload: AuthSessionRequest, response: Response):
+async def create_auth_session(payload: AuthSessionRequest, response: Response, request: Request):
     """Create a server-side browser session from user credentials or the service API key."""
+    enforce_rate_limit(request, "auth")
     principal = None
     if payload.api_key:
         if not RAPTOR_API_KEY or not hmac.compare_digest(payload.api_key, RAPTOR_API_KEY):
@@ -2062,6 +2148,7 @@ async def investigate(
     Upload a log file and start an investigation.
     POST /api/v1/investigate
     """
+    enforce_rate_limit(request, "upload")
     principal = require_role(request, "analyst")
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content:
@@ -2102,6 +2189,7 @@ def investigate_text(request: Request, background_tasks: BackgroundTasks, payloa
     Start an investigation from pasted logs or an Elasticsearch query.
     POST /api/v1/investigate/text
     """
+    enforce_rate_limit(request, "upload")
     principal = require_role(request, "analyst")
     log_content = payload.log_content or ""
     if not log_content.strip() and payload.elastic_query:
@@ -2399,6 +2487,7 @@ def query(request: Request, payload: QueryRequest):
     Natural language query against investigation.
     POST /api/v1/query
     """
+    enforce_rate_limit(request, "query")
     record = ensure_investigation_access(request, payload.investigation_id, "viewer")
 
     if record["status"] != "complete":
@@ -2492,6 +2581,7 @@ def get_cisa_kev(
 @app.post("/api/v1/threat-feeds/cisa-kev/sync", response_model=CisaKevResponse)
 def sync_cisa_kev(request: Request):
     """Force refresh the CISA KEV catalog cache."""
+    enforce_rate_limit(request, "connector")
     require_role(request, "analyst")
     payload = fetch_cisa_kev(refresh=True)
     vulnerabilities = payload.get("vulnerabilities", [])
@@ -2515,6 +2605,7 @@ def sync_cisa_kev(request: Request):
 @app.post("/api/v1/ingest/elasticsearch/poll", response_model=ElasticPollResponse)
 def poll_elasticsearch(request: Request, payload: ElasticPollRequest):
     """Poll Elasticsearch once and queue any returned events as an investigation."""
+    enforce_rate_limit(request, "connector")
     principal = require_role(request, "analyst")
     response = run_elasticsearch_poll_once(
         query=payload.query,
@@ -2657,8 +2748,10 @@ def _tcp_status(name: str, endpoint: str, default_port: int, timeout_seconds: fl
 
 
 @app.get("/api/v1/health/detailed")
-async def health_check_detailed():
+async def health_check_detailed(request: Request):
     """Bounded subsystem health for API/UI degraded-mode visibility."""
+    principal = require_role(request, "viewer")
+    full_details = _has_role(principal, "admin") or "service" in principal.get("roles", [])
     checks = {
         "api": {"status": "healthy", "detail": "FastAPI runtime responsive"},
         "database": {"status": "healthy", "backend": RAPTOR_DB_ENGINE, "detail": ""},
@@ -2734,6 +2827,11 @@ async def health_check_detailed():
     overall = "healthy"
     if any(v["status"] != "healthy" for v in checks.values()):
         overall = "degraded"
+
+    if not full_details:
+        for entry in checks.values():
+            if "detail" in entry:
+                entry["detail"] = "redacted; admin role required for subsystem detail"
 
     return {
         "status": overall,
