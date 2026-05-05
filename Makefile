@@ -26,6 +26,7 @@ compose-config:
 	ELASTIC_PASSWORD=ci_elastic_password_with_enough_entropy \
 	POSTGRES_PASSWORD=ci_postgres_password_with_enough_entropy \
 	RAPTOR_FRONTEND_ORIGIN=https://raptor.example.invalid \
+	RAPTOR_RATE_LIMIT_BACKEND=redis \
 	docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
 
 security-scan:
@@ -43,6 +44,12 @@ audit-verify:
 
 audit-export:
 	$(PYTHON) scripts/ops/export_audit_log.py --db data/raptor.db --out exports/audit-log.jsonl
+
+schema-status:
+	$(PYTHON) scripts/ops/schema_status.py --db data/raptor.db
+
+smoke-load:
+	$(PYTHON) scripts/ops/smoke_load.py --base-url http://127.0.0.1:8000/api/v1
 
 evidence-cleanup-dry-run:
 	$(PYTHON) scripts/ops/cleanup_expired_evidence.py --db data/raptor.db

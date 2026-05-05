@@ -17,6 +17,7 @@ import time
 import secrets
 import base64
 import re
+import ipaddress
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +54,12 @@ from config import (
     RAPTOR_ALLOW_AUTH_DISABLED,
     RAPTOR_SESSION_COOKIE_SECURE,
     RAPTOR_REQUIRE_RBAC,
+    RAPTOR_RATE_LIMIT_BACKEND,
+    RAPTOR_TRUSTED_SSO_ENABLED,
+    RAPTOR_TRUSTED_PROXY_CIDRS,
+    RAPTOR_SSO_USER_HEADER,
+    RAPTOR_SSO_ROLES_HEADER,
+    RAPTOR_SSO_TENANT_HEADER,
     RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
     RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
     RAPTOR_AUTH_MAX_FAILURES,
@@ -173,7 +180,10 @@ def _client_rate_key(request: Optional[Request]) -> str:
 
 def enforce_rate_limit(request: Optional[Request], bucket: str) -> None:
     limit, window = RATE_LIMIT_RULES.get(bucket, (60, 60))
-    key = (_client_rate_key(request), bucket)
+    client_key = _client_rate_key(request)
+    if RAPTOR_RATE_LIMIT_BACKEND == "redis" and _redis_rate_limit(client_key, bucket, limit, window):
+        return
+    key = (client_key, bucket)
     now = time.time()
     recent = [item for item in RATE_LIMIT_BUCKETS.get(key, []) if now - item < window]
     if len(recent) >= limit:
@@ -181,6 +191,55 @@ def enforce_rate_limit(request: Optional[Request], bucket: str) -> None:
         raise HTTPException(status_code=429, detail="Rate limit exceeded; retry later")
     recent.append(now)
     RATE_LIMIT_BUCKETS[key] = recent
+
+
+def _redis_rate_limit(client_key: str, bucket: str, limit: int, window: int) -> bool:
+    """Use Redis for multi-process rate limiting when available; return False to fall back."""
+    try:
+        safe_key = hashlib.sha256(f"{client_key}:{bucket}".encode("utf-8")).hexdigest()
+        redis_key = f"raptor:ratelimit:{safe_key}"
+        response = _redis_send_command("INCR", redis_key)
+        if not response or response.startswith(b"-"):
+            return False
+        current = 0
+        if response.startswith(b":"):
+            current = int(response[1:].split(b"\r\n", 1)[0])
+        if current == 1:
+            _redis_send_command("EXPIRE", redis_key, str(max(int(window), 1)))
+        if current > limit:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded; retry later")
+        return True
+    except HTTPException:
+        raise
+    except Exception:
+        return False
+
+
+def _request_from_trusted_proxy(request: Request) -> bool:
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", "")
+    if not host:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+        return any(address in ipaddress.ip_network(item, strict=False) for item in RAPTOR_TRUSTED_PROXY_CIDRS)
+    except ValueError:
+        return host in {"localhost", "testclient"}
+
+
+def _trusted_sso_principal(request: Request) -> Optional[dict]:
+    if not RAPTOR_TRUSTED_SSO_ENABLED or not _request_from_trusted_proxy(request):
+        return None
+    actor = request.headers.get(RAPTOR_SSO_USER_HEADER, "").strip()
+    if not actor:
+        return None
+    roles_raw = request.headers.get(RAPTOR_SSO_ROLES_HEADER, "viewer")
+    roles = [item.strip().lower() for item in re.split(r"[, ]+", roles_raw) if item.strip()]
+    allowed_roles = {"viewer", "analyst", "admin"}
+    roles = [role for role in roles if role in allowed_roles] or ["viewer"]
+    tenant_id = request.headers.get(RAPTOR_SSO_TENANT_HEADER, "default").strip() or "default"
+    user_id = hashlib.sha256(f"sso:{tenant_id}:{actor}".encode("utf-8")).hexdigest()[:32]
+    return _principal(actor, roles, tenant_id, user_id)
 
 
 def validate_feed_url(url: str) -> str:
@@ -677,6 +736,11 @@ async def optional_api_key_auth(request: Request, call_next):
         _set_request_principal(request, _principal("api-key", ["service"], "default", "api-key"))
         return await call_next(request)
 
+    sso_principal = _trusted_sso_principal(request)
+    if sso_principal:
+        _set_request_principal(request, sso_principal)
+        return await call_next(request)
+
     session_token = request.cookies.get("raptor_session", "")
     principal = _valid_session_token(session_token)
     if principal:
@@ -830,6 +894,12 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
         CREATE TRIGGER IF NOT EXISTS audit_log_no_update
         BEFORE UPDATE ON audit_log
         BEGIN
@@ -869,6 +939,13 @@ def init_db():
     for column, statement in evidence_migrations.items():
         if column not in evidence_columns:
             conn.execute(statement)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (?, ?)
+        """,
+        ("20260505_runtime_metadata_baseline", _utcnow()),
+    )
     audit_columns = {
         row[1]
         for row in conn.execute("PRAGMA table_info(audit_log)").fetchall()
