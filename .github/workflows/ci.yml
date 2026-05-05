@@ -48,6 +48,7 @@ jobs:
           ELASTIC_PASSWORD: ci_elastic_password_with_enough_entropy
           POSTGRES_PASSWORD: ci_postgres_password_with_enough_entropy
           RAPTOR_FRONTEND_ORIGIN: https://raptor.example.invalid
+          RAPTOR_RATE_LIMIT_BACKEND: redis
         run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config
 
   security-scan:
