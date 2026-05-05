@@ -33,11 +33,13 @@
 | Secret leakage in repository | Gitleaks secret scan in CI and local artifact ignores |
 | Retention overrun | Evidence retention metadata plus `scripts/ops/cleanup_expired_evidence.py` |
 | Backup tampering | Backup checksums plus audit-chain verification before export |
+| Forged SSO headers | SSO headers are accepted only from `RAPTOR_TRUSTED_PROXY_CIDRS`; ingress must strip client-supplied identity headers |
+| Multi-process rate-limit bypass | Production startup requires `RAPTOR_RATE_LIMIT_BACKEND=redis` |
 
 ## Residual Risks
 
 - SQLite is still a single-node embedded database. Use a managed relational database adapter before horizontally scaling backend workers.
 - Evidence encryption is application-managed. Use KMS-backed object storage for regulated environments and centralized key rotation.
 - Local bootstrap users are suitable for controlled deployments; large enterprises should integrate SSO/OIDC at the ingress or API layer.
-- In-memory API rate limits are a single-process guardrail. Put production ingress or Redis-backed rate limiting in front of horizontally scaled deployments.
+- In-memory API rate limits are a local-development guardrail. Production requires Redis-backed backend limits and should still use ingress limits as defense in depth.
 - Local filesystem evidence storage is acceptable for controlled single-node or mounted-volume deployments. Regulated multi-node deployments should use object storage and KMS.
