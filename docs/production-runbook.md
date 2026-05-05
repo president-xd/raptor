@@ -22,6 +22,8 @@ Production deployments must provide:
 - `RAPTOR_ALLOW_EXTERNAL_LLM=false` unless telemetry export is explicitly approved.
 - `RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS=true` only when this is a deliberate single-node SQLite deployment. Prefer PostgreSQL for production.
 - Backups for `data/raptor.db`, `data/evidence/`, Neo4j, Weaviate, Elasticsearch, and Redis volumes.
+- Prometheus scraping and alerting using `observability/prometheus-rules.yml`.
+- Dependency, secret, filesystem, and container scanning in CI.
 
 ## Identity And Access
 
@@ -38,6 +40,20 @@ Roles:
 Evidence is written under `data/evidence/{investigation_id}/`. Configure `EVIDENCE_ENCRYPTION_KEY` before accepting uploaded telemetry. New evidence blobs are encrypted with AES-256-GCM and record a key identifier in SQLite metadata. Rotate evidence keys by draining ingestion, re-encrypting evidence blobs, and validating hashes from `evidence_files.sha256`.
 
 Retention is configured by `EVIDENCE_RETENTION_DAYS`. Operational cleanup should remove expired evidence only after exporting required audit and case records.
+
+Useful operations:
+
+```bash
+# Dry-run expired evidence deletion
+python scripts/ops/cleanup_expired_evidence.py --db data/raptor.db
+
+# Execute expired evidence deletion after approval
+python scripts/ops/cleanup_expired_evidence.py --db data/raptor.db --execute
+
+# Rotate evidence encryption keys after a verified backup
+OLD_EVIDENCE_ENCRYPTION_KEY=old NEW_EVIDENCE_ENCRYPTION_KEY=new \
+  python scripts/ops/rotate_evidence_key.py --db data/raptor.db --execute
+```
 
 ## Worker Operations
 
@@ -73,6 +89,38 @@ Restore order:
 4. Start infrastructure and verify health.
 5. Start backend and confirm `/api/v1/health/detailed`.
 6. Reconcile queued/running jobs in `job_queue`.
+
+Baseline local backup and restore helpers:
+
+```bash
+scripts/ops/backup.sh backups/$(date -u +%Y%m%dT%H%M%SZ)
+scripts/ops/restore.sh backups/<backup-id>
+```
+
+For PostgreSQL deployments, add a `pg_dump` artifact beside the filesystem backup and restore it before starting the API and worker. Run a restore drill at least monthly in an isolated environment.
+
+## Audit Integrity
+
+Verify the audit hash chain from a backup copy before compliance export:
+
+```bash
+python scripts/ops/verify_audit_chain.py --db data/raptor.db
+python scripts/ops/export_audit_log.py --db data/raptor.db --out exports/audit-log.jsonl
+```
+
+Store audit exports and backup checksums in immutable storage when required by policy.
+
+## Release Gate
+
+Before tagging a production release, run:
+
+```bash
+make validate
+make security-scan
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config
+```
+
+CI additionally runs PostgreSQL integration, secret scanning, filesystem vulnerability scanning, and container scanning.
 
 ## Incident Response
 
