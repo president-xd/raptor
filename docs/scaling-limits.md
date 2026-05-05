@@ -25,3 +25,15 @@ This supports controlled production deployments with cleaner process isolation. 
 4. Add Prometheus scraping of `/api/v1/metrics`.
 5. Add ingress-level rate limiting, WAF rules, and SSO.
 6. Add queue-depth, worker-latency, parser-error, and investigation-failure alerts.
+7. Replace in-process rate limiting with Redis-backed or ingress-native limits before horizontal API scaling.
+8. Add schema migration tooling before independent API/worker version rollouts.
+9. Run load tests for upload, queue-claim, report, graph, and query endpoints before increasing worker concurrency.
+
+## Release Readiness Checks
+
+- `make validate` passes from a clean checkout.
+- PostgreSQL integration tests pass.
+- Security scan jobs pass: dependency audit, secret scan, filesystem scan, container scan.
+- Backup and restore drill completed for the target environment.
+- Evidence key rotation dry-run completed.
+- Audit hash chain verified on a backup copy.
