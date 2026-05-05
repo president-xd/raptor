@@ -1,0 +1,50 @@
+groups:
+  - name: raptor-api
+    rules:
+      - alert: RaptorHighErrorRate
+        expr: |
+          sum(rate(raptor_requests_by_status_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(raptor_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAPTOR API 5xx rate is above 5%
+          description: Investigate backend logs, DB health, and external connector status.
+
+      - alert: RaptorAuthFailureSpike
+        expr: increase(raptor_auth_failures_total[10m]) > 25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAPTOR authentication failures spiked
+          description: Check for brute force attempts, expired sessions, or broken frontend auth.
+
+      - alert: RaptorInvestigationFailures
+        expr: increase(raptor_investigations_failed_total[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RAPTOR investigations are failing
+          description: Review worker logs, parser errors, LLM/RAG availability, and database state.
+
+      - alert: RaptorParserErrorSpike
+        expr: increase(raptor_parser_errors_total[15m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAPTOR parser errors increased
+          description: Input feed format may have changed or malformed telemetry is being uploaded.
+
+      - alert: RaptorLatencyHigh
+        expr: raptor_request_latency_seconds_avg > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAPTOR average request latency is high
+          description: Check DB latency, worker contention, and external subsystem health.
