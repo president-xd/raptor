@@ -281,6 +281,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             "RAPTOR_API_KEY": app_config.RAPTOR_API_KEY,
             "RAPTOR_ALLOW_AUTH_DISABLED": app_config.RAPTOR_ALLOW_AUTH_DISABLED,
             "RAPTOR_REQUIRE_RBAC": app_config.RAPTOR_REQUIRE_RBAC,
+            "RAPTOR_RATE_LIMIT_BACKEND": app_config.RAPTOR_RATE_LIMIT_BACKEND,
             "RAPTOR_SESSION_COOKIE_SECURE": app_config.RAPTOR_SESSION_COOKIE_SECURE,
             "RAPTOR_BOOTSTRAP_ADMIN_PASSWORD": app_config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD,
             "EVIDENCE_ENCRYPTION_KEY": app_config.EVIDENCE_ENCRYPTION_KEY,
@@ -296,6 +297,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             app_config.RAPTOR_API_KEY = "production-api-key"
             app_config.RAPTOR_ALLOW_AUTH_DISABLED = False
             app_config.RAPTOR_REQUIRE_RBAC = True
+            app_config.RAPTOR_RATE_LIMIT_BACKEND = "memory"
             app_config.RAPTOR_SESSION_COOKIE_SECURE = True
             app_config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = "production-admin-password"
             app_config.EVIDENCE_ENCRYPTION_KEY = "production-evidence-key"
@@ -306,6 +308,10 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
                 app_config.validate_startup_config()
 
             app_config.RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS = True
+            with self.assertRaisesRegex(RuntimeError, "RAPTOR_RATE_LIMIT_BACKEND=redis"):
+                app_config.validate_startup_config()
+
+            app_config.RAPTOR_RATE_LIMIT_BACKEND = "redis"
             app_config.validate_startup_config()
 
             app_config.RAPTOR_DB_ENGINE = "postgresql"
@@ -353,6 +359,50 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
         entry = app_main.list_audit_entries(investigation_id="case-1")[0]
 
         self.assertEqual(entry["actor"], "alice")
+
+    def test_trusted_sso_headers_require_trusted_proxy(self):
+        originals = {
+            "RAPTOR_TRUSTED_SSO_ENABLED": app_main.RAPTOR_TRUSTED_SSO_ENABLED,
+            "RAPTOR_TRUSTED_PROXY_CIDRS": app_main.RAPTOR_TRUSTED_PROXY_CIDRS,
+        }
+        app_main.RAPTOR_TRUSTED_SSO_ENABLED = True
+        app_main.RAPTOR_TRUSTED_PROXY_CIDRS = ["127.0.0.1/32"]
+
+        class LocalClient:
+            host = "127.0.0.1"
+
+        class RemoteClient:
+            host = "10.0.0.5"
+
+        class LocalRequest:
+            headers = {"x-forwarded-user": "alice", "x-forwarded-roles": "analyst,viewer", "x-forwarded-tenant": "tenant-a"}
+            client = LocalClient()
+
+        class RemoteRequest:
+            headers = LocalRequest.headers
+            client = RemoteClient()
+
+        try:
+            principal = app_main._trusted_sso_principal(LocalRequest())
+            self.assertEqual(principal["actor"], "alice")
+            self.assertIn("analyst", principal["roles"])
+            self.assertEqual(principal["tenant_id"], "tenant-a")
+            self.assertIsNone(app_main._trusted_sso_principal(RemoteRequest()))
+        finally:
+            for name, value in originals.items():
+                setattr(app_main, name, value)
+
+    def test_schema_migration_baseline_is_recorded(self):
+        conn = sqlite3.connect(str(app_main.DB_PATH))
+        try:
+            version = conn.execute(
+                "SELECT version FROM schema_migrations WHERE version = ?",
+                ("20260505_runtime_metadata_baseline",),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(version)
 
     def test_dynamic_update_helpers_reject_unknown_columns(self):
         with self.assertRaises(ValueError):
