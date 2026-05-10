@@ -11,6 +11,7 @@ GET  /api/v1/investigate/{id}/evidence — stored raw evidence metadata
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -119,11 +120,11 @@ def investigate_text(
 
 @router.get("/api/v1/investigations", response_model=InvestigationListResponse)
 async def list_investigations(
-    request: Request, limit: int = 25
+    request: Request, limit: int = 25, offset: int = 0
 ) -> InvestigationListResponse:
     """List recent investigations for case-management UI."""
     principal = require_role(request, "viewer")
-    rows = db_list(max(1, min(limit, 100)), principal)
+    rows = db_list(max(1, min(limit, 100)), max(0, offset), principal)
     items = [
         InvestigationListItem(
             investigation_id=row.get("id", ""),
@@ -153,9 +154,10 @@ async def list_investigations(
     response_model=InvestigationStatus,
 )
 async def get_status(
-    request: Request, investigation_id: str
+    request: Request, investigation_id: uuid.UUID
 ) -> InvestigationStatus:
     """Poll investigation progress."""
+    investigation_id = str(investigation_id)
     record = ensure_investigation_access(request, investigation_id, "viewer")
     return InvestigationStatus(
         investigation_id=investigation_id,
@@ -172,9 +174,10 @@ async def get_status(
     response_model=InvestigationReport,
 )
 async def get_report(
-    request: Request, investigation_id: str
+    request: Request, investigation_id: uuid.UUID
 ) -> InvestigationReport:
     """Return the full investigation report."""
+    investigation_id = str(investigation_id)
     record = ensure_investigation_access(request, investigation_id, "viewer")
 
     findings: list[Finding] = []
@@ -212,8 +215,9 @@ async def get_report(
 
 
 @router.get("/api/v1/investigate/{investigation_id}/graph")
-async def get_graph(request: Request, investigation_id: str) -> JSONResponse:
+async def get_graph(request: Request, investigation_id: uuid.UUID) -> JSONResponse:
     """Return the Sigma.js-compatible attack graph JSON."""
+    investigation_id = str(investigation_id)
     record = ensure_investigation_access(request, investigation_id, "viewer")
     audit_log(request, "graph.viewed", investigation_id, {})
     graph_json = record.get("graph_json", "{}")
@@ -227,9 +231,10 @@ async def get_graph(request: Request, investigation_id: str) -> JSONResponse:
     response_model=EvidenceListResponse,
 )
 async def get_evidence(
-    request: Request, investigation_id: str
+    request: Request, investigation_id: uuid.UUID
 ) -> EvidenceListResponse:
     """List stored raw evidence metadata for an investigation."""
+    investigation_id = str(investigation_id)
     ensure_investigation_access(request, investigation_id, "viewer")
     rows = list_evidence_files(investigation_id)
     audit_log(request, "evidence.listed", investigation_id, {"count": len(rows)})
