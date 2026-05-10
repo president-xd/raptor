@@ -20,7 +20,7 @@ from loguru import logger
 sys.path.insert(0, os.path.dirname(__file__))
 
 import config as _config
-from config import API_HOST, API_PORT, validate_startup_config
+from config import API_HOST, API_PORT, SESSION_COOKIE_NAME, validate_startup_config
 from auth_core import (
     MUTATING_METHODS,
     _extract_api_key,
@@ -132,6 +132,7 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
     response.headers.setdefault(
         "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
     )
@@ -150,7 +151,7 @@ async def security_headers(request: Request, call_next):
     )
     if _config.RAPTOR_PRODUCTION:
         response.headers.setdefault(
-            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload"
         )
     return response
 
@@ -171,7 +172,7 @@ async def csrf_guard(request: Request, call_next):
     if supplied and _api_key and _hmac.compare_digest(supplied, _api_key):
         return await call_next(request)
 
-    if not request.cookies.get("raptor_session"):
+    if not request.cookies.get(SESSION_COOKIE_NAME):
         return await call_next(request)
 
     from urllib.parse import urlparse as _urlparse
@@ -232,7 +233,7 @@ async def optional_api_key_auth(request: Request, call_next):
         return await call_next(request)
 
     # 3. Browser session cookie
-    session_token = request.cookies.get("raptor_session", "")
+    session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
     principal = _valid_session_token(session_token)
     if principal:
         _set_request_principal(request, principal)
