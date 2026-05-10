@@ -95,6 +95,8 @@ RAPTOR_BOOTSTRAP_ADMIN_USERNAME = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_USERNAME", "
 RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD", "")
 RAPTOR_AUTH_MAX_FAILURES = int(os.getenv("RAPTOR_AUTH_MAX_FAILURES", "5"))
 RAPTOR_AUTH_LOCK_SECONDS = int(os.getenv("RAPTOR_AUTH_LOCK_SECONDS", "900"))
+RAPTOR_SESSION_TTL_SECONDS = int(os.getenv("RAPTOR_SESSION_TTL_SECONDS", "28800"))  # 8 h default
+RAPTOR_BOOTSTRAP_ADMIN_DISABLED = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_DISABLED", "false").lower() == "true"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
 CORS_ALLOW_ORIGINS = [
   origin.strip()
@@ -318,6 +320,21 @@ def validate_startup_config() -> None:
         failures.append("RAPTOR_RATE_LIMIT_BACKEND=redis is required for production multi-process rate limiting")
     if RAPTOR_TRUSTED_SSO_ENABLED and not RAPTOR_TRUSTED_PROXY_CIDRS:
         failures.append("RAPTOR_TRUSTED_PROXY_CIDRS must be set when trusted SSO headers are enabled")
+
+    storage_backend = os.getenv("RAPTOR_STORAGE_BACKEND", "local").lower()
+    if storage_backend == "s3" and not os.getenv("S3_BUCKET", ""):
+        failures.append("S3_BUCKET must be set when RAPTOR_STORAGE_BACKEND=s3")
+
+    if RAPTOR_BOOTSTRAP_ADMIN_PASSWORD and not RAPTOR_BOOTSTRAP_ADMIN_DISABLED:
+        # Not a hard failure — allow deployments that haven't yet created a real admin.
+        # Logged prominently so it surfaces in production startup logs.
+        import sys
+        print(
+            "RAPTOR SECURITY NOTICE: RAPTOR_BOOTSTRAP_ADMIN_DISABLED is not set. "
+            "Set it to true after creating permanent admin accounts to prevent the "
+            "bootstrap account from being used as a persistent privilege escalation path.",
+            file=sys.stderr,
+        )
 
     if failures:
         joined = "; ".join(failures)
