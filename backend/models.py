@@ -1,8 +1,23 @@
 """
 RAPTOR | API Request/Response Models
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
+def _check_password_complexity(v: str) -> str:
+    missing = []
+    if not any(c.isupper() for c in v):
+        missing.append("uppercase letter")
+    if not any(c.islower() for c in v):
+        missing.append("lowercase letter")
+    if not any(c.isdigit() for c in v):
+        missing.append("digit")
+    if not any(not c.isalnum() for c in v):
+        missing.append("special character")
+    if missing:
+        raise ValueError(f"Password must contain at least one: {', '.join(missing)}")
+    return v
+
+
 from schema import (
     Finding, AnalysisResult, AttributionResult,
     SimulationPrediction, AttackGraph
@@ -284,13 +299,25 @@ class APTProfileListResponse(BaseModel):
 
 class UserCreateRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
-    password: str = Field(..., min_length=8, max_length=256)
+    password: str = Field(..., min_length=12, max_length=256)
     roles: List[str] = Field(default_factory=lambda: ["viewer"])
     tenant_id: str = Field(default="default", max_length=128)
 
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
+        return _check_password_complexity(v)
+
 
 class UserUpdateRequest(BaseModel):
-    password: Optional[str] = Field(default=None, min_length=8, max_length=256)
+    password: Optional[str] = Field(default=None, min_length=12, max_length=256)
+
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _check_password_complexity(v)
     roles: Optional[List[str]] = None
     disabled: Optional[bool] = None
     tenant_id: Optional[str] = Field(default=None, max_length=128)
