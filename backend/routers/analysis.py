@@ -53,16 +53,6 @@ def simulate(request: Request, payload: SimulateRequest) -> SimulationResponse:
     if attribution is None:
         attribution = AttributionResult(**attribution_data[0])
 
-    if attribution.confidence_label in {"UNKNOWN", "LOW"}:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Simulation blocked: low-confidence attribution "
-                f"({attribution.confidence_label}, {attribution.confidence_score:.0%}). "
-                "Refine evidence before prediction."
-            ),
-        )
-
     observed_ttps = [
         f.get("technique_id", "")
         for f in json.loads(record.get("findings_json") or "[]")
@@ -76,12 +66,6 @@ def simulate(request: Request, payload: SimulateRequest) -> SimulationResponse:
                 compromised_hosts.append(node.get("label") or node.get("id"))
     except Exception:
         pass
-
-    if not compromised_hosts:
-        raise HTTPException(
-            status_code=400,
-            detail="Simulation requires at least one compromised host in the graph.",
-        )
 
     from simulation.predictor import predict_next_steps
 
