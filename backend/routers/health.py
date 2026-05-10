@@ -19,8 +19,9 @@ from config import (
     LLM_API_KEY,
     LLM_MODEL,
     LLM_PROVIDER,
-    RAPTOR_API_KEY,
     RAPTOR_ALLOW_AUTH_DISABLED,
+    RAPTOR_ALLOW_EXTERNAL_LLM,
+    RAPTOR_API_KEY,
     RAPTOR_DB_ENGINE,
     RAPTOR_PRODUCTION,
     REDIS_URL,
@@ -79,8 +80,12 @@ async def health_check_detailed(request: Request) -> dict:
         "redis": {"status": "degraded", "detail": "unreachable"},
         "cisa_kev": {"status": "degraded", "detail": "not cached"},
         "llm": {
-            "status": "degraded",
-            "detail": f"{LLM_PROVIDER} API key missing",
+            "status": "disabled" if not RAPTOR_ALLOW_EXTERNAL_LLM else "degraded",
+            "detail": (
+                "LLM disabled (RAPTOR_ALLOW_EXTERNAL_LLM=false); rule-based analysis active"
+                if not RAPTOR_ALLOW_EXTERNAL_LLM
+                else f"{LLM_PROVIDER} API key missing"
+            ),
         },
     }
 
@@ -164,6 +169,11 @@ async def health_check_detailed(request: Request) -> dict:
             "status": "healthy",
             "detail": f"{LLM_PROVIDER}/{LLM_MODEL} configured",
         }
+    elif not RAPTOR_ALLOW_EXTERNAL_LLM:
+        checks["llm"] = {
+            "status": "disabled",
+            "detail": "LLM disabled (RAPTOR_ALLOW_EXTERNAL_LLM=false); rule-based analysis active",
+        }
 
     # ── Auth ──────────────────────────────────────────────────────────────────
     if not RAPTOR_API_KEY and not RAPTOR_ALLOW_AUTH_DISABLED:
@@ -179,7 +189,7 @@ async def health_check_detailed(request: Request) -> dict:
 
     overall = (
         "degraded"
-        if any(v.get("status") != "healthy" for v in checks.values())
+        if any(v.get("status") not in {"healthy", "disabled"} for v in checks.values())
         else "healthy"
     )
 
