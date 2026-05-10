@@ -39,6 +39,12 @@ aiofiles>=23.2.1
 aiosqlite>=0.20.0
 psycopg[binary]>=3.2.0
 
+# Metrics
+prometheus_client>=0.20.0
+
+# Resilience: circuit breaker + exponential back-off for external service calls
+tenacity>=8.3.0
+
 # Utilities
 loguru>=0.7.2
 cryptography>=42.0.0
