@@ -1,5 +1,5 @@
 from helpers import BACKEND_DIR  # noqa: F401
-import main as app_main
+from database import _postgres_sql
 
 
 def normalize(sql: str) -> str:
@@ -7,7 +7,7 @@ def normalize(sql: str) -> str:
 
 
 def test_postgres_adapter_translates_sqlite_schema_fragments():
-    sql, params = app_main._postgres_sql(
+    sql, params = _postgres_sql(
         """
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,14 +24,14 @@ def test_postgres_adapter_translates_sqlite_schema_fragments():
 
 
 def test_postgres_adapter_maps_table_info_introspection():
-    sql, params = app_main._postgres_sql("PRAGMA table_info(investigations)", ())
+    sql, params = _postgres_sql("PRAGMA table_info(investigations)", ())
 
     assert "information_schema.columns" in sql
     assert params == ("investigations",)
 
 
 def test_postgres_adapter_maps_job_queue_upsert():
-    sql, params = app_main._postgres_sql(
+    sql, params = _postgres_sql(
         """
         INSERT OR REPLACE INTO job_queue
         (investigation_id, status, attempts, payload_json, next_run_at, created_at, updated_at)
@@ -47,7 +47,7 @@ def test_postgres_adapter_maps_job_queue_upsert():
 
 
 def test_postgres_adapter_returns_evidence_id_on_insert():
-    sql, _params = app_main._postgres_sql(
+    sql, _params = _postgres_sql(
         """
         INSERT INTO evidence_files
         (investigation_id, original_filename, stored_path, sha256, size_bytes,
