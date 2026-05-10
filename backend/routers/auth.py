@@ -19,7 +19,7 @@ from auth_core import (
     require_role,
     revoke_session,
 )
-from config import RAPTOR_API_KEY, RAPTOR_SESSION_COOKIE_SECURE, RAPTOR_SESSION_TTL_SECONDS
+from config import RAPTOR_API_KEY, RAPTOR_SESSION_COOKIE_SECURE, RAPTOR_SESSION_TTL_SECONDS, SESSION_COOKIE_NAME
 from models import AuthSessionRequest, AuthSessionResponse, PrincipalResponse
 import metrics_store
 
@@ -50,11 +50,12 @@ async def create_auth_session(
     create_session(principal.get("user_id") or "api-key", token)
 
     response.set_cookie(
-        "raptor_session",
+        SESSION_COOKIE_NAME,
         token,
         httponly=True,
         secure=RAPTOR_SESSION_COOKIE_SECURE,
-        samesite="lax",
+        samesite="strict",
+        path="/",
         max_age=RAPTOR_SESSION_TTL_SECONDS,
     )
     return AuthSessionResponse(
@@ -79,8 +80,8 @@ async def get_current_principal(request: Request) -> PrincipalResponse:
 @router.post("/logout")
 async def logout(request: Request, response: Response) -> dict:
     """Revoke the current browser session."""
-    token = request.cookies.get("raptor_session", "")
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
     if token:
         revoke_session(token)
-    response.delete_cookie("raptor_session")
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return {"authenticated": False}
