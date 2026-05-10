@@ -101,11 +101,26 @@ jobs:
 
   container-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # required for Cosign keyless signing
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build backend image
-        run: docker build -t raptor-backend:ci -f backend/Dockerfile .
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend/Dockerfile
+          tags: raptor-backend:ci
+          load: true
 
       - name: Scan backend image
         uses: aquasecurity/trivy-action@0.28.0
@@ -115,8 +130,19 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      - name: Sign backend image (keyless OIDC)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' raptor-backend:ci 2>/dev/null || echo "raptor-backend:ci")
+          cosign sign --yes "${IMAGE_DIGEST}"
+
       - name: Build frontend image
-        run: docker build -t raptor-frontend:ci frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          tags: raptor-frontend:ci
+          load: true
 
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@0.28.0
@@ -125,6 +151,12 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+      - name: Sign frontend image (keyless OIDC)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' raptor-frontend:ci 2>/dev/null || echo "raptor-frontend:ci")
+          cosign sign --yes "${IMAGE_DIGEST}"
 
   postgres-integration:
     runs-on: ubuntu-latest
