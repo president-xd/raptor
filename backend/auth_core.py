@@ -16,6 +16,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -45,7 +46,6 @@ from config import (
     RAPTOR_SSO_USER_HEADER,
     RAPTOR_TRUSTED_PROXY_CIDRS,
     RAPTOR_TRUSTED_SSO_ENABLED,
-    SESSION_COOKIE_NAME,
 )
 from database import db_connect, db_get, _utcnow
 import metrics_store
@@ -186,17 +186,19 @@ def _valid_session_token(token: str) -> Optional[dict]:
             last_activity = row["last_seen_at"] or row["created_at"] or ""
             if last_activity:
                 try:
-                    from datetime import datetime, timezone
                     last_ts = datetime.fromisoformat(str(last_activity)).timestamp()
                     if now - last_ts > RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS:
                         return None
                 except Exception:
                     pass
-        conn.execute(
-            "UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?",
-            (_utcnow(), row["id"]),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                "UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?",
+                (_utcnow(), row["id"]),
+            )
+            conn.commit()
+        except Exception:
+            pass  # transient DB error must not invalidate a valid session
         return _principal(
             row["username"],
             json.loads(row["roles"] or "[]"),
@@ -384,10 +386,7 @@ def _authenticated_actor(request: Request) -> str:
     supplied = _extract_api_key(request)
     if supplied and hmac.compare_digest(supplied, _config.RAPTOR_API_KEY):
         return "api-key"
-    session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    if _valid_session_token(session_token):
-        return "browser-session"
-    return "authenticated-request"
+    return "unauthenticated"
 
 
 # ── Origin / CORS helpers ─────────────────────────────────────────────────────
@@ -485,7 +484,6 @@ def _client_rate_key(request: Optional[Request]) -> str:
 
 def enforce_rate_limit(request: Optional[Request], bucket: str) -> None:
     from config import RAPTOR_RATE_LIMIT_BACKEND
-    from database import _redis_send_command
 
     limit, window = RATE_LIMIT_RULES.get(bucket, (60, 60))
     client_key = _client_rate_key(request)
