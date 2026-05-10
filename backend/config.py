@@ -96,7 +96,10 @@ RAPTOR_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD", "
 RAPTOR_AUTH_MAX_FAILURES = int(os.getenv("RAPTOR_AUTH_MAX_FAILURES", "5"))
 RAPTOR_AUTH_LOCK_SECONDS = int(os.getenv("RAPTOR_AUTH_LOCK_SECONDS", "900"))
 RAPTOR_SESSION_TTL_SECONDS = int(os.getenv("RAPTOR_SESSION_TTL_SECONDS", "28800"))  # 8 h default
+RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS", "0"))  # 0 = disabled
 RAPTOR_BOOTSTRAP_ADMIN_DISABLED = os.getenv("RAPTOR_BOOTSTRAP_ADMIN_DISABLED", "false").lower() == "true"
+# Use __Host- prefix in production (requires Secure=true + Path=/) to prevent subdomain injection
+SESSION_COOKIE_NAME = "__Host-raptor_session" if RAPTOR_SESSION_COOKIE_SECURE else "raptor_session"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "10485760"))  # 10 MiB default
 CORS_ALLOW_ORIGINS = [
   origin.strip()
@@ -141,6 +144,11 @@ DB_PATH = _project_path_from_env("RAPTOR_DB_PATH", str(DATA_DIR / "raptor.db"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 EVIDENCE_ENCRYPTION_KEY = os.getenv("EVIDENCE_ENCRYPTION_KEY", "")
 EVIDENCE_RETENTION_DAYS = int(os.getenv("EVIDENCE_RETENTION_DAYS", "180"))
+RAPTOR_STORAGE_BACKEND = os.getenv("RAPTOR_STORAGE_BACKEND", "local").lower()
+S3_BUCKET = os.getenv("S3_BUCKET", "")
+S3_PREFIX = os.getenv("S3_PREFIX", "evidence/")
+S3_REGION = os.getenv("S3_REGION", "us-east-1")
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "")
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
@@ -320,6 +328,13 @@ def validate_startup_config() -> None:
         failures.append("RAPTOR_RATE_LIMIT_BACKEND=redis is required for production multi-process rate limiting")
     if RAPTOR_TRUSTED_SSO_ENABLED and not RAPTOR_TRUSTED_PROXY_CIDRS:
         failures.append("RAPTOR_TRUSTED_PROXY_CIDRS must be set when trusted SSO headers are enabled")
+    if RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS == 0:
+        import sys as _sys
+        print(
+            "RAPTOR SECURITY NOTICE: RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS is 0 (disabled). "
+            "Consider setting it to 3600 (1 hour) so idle analyst sessions expire.",
+            file=_sys.stderr,
+        )
 
     storage_backend = os.getenv("RAPTOR_STORAGE_BACKEND", "local").lower()
     if storage_backend == "s3" and not os.getenv("S3_BUCKET", ""):
