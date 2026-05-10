@@ -2,7 +2,11 @@
 .codex
 *.log
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 __pycache__/
 *.py[cod]
 .pytest_cache/
