@@ -23,6 +23,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+import config as _config
 from config import (
     CORS_ALLOW_CREDENTIALS,
     CORS_ALLOW_ORIGINS,
@@ -37,12 +38,14 @@ from config import (
     RAPTOR_PRODUCTION,
     RAPTOR_REQUIRE_RBAC,
     RAPTOR_SESSION_COOKIE_SECURE,
+    RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS,
     RAPTOR_SESSION_TTL_SECONDS,
     RAPTOR_SSO_ROLES_HEADER,
     RAPTOR_SSO_TENANT_HEADER,
     RAPTOR_SSO_USER_HEADER,
     RAPTOR_TRUSTED_PROXY_CIDRS,
     RAPTOR_TRUSTED_SSO_ENABLED,
+    SESSION_COOKIE_NAME,
 )
 from database import db_connect, db_get, _utcnow
 import metrics_store
@@ -146,9 +149,9 @@ def _set_request_principal(request: Request, principal: dict) -> None:
 
 def require_role(request: Request, role: str) -> dict:
     principal = _request_principal(request)
-    if not RAPTOR_REQUIRE_RBAC:
+    if not _config.RAPTOR_REQUIRE_RBAC:
         return principal
-    if RAPTOR_ALLOW_AUTH_DISABLED and principal["actor"] == "anonymous":
+    if _config.RAPTOR_ALLOW_AUTH_DISABLED and principal["actor"] == "anonymous":
         return principal
     if not _has_role(principal, role):
         raise HTTPException(status_code=403, detail=f"{role} role required")
@@ -165,7 +168,7 @@ def _valid_session_token(token: str) -> Optional[dict]:
     try:
         row = conn.execute(
             """
-            SELECT s.id, s.expires_at, s.revoked_at,
+            SELECT s.id, s.expires_at, s.revoked_at, s.last_seen_at, s.created_at,
                    u.id AS user_id, u.username, u.roles, u.tenant_id, u.disabled
             FROM auth_sessions s
             JOIN users u ON u.id = s.user_id
@@ -175,8 +178,20 @@ def _valid_session_token(token: str) -> Optional[dict]:
         ).fetchone()
         if not row or row["revoked_at"] or row["disabled"]:
             return None
-        if float(row["expires_at"]) < time.time():
+        now = time.time()
+        if float(row["expires_at"]) < now:
             return None
+        # Idle-timeout: reject sessions that have been inactive too long
+        if RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS > 0:
+            last_activity = row["last_seen_at"] or row["created_at"] or ""
+            if last_activity:
+                try:
+                    from datetime import datetime, timezone
+                    last_ts = datetime.fromisoformat(str(last_activity)).timestamp()
+                    if now - last_ts > RAPTOR_SESSION_IDLE_TIMEOUT_SECONDS:
+                        return None
+                except Exception:
+                    pass
         conn.execute(
             "UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?",
             (_utcnow(), row["id"]),
@@ -194,7 +209,7 @@ def _valid_session_token(token: str) -> Optional[dict]:
 
 def create_session(user_id: str, token: str) -> None:
     """Persist a new browser session token."""
-    expires_at = time.time() + RAPTOR_SESSION_TTL_SECONDS
+    expires_at = time.time() + _config.RAPTOR_SESSION_TTL_SECONDS
     conn = db_connect()
     try:
         conn.execute(
@@ -248,8 +263,8 @@ def authenticate_user(username: str, password: str) -> dict:
         if not _verify_password(password, row["password_hash"]):
             failures = int(row["failed_attempts"] or 0) + 1
             locked_until = (
-                now + RAPTOR_AUTH_LOCK_SECONDS
-                if failures >= RAPTOR_AUTH_MAX_FAILURES
+                now + _config.RAPTOR_AUTH_LOCK_SECONDS
+                if failures >= _config.RAPTOR_AUTH_MAX_FAILURES
                 else 0
             )
             conn.execute(
@@ -292,10 +307,10 @@ def bootstrap_admin_user() -> None:
             (json.dumps(["service"]), _utcnow()),
         )
 
-        if RAPTOR_BOOTSTRAP_ADMIN_DISABLED:
+        if _config.RAPTOR_BOOTSTRAP_ADMIN_DISABLED:
             conn.execute(
                 "UPDATE users SET disabled = 1 WHERE username = ?",
-                (RAPTOR_BOOTSTRAP_ADMIN_USERNAME,),
+                (_config.RAPTOR_BOOTSTRAP_ADMIN_USERNAME,),
             )
             logger.info(
                 "Bootstrap admin disabled (RAPTOR_BOOTSTRAP_ADMIN_DISABLED=true)"
@@ -303,13 +318,13 @@ def bootstrap_admin_user() -> None:
             conn.commit()
             return
 
-        if not RAPTOR_BOOTSTRAP_ADMIN_PASSWORD:
+        if not _config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD:
             conn.commit()
             return
 
         existing = conn.execute(
             "SELECT id FROM users WHERE username = ?",
-            (RAPTOR_BOOTSTRAP_ADMIN_USERNAME,),
+            (_config.RAPTOR_BOOTSTRAP_ADMIN_USERNAME,),
         ).fetchone()
         if not existing:
             conn.execute(
@@ -319,8 +334,8 @@ def bootstrap_admin_user() -> None:
                 """,
                 (
                     str(uuid.uuid4()),
-                    RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
-                    _password_hash(RAPTOR_BOOTSTRAP_ADMIN_PASSWORD),
+                    _config.RAPTOR_BOOTSTRAP_ADMIN_USERNAME,
+                    _password_hash(_config.RAPTOR_BOOTSTRAP_ADMIN_PASSWORD),
                     json.dumps(["admin", "analyst", "viewer"]),
                     _utcnow(),
                 ),
@@ -364,12 +379,12 @@ def _authenticated_actor(request: Request) -> str:
     principal = getattr(getattr(request, "state", None), "principal", None)
     if principal and principal.get("actor"):
         return str(principal["actor"])
-    if not RAPTOR_API_KEY:
-        return "local-auth-disabled" if RAPTOR_ALLOW_AUTH_DISABLED else "unauthenticated"
+    if not _config.RAPTOR_API_KEY:
+        return "local-auth-disabled" if _config.RAPTOR_ALLOW_AUTH_DISABLED else "unauthenticated"
     supplied = _extract_api_key(request)
-    if supplied and hmac.compare_digest(supplied, RAPTOR_API_KEY):
+    if supplied and hmac.compare_digest(supplied, _config.RAPTOR_API_KEY):
         return "api-key"
-    session_token = request.cookies.get("raptor_session", "")
+    session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
     if _valid_session_token(session_token):
         return "browser-session"
     return "authenticated-request"
@@ -386,7 +401,7 @@ def _is_trusted_origin(origin: str) -> bool:
 def _is_allowed_cors_origin(origin: str) -> bool:
     if not origin:
         return False
-    allowed = {o.rstrip("/") for o in CORS_ALLOW_ORIGINS}
+    allowed = {o.rstrip("/") for o in _config.CORS_ALLOW_ORIGINS}
     return "*" in allowed or origin.rstrip("/") in allowed
 
 
@@ -398,7 +413,7 @@ def _json_auth_error(
     if _is_allowed_cors_origin(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
-        if CORS_ALLOW_CREDENTIALS:
+        if _config.CORS_ALLOW_CREDENTIALS:
             response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
@@ -431,24 +446,24 @@ def _request_from_trusted_proxy(request: Request) -> bool:
         address = ipaddress.ip_address(host)
         return any(
             address in ipaddress.ip_network(cidr, strict=False)
-            for cidr in RAPTOR_TRUSTED_PROXY_CIDRS
+            for cidr in _config.RAPTOR_TRUSTED_PROXY_CIDRS
         )
     except ValueError:
         return host in {"localhost", "testclient"}
 
 
 def _trusted_sso_principal(request: Request) -> Optional[dict]:
-    if not RAPTOR_TRUSTED_SSO_ENABLED or not _request_from_trusted_proxy(request):
+    if not _config.RAPTOR_TRUSTED_SSO_ENABLED or not _request_from_trusted_proxy(request):
         return None
-    actor = request.headers.get(RAPTOR_SSO_USER_HEADER, "").strip()
+    actor = request.headers.get(_config.RAPTOR_SSO_USER_HEADER, "").strip()
     if not actor:
         return None
-    roles_raw = request.headers.get(RAPTOR_SSO_ROLES_HEADER, "viewer")
+    roles_raw = request.headers.get(_config.RAPTOR_SSO_ROLES_HEADER, "viewer")
     roles = [r.strip().lower() for r in re.split(r"[, ]+", roles_raw) if r.strip()]
     allowed_roles = {"viewer", "analyst", "admin"}
     roles = [r for r in roles if r in allowed_roles] or ["viewer"]
     tenant_id = (
-        request.headers.get(RAPTOR_SSO_TENANT_HEADER, "default").strip() or "default"
+        request.headers.get(_config.RAPTOR_SSO_TENANT_HEADER, "default").strip() or "default"
     )
     user_id = hashlib.sha256(
         f"sso:{tenant_id}:{actor}".encode("utf-8")
