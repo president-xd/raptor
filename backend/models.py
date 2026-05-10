@@ -278,3 +278,56 @@ class APTProfileListResponse(BaseModel):
     """Response for GET /api/v1/apt/profiles"""
     profiles: List[APTProfileSummary] = Field(default_factory=list)
     total_count: int = 0
+
+
+# ─── User Management ─────────────────────────────────────────────────
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=8, max_length=256)
+    roles: List[str] = Field(default_factory=lambda: ["viewer"])
+    tenant_id: str = Field(default="default", max_length=128)
+
+
+class UserUpdateRequest(BaseModel):
+    password: Optional[str] = Field(default=None, min_length=8, max_length=256)
+    roles: Optional[List[str]] = None
+    disabled: Optional[bool] = None
+    tenant_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    roles: List[str]
+    tenant_id: str
+    disabled: bool = False
+    created_at: str = ""
+    last_login_at: str = ""
+
+
+class UserListResponse(BaseModel):
+    users: List[UserResponse] = Field(default_factory=list)
+    total_count: int = 0
+
+
+# ─── Schema / Admin ───────────────────────────────────────────────────
+
+class SchemaMigration(BaseModel):
+    version: str
+    applied_at: str
+
+
+class SchemaStatusResponse(BaseModel):
+    migrations: List[SchemaMigration] = Field(default_factory=list)
+    total_count: int = 0
+    db_engine: str = ""
+
+
+# ─── Elasticsearch Config ─────────────────────────────────────────────
+
+class ElasticConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    query: Optional[str] = Field(default=None, max_length=1000)
+    interval_seconds: Optional[int] = Field(default=None, ge=30, le=86400)
+    window_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
