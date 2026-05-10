@@ -449,6 +449,7 @@ export default function Dashboard() {
               operationFeed={operationFeed}
               coverage={buildCoverage(selectedReport?.findings || [])}
               graph={selectedGraph}
+              selectedInvestigation={selectedInvestigation}
               onOpenInvestigation={openInvestigation}
               onRefresh={() => loadInvestigations(false)}
             />
@@ -498,8 +499,13 @@ export default function Dashboard() {
           {activePage === 'query' && (
             <QueryWorkspacePage
               investigation={selectedInvestigation}
+              investigations={investigations}
               report={selectedReport}
               onAskQuestion={askInvestigationQuestion}
+              onSelectInvestigation={(id) => {
+                setSelectedInvestigationId(id);
+                loadArtifacts(id);
+              }}
               showToast={showToast}
             />
           )}
@@ -534,6 +540,7 @@ export default function Dashboard() {
             <ReportsPage
               investigations={investigations}
               selectedInvestigation={selectedInvestigation}
+              reportCache={reportCache}
               report={selectedReport}
               onSelect={(id) => {
                 setSelectedInvestigationId(id);
@@ -618,7 +625,7 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
           <div className="sidebar-heading">Pipeline Status</div>
           {services.slice(0, 6).map((service) => (
             <div className="pipeline-row" key={service.name} title={service.detail}>
-              <span className={`status-dot ${service.online ? 'online' : 'offline'}`} />
+              <span className={`status-dot ${service.disabled ? 'disabled' : service.online ? 'online' : 'offline'}`} />
               <span>{service.name}</span>
             </div>
           ))}
@@ -637,7 +644,7 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
 
 function TopHeader({ title, search, setSearch, health, healthError, onNewInvestigation, onAuthenticate, onNotifications, onRefresh }) {
   const healthy = health?.status === 'healthy' && !healthError;
-  const authDegraded = health?.subsystems?.auth?.status && health.subsystems.auth.status !== 'healthy';
+  const authDegraded = health?.subsystems?.auth?.status && !['healthy', 'disabled'].includes(health.subsystems.auth.status);
   return (
     <header className="top-header">
       <div className="top-title">
@@ -687,9 +694,12 @@ function DashboardPage({
   operationFeed,
   coverage,
   graph,
+  selectedInvestigation,
   onOpenInvestigation,
   onRefresh,
 }) {
+  const graphTarget = selectedInvestigation?.id || investigations.find((item) => item.statusRaw === 'complete')?.id || investigations[0]?.id;
+
   return (
     <div className="dashboard-layout page-panel">
       <div className="metric-grid">
@@ -703,7 +713,7 @@ function DashboardPage({
           className="span-8"
           title="Recent Investigations"
           icon={Gauge}
-          action={<button type="button" className="panel-chip" onClick={onRefresh}>Refresh</button>}
+          action={<button type="button" className="panel-chip" onClick={onRefresh}><RefreshCcw size={13} />Refresh</button>}
         >
           {investigationsError && <InlineError message={investigationsError} />}
           {investigationsLoading && <EmptyState icon={Activity} title="Loading backend investigations" />}
@@ -724,7 +734,7 @@ function DashboardPage({
         </Panel>
 
         <Panel className="span-4" title="Operations Feed" icon={RadioTower}>
-          <div className="alert-feed">
+          <div className="alert-feed-scroll">
             {operationFeed.map((alert) => (
               <div className={`alert-item ${alert.type}`} key={`${alert.time}-${alert.title}`}>
                 <span className="alert-dot" />
@@ -738,8 +748,13 @@ function DashboardPage({
           </div>
         </Panel>
 
-        <Panel className="span-8" title="Active Attack Graph Preview" icon={Network}>
-          <MiniAttackMap graph={graph} onOpen={() => investigations[0] && onOpenInvestigation(investigations[0].id)} />
+        <Panel className="span-8" title="Active Attack Graph Preview" icon={Network}
+          action={selectedInvestigation && <span className="panel-chip">{selectedInvestigation.name}</span>}
+        >
+          <MiniAttackMap
+            graph={graph}
+            onOpen={() => graphTarget && onOpenInvestigation(graphTarget)}
+          />
         </Panel>
 
         <Panel className="span-4" title="Kill Chain Coverage" icon={Layers3}>
@@ -1092,8 +1107,17 @@ function InvestigationDetailPage({
             onClick={() => downloadMarkdown(report, showToast)}
             disabled={!report?.narrative_report}
           >
+            <FileDown size={16} />
+            MD
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => downloadPdf(report, showToast)}
+            disabled={!report}
+          >
             <Download size={16} />
-            Download MD
+            PDF
           </button>
         </div>
       </div>
@@ -1140,7 +1164,7 @@ function InvestigationDetailPage({
             showToast={showToast}
           />
         )}
-        {activeTab === 'report' && <ForensicReportTab report={report} evidence={evidence} />}
+        {activeTab === 'report' && <ForensicReportTab report={report} evidence={evidence} showToast={showToast} />}
       </div>
     </div>
   );
@@ -1202,9 +1226,10 @@ function AttackGraphTab({ graph, report }) {
           </div>
           <div className="graph-legend">
             <span><i className="legend-dot compromised" />Compromised</span>
-            <span><i className="legend-dot dc" />Domain Controller</span>
+            <span><i className="legend-dot dc" />Crown DC</span>
             <span><i className="legend-dot clean" />Host</span>
-            <span><i className="legend-dot external" />Technique/User</span>
+            <span><i className="legend-dot" style={{ background: 'var(--warning)' }} />Technique</span>
+            <span><i className="legend-dot external" />User/Network</span>
           </div>
         </div>
 
@@ -1236,19 +1261,59 @@ function AttackGraphTab({ graph, report }) {
               <pattern id="graph-grid" width="32" height="32" patternUnits="userSpaceOnUse">
                 <path d="M 32 0 L 0 0 0 32" />
               </pattern>
-              <filter id="node-shadow" x="-45%" y="-45%" width="190%" height="190%">
-                <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#10100e" floodOpacity="0.16" />
+              <filter id="node-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#10100e" floodOpacity="0.18" />
               </filter>
+              <filter id="glow-danger" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
+                <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.7  0 0 0 0 0.1  0 0 0 0 0.1  0 0 0 0.8 0" result="glow" />
+                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="glow-crown" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+                <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.06  0 0 0 0 0.06  0 0 0 0 0.06  0 0 0 0.7 0" result="glow" />
+                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="glow-warning" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+                <feColorMatrix in="blur" type="matrix" values="0.6 0 0 0 0.5  0 0 0 0 0.3  0 0 0 0 0  0 0 0 0.7 0" result="glow" />
+                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <linearGradient id="lane-grad-0" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="rgba(59,130,246,0.05)" />
+                <stop offset="100%" stopColor="rgba(59,130,246,0.01)" />
+              </linearGradient>
+              <linearGradient id="lane-grad-1" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="rgba(138,91,0,0.04)" />
+                <stop offset="100%" stopColor="rgba(138,91,0,0.01)" />
+              </linearGradient>
+              <linearGradient id="lane-grad-2" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="rgba(180,35,24,0.05)" />
+                <stop offset="100%" stopColor="rgba(180,35,24,0.02)" />
+              </linearGradient>
+              <linearGradient id="lane-grad-3" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="rgba(16,16,14,0.04)" />
+                <stop offset="100%" stopColor="rgba(16,16,14,0.01)" />
+              </linearGradient>
               <marker id="graph-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
                 <path d="M0,0 L9,4.5 L0,9 z" />
               </marker>
             </defs>
             <rect className="graph-grid-fill" x="0" y="0" width="1040" height={normalized.viewHeight} />
             <g className="graph-lanes" aria-hidden="true">
-              {graphLanes.map((lane) => (
+              {graphLanes.map((lane, laneIndex) => (
                 <g key={lane.label}>
-                  <rect x={lane.x} y="28" width={lane.width} height={normalized.viewHeight - 118} />
-                  <text x={lane.x + 12} y="54">{lane.label}</text>
+                  <rect
+                    x={lane.x}
+                    y="28"
+                    width={lane.width}
+                    height={normalized.viewHeight - 118}
+                    fill={`url(#lane-grad-${laneIndex})`}
+                    stroke="rgba(16,16,14,0.08)"
+                    strokeWidth="1"
+                  />
+                  <rect x={lane.x} y="28" width="3" height={normalized.viewHeight - 118} fill={`url(#lane-grad-${laneIndex})`} opacity="0.7" />
+                  <text x={lane.x + 12} y="20" fontSize="10" fontWeight="900" textAnchor="start" fill="rgba(16,16,14,0.38)" style={{ textTransform: 'uppercase', letterSpacing: '1.2px' }}>{lane.label}</text>
                 </g>
               ))}
             </g>
@@ -1261,44 +1326,95 @@ function AttackGraphTab({ graph, report }) {
               const midY = (source.y + target.y) / 2;
               const curve = edgeCurve(edge, source, target, index);
               const path = `M${source.x},${source.y} C${midX},${source.y + curve} ${midX},${target.y - curve} ${target.x},${target.y}`;
+              const isHighRisk = edge.edge_type?.includes('lateral') || edge.edge_type?.includes('sequence') || edge.edge_type?.includes('exfil');
               return (
                 <g className={`graph-edge ${edgeClassName(edge)}`} key={edge.id || id}>
                   <path id={id} d={path} markerEnd="url(#graph-arrow)" />
-                  <circle r="4" className="edge-particle">
-                    <animateMotion dur={`${3 + (index % 3)}s`} repeatCount="indefinite">
-                      <mpath href={`#${id}`} />
-                    </animateMotion>
-                  </circle>
+                  {isHighRisk && (
+                    <circle r="5" className="edge-particle">
+                      <animateMotion dur={`${2.5 + (index % 4) * 0.6}s`} repeatCount="indefinite">
+                        <mpath href={`#${id}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
+                  {!isHighRisk && (
+                    <circle r="3.5" className="edge-particle" opacity="0.55">
+                      <animateMotion dur={`${4 + (index % 3)}s`} repeatCount="indefinite">
+                        <mpath href={`#${id}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
                   <text x={midX} y={midY + curve * 0.16 - 10}>{truncate(compactGraphText(edge.label || edge.edge_type), 18)}</text>
                 </g>
               );
             })}
-            {normalized.nodes.map((node) => (
-              <g
-                key={node.id}
-                className={`graph-node ${node.status} ${selectedNode?.id === node.id ? 'selected' : ''}`}
-                transform={`translate(${node.x} ${node.y})`}
-                role="button"
-                tabIndex="0"
-                onClick={() => setSelectedNodeId(node.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') setSelectedNodeId(node.id);
-                }}
-              >
-                <circle className="node-halo" r={node.haloRadius} />
-                <circle className="node-ring" r={node.ringRadius} />
-                <circle className="node-core" r={node.radius} />
-                <text className="node-glyph" y="5">{nodeGlyph(node)}</text>
-                {!node.compact && (
-                  <>
-                    <rect className="node-chip" x="-22" y="-34" width="44" height="14" rx="0" />
-                    <text className="node-chip-text" y="-24">{nodeChip(node)}</text>
-                  </>
-                )}
-                <text className="node-label" y={node.compact ? 28 : 33}>{truncate(node.displayLabel, node.compact ? 13 : 18)}</text>
-                {!node.compact && <text className="node-subtitle" y="46">{truncate(node.subtitle, 22)}</text>}
-              </g>
-            ))}
+            {normalized.nodes.map((node) => {
+              const isSelected = selectedNode?.id === node.id;
+              const compact = node.compact;
+              const nw = compact ? 72 : 96;
+              const nh = compact ? 26 : 34;
+              const glowFilter = node.status === 'compromised' ? 'url(#glow-danger)'
+                : node.status === 'crown' ? 'url(#glow-crown)'
+                  : node.status === 'warning' ? 'url(#glow-warning)'
+                    : 'url(#node-shadow)';
+              return (
+                <g
+                  key={node.id}
+                  className={`graph-node ${node.status} ${isSelected ? 'selected' : ''}`}
+                  transform={`translate(${node.x - nw / 2} ${node.y - nh / 2})`}
+                  role="button"
+                  tabIndex="0"
+                  onClick={() => setSelectedNodeId(node.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') setSelectedNodeId(node.id);
+                  }}
+                  filter={glowFilter}
+                >
+                  {/* Node body */}
+                  <rect
+                    className="node-body"
+                    width={nw} height={nh} rx="5"
+                    strokeWidth={isSelected ? '2' : '1.5'}
+                  />
+                  {/* Type badge strip on left */}
+                  <rect className="node-type-strip" width="4" height={nh} rx="2" />
+                  {/* Glyph */}
+                  <text
+                    className="node-glyph-rect"
+                    x="14" y={nh / 2 + 4}
+                    fontSize={node.kind === 'dc' ? '10' : '8'}
+                    fontWeight="900"
+                    textAnchor="middle"
+                  >
+                    {nodeGlyph(node)}
+                  </text>
+                  {/* Label */}
+                  <text
+                    className="node-label"
+                    x="24" y={compact ? nh / 2 + 4 : nh / 2 + 1}
+                    fontSize={compact ? '8' : '9'}
+                    textAnchor="start"
+                  >
+                    {truncate(node.displayLabel, compact ? 10 : 11)}
+                  </text>
+                  {/* Subtitle */}
+                  {!compact && (
+                    <text
+                      className="node-subtitle"
+                      x="24" y={nh / 2 + 12}
+                      fontSize="7.5"
+                      textAnchor="start"
+                    >
+                      {truncate(node.subtitle, 13)}
+                    </text>
+                  )}
+                  {/* Status indicator dot */}
+                  {(node.status === 'compromised' || node.status === 'crown') && (
+                    <circle cx={nw - 7} cy="7" r="4" className="node-status-dot" />
+                  )}
+                </g>
+              );
+            })}
           </svg>
         </div>
 
@@ -1488,22 +1604,29 @@ function AttributionTab({ report }) {
 function SimulationTab({ investigation, simulation, loading, error, onRun }) {
   const predictions = simulation?.predictions || [];
   const canRun = investigation?.statusRaw === 'complete';
+  const notComplete = investigation && investigation.statusRaw !== 'complete';
+
+  const blockingReasons = [];
+  if (!investigation) blockingReasons.push('No investigation selected');
+  else if (notComplete) blockingReasons.push(`Investigation is ${investigation.status?.toLowerCase() || 'not complete'} (${investigation.progress || 0}%)`);
 
   return (
     <div className="simulation-list">
       <div className="action-strip">
         <button type="button" className="primary-button" onClick={onRun} disabled={!canRun || loading}>
           <Play size={16} />
-          {loading ? 'Running Simulation' : 'Run Backend Simulation'}
+          {loading ? 'Running Simulation…' : 'Run Backend Simulation'}
         </button>
-        {!canRun && <span className="panel-chip">Investigation must be complete</span>}
+        {blockingReasons.map((reason) => (
+          <span key={reason} className="panel-chip">{reason}</span>
+        ))}
       </div>
       {error && <InlineError message={error} />}
       {!predictions.length && !loading && (
         <EmptyState
           icon={Play}
           title="No simulation output loaded"
-          detail="Run the backend simulation endpoint to generate next-step predictions. Low-confidence attribution is blocked by the API."
+          detail="Run the backend simulation to generate next-step attack predictions based on the attributed APT group."
         />
       )}
       {predictions.map((prediction, index) => (
@@ -1532,7 +1655,7 @@ function SimulationTab({ investigation, simulation, loading, error, onRun }) {
   );
 }
 
-function QueryWorkspacePage({ investigation, report, embedded = false, onAskQuestion, showToast }) {
+function QueryWorkspacePage({ investigation, investigations = [], report, embedded = false, onAskQuestion, onSelectInvestigation, showToast }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
@@ -1543,18 +1666,32 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
     'What would the attributed actor do next?',
   ];
 
+  const completedInvestigations = investigations.filter((item) => item.statusRaw === 'complete');
+  const isComplete = investigation?.statusRaw === 'complete';
+
   useEffect(() => {
     if (!investigation) {
       setMessages([]);
       return;
     }
-    setMessages([
-      {
-        role: 'assistant',
-        text: `Backend context selected for ${investigation.id}. Questions are sent to /api/v1/query and require a completed investigation.`,
-      },
-    ]);
-  }, [investigation?.id]);
+    const complete = investigation.statusRaw === 'complete';
+    if (complete) {
+      setMessages([
+        {
+          role: 'assistant',
+          text: `Context loaded for case "${investigation.name || investigation.id}". Ask anything about attribution, evidence, lateral movement, or containment.`,
+        },
+      ]);
+    } else {
+      setMessages([
+        {
+          role: 'assistant',
+          text: `Investigation "${investigation.name || investigation.id}" is ${investigation.status?.toLowerCase() || 'processing'} (${investigation.progress || 0}%). Query becomes available once analysis completes.`,
+          meta: `status: ${investigation.statusRaw || 'unknown'}`,
+        },
+      ]);
+    }
+  }, [investigation?.id, investigation?.statusRaw]);
 
   const send = async (text = input) => {
     const trimmed = text.trim();
@@ -1572,7 +1709,7 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
         {
           role: 'assistant',
           text: response.answer || 'The backend returned an empty answer.',
-          meta: `${response.query_type || 'query'} - ${response.confidence || 'unknown'} confidence`,
+          meta: response.query_type || null,
         },
       ]);
     } catch (error) {
@@ -1584,16 +1721,46 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
     }
   };
 
-  const disabled = !investigation || investigation.statusRaw !== 'complete' || sending;
+  const disabled = !isComplete || sending;
 
   return (
     <div className={`query-page ${embedded ? 'embedded' : 'page-panel'}`}>
+      {!embedded && !isComplete && completedInvestigations.length > 0 && (
+        <Panel title="Select Investigation" icon={Archive} className="query-selector-panel">
+          <p className="query-selector-hint">
+            Intelligence Query requires a completed investigation. Select one below or complete an active investigation first.
+          </p>
+          <div className="query-selector-list">
+            {completedInvestigations.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`query-selector-row ${investigation?.id === item.id ? 'active' : ''}`}
+                onClick={() => onSelectInvestigation?.(item.id)}
+              >
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{shortId(item.id)} · {item.confidence}% confidence · {item.candidate || 'no attribution'}</small>
+                </div>
+                <StatusPill status="Complete" />
+              </button>
+            ))}
+          </div>
+        </Panel>
+      )}
+      {!embedded && !isComplete && !completedInvestigations.length && (
+        <EmptyState
+          icon={MessageSquare}
+          title="No completed investigations"
+          detail="Submit a log file or paste logs from the Investigations page. Intelligence Query becomes available once analysis is complete."
+        />
+      )}
       <Panel title="Investigation Context Chat" icon={MessageSquare} className="chat-panel">
         <div className="chat-context">
           <span>Loaded case</span>
-          <strong>{investigation?.id || 'none'}</strong>
+          <strong>{investigation?.id ? shortId(investigation.id) : 'none'}</strong>
           <small>{investigation?.name || 'Select a completed investigation'}</small>
-          {report?.status && <StatusPill status={titleCase(report.status)} />}
+          {investigation?.statusRaw && <StatusPill status={titleCase(investigation.statusRaw)} />}
         </div>
         <div className="chat-history">
           {messages.map((message, index) => (
@@ -1605,6 +1772,12 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
               </p>
             </div>
           ))}
+          {!messages.length && (
+            <div className="chat-placeholder">
+              <MessageSquare size={22} />
+              <span>Select a completed investigation to begin querying</span>
+            </div>
+          )}
         </div>
         <div className="suggestion-row">
           {suggestions.map((suggestion) => (
@@ -1623,7 +1796,7 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask about attribution, evidence, paths, or containment..."
+            placeholder={isComplete ? 'Ask about attribution, evidence, paths, or containment...' : 'Select a completed investigation to enable querying'}
             disabled={disabled}
           />
           <button type="submit" className="primary-button" disabled={disabled || !input.trim()}>
@@ -1635,14 +1808,17 @@ function QueryWorkspacePage({ investigation, report, embedded = false, onAskQues
   );
 }
 
-function ForensicReportTab({ report, evidence }) {
+function ForensicReportTab({ report, evidence, showToast }) {
   const [selectedFindingId, setSelectedFindingId] = useState('');
+  const [activeSection, setActiveSection] = useState('findings');
   const findings = report?.findings || [];
-  const selectedFinding = findings.find((finding) => finding.technique_id === selectedFindingId) || findings[0] || null;
+  const selectedFinding = findings.find((f) => f.technique_id === selectedFindingId) || findings[0] || null;
   const evidenceFiles = evidence?.evidence || [];
+  const coverage = buildCoverage(findings);
+  const hotPhases = coverage.filter((c) => c.count > 0);
 
   useEffect(() => {
-    if (findings.length && !findings.some((finding) => finding.technique_id === selectedFindingId)) {
+    if (findings.length && !findings.some((f) => f.technique_id === selectedFindingId)) {
       setSelectedFindingId(findings[0].technique_id);
     }
   }, [findings, selectedFindingId]);
@@ -1653,46 +1829,114 @@ function ForensicReportTab({ report, evidence }) {
 
   return (
     <div className="forensic-layout">
-      <Panel title="Kill Chain Coverage" icon={Layers3}>
-        <div className="killchain-boxes">
-          {buildCoverage(findings).map((item) => (
-            <button
-              key={item.phase}
-              type="button"
-              className={`killchain-box ${item.score > 80 ? 'hot' : item.score > 40 ? 'warm' : 'cool'}`}
-            >
-              <span>{formatPhase(item.phase)}</span>
-              <strong>{item.count}</strong>
+      <div className="forensic-main">
+        <div className="forensic-toolbar">
+          <div className="segmented-control" role="tablist">
+            {[
+              ['findings', 'Findings', findings.length],
+              ['narrative', 'Narrative', null],
+              ['evidence', 'Evidence', evidenceFiles.length],
+            ].map(([id, label, count]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={activeSection === id}
+                className={activeSection === id ? 'active' : ''}
+                onClick={() => setActiveSection(id)}
+              >
+                {label}
+                {count != null && count > 0 && <span className="nav-badge">{count}</span>}
+              </button>
+            ))}
+          </div>
+          <div className="button-row">
+            <button type="button" className="secondary-button" onClick={() => downloadMarkdown(report, showToast)} disabled={!report?.narrative_report}>
+              <FileDown size={14} />
+              MD
             </button>
-          ))}
+            <button type="button" className="primary-button" onClick={() => downloadPdf(report, showToast)}>
+              <Download size={14} />
+              PDF
+            </button>
+          </div>
         </div>
-      </Panel>
-      <Panel title="Findings Timeline" icon={Clock} className="forensic-events">
-        {!findings.length && <EmptyState icon={Layers3} title="No findings recorded yet" />}
-        {findings.map((finding) => (
-          <button
-            type="button"
-            key={finding.technique_id}
-            className={`forensic-card ${selectedFinding?.technique_id === finding.technique_id ? 'active' : ''}`}
-            onClick={() => setSelectedFindingId(finding.technique_id)}
-          >
-            <code>{finding.technique_id}</code>
-            <div>
-              <strong>{finding.technique_name || finding.technique_id}</strong>
-              <span>{formatPhase(finding.kill_chain_phase)} - {finding.confidence}</span>
-              <p>{finding.evidence_summary}</p>
+
+        {activeSection === 'findings' && (
+          <div className="forensic-findings-grid">
+            <div className="forensic-sidebar">
+              <div className="killchain-summary">
+                {hotPhases.slice(0, 8).map((item) => (
+                  <div key={item.phase} className={`killchain-phase ${item.score > 75 ? 'hot' : item.score > 35 ? 'warm' : 'cool'}`}>
+                    <span>{formatPhase(item.phase)}</span>
+                    <strong>{item.count}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="forensic-list">
+                {!findings.length && <EmptyState icon={Layers3} title="No findings recorded yet" />}
+                {findings.map((finding) => (
+                  <button
+                    type="button"
+                    key={finding.technique_id}
+                    className={`forensic-card ${selectedFinding?.technique_id === finding.technique_id ? 'active' : ''}`}
+                    onClick={() => setSelectedFindingId(finding.technique_id)}
+                  >
+                    <code>{finding.technique_id}</code>
+                    <div>
+                      <strong>{finding.technique_name || finding.technique_id}</strong>
+                      <span>{formatPhase(finding.kill_chain_phase)}</span>
+                    </div>
+                    <ChevronRight size={15} />
+                  </button>
+                ))}
+              </div>
             </div>
-            <ChevronRight size={17} />
-          </button>
-        ))}
-        {report.narrative_report && (
-          <article className="markdown-report">
-            <h3>Backend Narrative Report</h3>
-            <pre>{report.narrative_report}</pre>
-          </article>
+            <EvidencePanel finding={selectedFinding} evidenceFiles={evidenceFiles} />
+          </div>
         )}
-      </Panel>
-      <EvidencePanel finding={selectedFinding} evidenceFiles={evidenceFiles} />
+
+        {activeSection === 'narrative' && (
+          <div className="forensic-narrative">
+            {report.narrative_report ? (
+              <article className="markdown-report">
+                <div className="markdown-toolbar">
+                  <span>Backend Narrative Report</span>
+                  <button type="button" className="secondary-button" onClick={() => downloadMarkdown(report, showToast)} disabled={!report.narrative_report}>
+                    <FileDown size={13} />
+                    Download MD
+                  </button>
+                </div>
+                <pre>{report.narrative_report}</pre>
+              </article>
+            ) : (
+              <EmptyState icon={FileText} title="No narrative report" detail="The backend generates a narrative after analysis completes." />
+            )}
+          </div>
+        )}
+
+        {activeSection === 'evidence' && (
+          <div className="forensic-narrative">
+            {!evidenceFiles.length ? (
+              <EmptyState icon={FileText} title="No raw evidence files" detail="Evidence metadata is returned by the backend evidence endpoint." />
+            ) : (
+              <div className="feed-list">
+                {evidenceFiles.map((item) => (
+                  <div className="feed-row" key={item.id || item.sha256}>
+                    <div className="feed-name">
+                      <span className="status-dot online" />
+                      <div>
+                        <strong>{item.original_filename || 'raw evidence'}</strong>
+                        <small>{formatBytes(item.size_bytes)} · {item.source || 'unknown'} · {shortId(item.sha256)}</small>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2040,13 +2284,13 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
           {rows.map((feed) => (
             <div className="feed-row" key={feed.name}>
               <div className="feed-name">
-                <span className={`status-dot ${feed.online ? 'online' : 'offline'}`} />
+                <span className={`status-dot ${feed.disabled ? 'disabled' : feed.online ? 'online' : 'offline'}`} />
                 <div>
                   <strong>{feed.name}</strong>
                   <small>{feed.detail}</small>
                 </div>
               </div>
-              <span className="feed-status">{feed.status}</span>
+              <span className={`feed-status ${feed.disabled ? 'status-muted' : ''}`}>{feed.status}</span>
             </div>
           ))}
         </div>
@@ -2117,7 +2361,12 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
               <ReadOnlySetting label="Last Status" value={elasticStatus.last_status || 'none'} />
               <ReadOnlySetting label="Investigations" value={String(elasticStatus.investigation_count || 0)} />
             </div>
-            {elasticStatus.last_error && <InlineError message={elasticStatus.last_error} />}
+            {elasticStatus.last_error && (
+              <InlineError message={truncate(
+                elasticStatus.last_error.replace(/\[WinError \d+\]/g, '[conn refused]'),
+                200
+              )} />
+            )}
           </>
         ) : (
           <EmptyState icon={Database} title="Loading Elasticsearch poller state" />
@@ -2143,8 +2392,20 @@ function StandaloneSimulationPage({ investigation, simulation, loading, error, o
   );
 }
 
-function ReportsPage({ investigations, selectedInvestigation, report, onSelect, showToast }) {
+function ReportsPage({ investigations, selectedInvestigation, reportCache = {}, report, onSelect, showToast }) {
   const reportable = investigations.filter((item) => item.statusRaw === 'complete');
+
+  const handleDownload = (item, type) => {
+    const cached = reportCache[item.id];
+    if (!cached) {
+      showToast('Loading report — try again in a moment');
+      onSelect(item.id);
+      return;
+    }
+    if (type === 'md') downloadMarkdown(cached, showToast);
+    else downloadPdf(cached, showToast);
+  };
+
   return (
     <div className="page-panel reports-page">
       <Panel title="Generated Backend Reports" icon={FileText}>
@@ -2156,23 +2417,39 @@ function ReportsPage({ investigations, selectedInvestigation, report, onSelect, 
               detail="Reports are produced by the backend after an investigation reaches complete."
             />
           )}
-          {reportable.map((item) => (
-            <div className={`report-row ${selectedInvestigation?.id === item.id ? 'active' : ''}`} key={item.id}>
-              <div>
-                <strong>{item.name}</strong>
-                <small>{item.id} - completed {item.completedAt || item.date}</small>
+          {reportable.map((item) => {
+            const itemReport = reportCache[item.id];
+            return (
+              <div className={`report-row ${selectedInvestigation?.id === item.id ? 'active' : ''}`} key={item.id}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <small>{shortId(item.id)} · {item.confidence}% confidence · completed {item.completedAt || item.date}</small>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => onSelect(item.id)} title="Preview report">
+                  <Eye size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => handleDownload(item, 'md')}
+                  disabled={!!itemReport && !itemReport?.narrative_report}
+                  title="Download Markdown"
+                >
+                  <FileDown size={15} />
+                  MD
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => handleDownload(item, 'pdf')}
+                  title="Download PDF"
+                >
+                  <Download size={15} />
+                  PDF
+                </button>
               </div>
-              <span className="feed-status">{item.confidence}%</span>
-              <button type="button" className="secondary-button" onClick={() => onSelect(item.id)}>
-                <Eye size={15} />
-                Preview
-              </button>
-              <button type="button" className="primary-button" onClick={() => downloadMarkdown(report, showToast)} disabled={selectedInvestigation?.id !== item.id || !report?.narrative_report}>
-                <FileDown size={15} />
-                Download
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Panel>
       <Panel title="Report Preview" icon={BookOpen}>
@@ -2181,13 +2458,19 @@ function ReportsPage({ investigations, selectedInvestigation, report, onSelect, 
             <ShieldAlert size={34} />
             <span>RAPTOR Forensic Report</span>
             <h2>{report?.name || selectedInvestigation?.name || 'No report selected'}</h2>
-            <small>{report?.timestamp ? formatDate(report.timestamp) : 'Select a completed investigation'}</small>
+            <small>{report?.timestamp ? formatDate(report.timestamp) : 'Select an investigation to preview'}</small>
+            {selectedInvestigation && (
+              <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <StatusPill status={selectedInvestigation.status} />
+                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{selectedInvestigation.confidence}% confidence</span>
+              </div>
+            )}
           </div>
           <div className="report-snippet">
             {report?.narrative_report ? (
               <pre>{report.narrative_report}</pre>
             ) : (
-              <EmptyState icon={FileText} title="No backend report selected" />
+              <EmptyState icon={FileText} title={selectedInvestigation ? 'Loading report…' : 'Select an investigation'} />
             )}
           </div>
         </div>
@@ -2432,45 +2715,128 @@ function Panel({ title, icon: Icon, action, children, className = '' }) {
 }
 
 function MiniAttackMap({ graph, onOpen }) {
-  const normalized = normalizeGraph(graph);
+  const normalized = normalizeGraph(graph, 'risk');
   if (!normalized.nodes.length) {
     return (
-      <button type="button" className="mini-graph" onClick={onOpen} disabled>
-        <EmptyState icon={Network} title="No graph selected" detail="Open a completed investigation to preview its backend graph." />
-      </button>
+      <div className="mini-map-wrapper empty">
+        <EmptyState icon={Network} title="No graph data" detail="Complete an investigation to see the attack graph preview here." />
+        <button type="button" className="mini-map-open-btn" onClick={onOpen} disabled>
+          <ExternalLink size={13} />
+          Open Investigation Detail
+        </button>
+      </div>
     );
   }
+
   const nodesById = Object.fromEntries(normalized.nodes.map((node) => [node.id, node]));
+  const viewH = Math.max(400, normalized.viewHeight);
+
+  const laneColors = [
+    'rgba(59,130,246,0.06)',
+    'rgba(138,91,0,0.05)',
+    'rgba(180,35,24,0.06)',
+    'rgba(60,60,60,0.04)',
+  ];
+  const laneStroke = [
+    'rgba(59,130,246,0.15)',
+    'rgba(138,91,0,0.12)',
+    'rgba(180,35,24,0.15)',
+    'rgba(60,60,60,0.10)',
+  ];
+
+  const nodeColor = (node) => {
+    if (node.status === 'crown') return '#6d28d9';
+    if (node.status === 'compromised') return '#b42318';
+    if (node.status === 'warning') return '#8a5b00';
+    if (node.kind === 'user') return '#2f5f68';
+    return 'var(--text)';
+  };
+  const nodeFill = (node) => {
+    if (node.status === 'crown') return 'rgba(109,40,217,0.12)';
+    if (node.status === 'compromised') return 'rgba(180,35,24,0.12)';
+    if (node.status === 'warning') return 'rgba(138,91,0,0.10)';
+    return 'var(--bg-elevated)';
+  };
+
   return (
-    <button type="button" className="mini-graph" onClick={onOpen}>
-      <svg viewBox="0 0 1040 430" aria-hidden="true">
-        <defs>
-          <marker id="mini-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-            <path d="M 0 0 L 8 4 L 0 8 z" />
-          </marker>
-        </defs>
-        {normalized.edges.slice(0, 10).map((edge, index) => {
-          const source = nodesById[edge.source];
-          const target = nodesById[edge.target];
-          if (!source || !target) return null;
-          return (
-            <path
-              key={edge.id || index}
-              className={`mini-edge ${edge.edge_type?.includes('lateral') ? 'warning' : 'danger'}`}
-              d={`M${source.x} ${source.y} C${(source.x + target.x) / 2} ${source.y - 30} ${(source.x + target.x) / 2} ${target.y + 30} ${target.x} ${target.y}`}
-              markerEnd="url(#mini-arrow)"
-            />
-          );
-        })}
-        {normalized.nodes.slice(0, 8).map((node) => (
-          <g className={`mini-node ${node.kind === 'dc' ? 'dc' : node.status}`} transform={`translate(${node.x} ${node.y})`} key={node.id}>
-            <circle r={node.kind === 'dc' ? 30 : 24} />
-            <text y="48">{truncate(node.label, 14)}</text>
-          </g>
-        ))}
-      </svg>
-      <span>Open investigation detail</span>
-    </button>
+    <div className="mini-map-wrapper">
+      <div className="mini-map-scroll">
+        <svg
+          viewBox={`0 0 1040 ${viewH}`}
+          style={{ width: '100%', height: `${Math.min(viewH, 440)}px` }}
+          aria-hidden="true"
+          preserveAspectRatio="xMidYMid meet"
+        >
+          <defs>
+            <marker id="mini-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+              <path d="M0,0 L7,3.5 L0,7z" fill="var(--border-strong)" opacity="0.6" />
+            </marker>
+          </defs>
+
+          {graphLanes.map((lane, i) => (
+            <g key={lane.label}>
+              <rect x={lane.x} y={20} width={lane.width} height={viewH - 40}
+                fill={laneColors[i]} stroke={laneStroke[i]} strokeWidth="0.75" rx="2" />
+              <text x={lane.x + lane.width / 2} y="14" fontSize="8" fontWeight="800"
+                textAnchor="middle" fill="rgba(16,16,14,0.38)" style={{ textTransform: 'uppercase', letterSpacing: '1.5px' }}>
+                {lane.label}
+              </text>
+            </g>
+          ))}
+
+          {normalized.edges.slice(0, 60).map((edge, i) => {
+            const src = nodesById[edge.source];
+            const tgt = nodesById[edge.target];
+            if (!src || !tgt) return null;
+            const mx = (src.x + tgt.x) / 2;
+            const isHigh = edge.edge_type?.includes('lateral') || edge.edge_type?.includes('sequence');
+            return (
+              <path
+                key={edge.id || i}
+                d={`M${src.x},${src.y} C${mx},${src.y} ${mx},${tgt.y} ${tgt.x},${tgt.y}`}
+                fill="none"
+                stroke={isHigh ? 'rgba(180,35,24,0.5)' : 'rgba(16,16,14,0.25)'}
+                strokeWidth={isHigh ? '1.8' : '1'}
+                strokeDasharray={isHigh ? 'none' : '4,3'}
+                markerEnd="url(#mini-arrow)"
+              />
+            );
+          })}
+
+          {normalized.nodes.slice(0, 50).map((node) => {
+            const w = Math.max(48, Math.min(node.displayLabel.length * 6.5 + 20, 100));
+            const h = 24;
+            const color = nodeColor(node);
+            const fill = nodeFill(node);
+            return (
+              <g key={node.id} transform={`translate(${node.x - w / 2},${node.y - h / 2})`}>
+                <rect width={w} height={h} rx="4"
+                  fill={fill}
+                  stroke={color}
+                  strokeWidth={node.status === 'compromised' || node.status === 'crown' ? '1.5' : '0.75'}
+                />
+                <text
+                  x={w / 2} y={h / 2 + 3.5}
+                  fontSize="8.5" fontWeight={node.status === 'compromised' || node.status === 'crown' ? '800' : '500'}
+                  textAnchor="middle"
+                  fill={color}
+                  style={{ fontFamily: 'inherit' }}
+                >
+                  {truncate(node.displayLabel, 14)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="mini-map-footer">
+        <span>{normalized.nodes.length} nodes · {normalized.edges.length} edges</span>
+        <button type="button" className="mini-map-open-btn" onClick={onOpen}>
+          <ExternalLink size={12} />
+          Open Detail
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2609,7 +2975,7 @@ function buildOperationFeed(investigations, health, investigationsError, healthE
     feed.push({ type: 'critical', title: 'Health API error', detail: healthError, time: 'now' });
   }
   Object.entries(health?.subsystems || {}).forEach(([name, value]) => {
-    if (value.status !== 'healthy') {
+    if (!['healthy', 'disabled'].includes(value.status)) {
       feed.push({ type: 'critical', title: `${name} degraded`, detail: value.detail || 'Subsystem unavailable', time: 'now' });
     }
   });
@@ -2948,17 +3314,19 @@ function summarizeNode(node) {
 
 function healthRows(health, healthError) {
   if (healthError) {
-    return [{ name: 'RAPTOR API', status: 'degraded', detail: healthError, online: false }];
+    return [{ name: 'RAPTOR API', status: 'degraded', detail: healthError, online: false, disabled: false }];
   }
   const subsystems = health?.subsystems || {};
   const names = ['api', 'auth', 'database', 'evidence', 'neo4j', 'weaviate', 'elasticsearch', 'redis', 'cisa_kev', 'llm'];
   return names.map((name) => {
     const entry = subsystems[name] || { status: 'unknown', detail: 'not checked' };
+    const isDisabled = entry.status === 'disabled';
     return {
       name: name === 'llm' ? 'LLM Inference' : titleCase(name),
       status: entry.status,
       detail: entry.detail || 'no detail',
       online: entry.status === 'healthy',
+      disabled: isDisabled,
     };
   });
 }
@@ -2983,7 +3351,179 @@ function downloadMarkdown(report, showToast) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  showToast?.('Report downloaded from backend response');
+  showToast?.('Markdown report downloaded');
+}
+
+function downloadPdf(report, showToast) {
+  if (!report) return;
+
+  function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function inlineMd(text) {
+    let s = esc(text);
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    s = s.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px">$1</code>');
+    return s;
+  }
+
+  function mdToHtml(md) {
+    if (!md) return '';
+    const lines = md.split('\n');
+    const out = [];
+    let inList = false;
+    for (const line of lines) {
+      const t = line.trim();
+      if (/^[-*]{3,}$/.test(t)) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push('<hr style="border:none;border-top:1px solid #e0e0e0;margin:14px 0">');
+      } else if (!t) {
+        if (inList) { out.push('</ul>'); inList = false; }
+      } else if (t.startsWith('#### ')) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<h5 style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#666;margin:14px 0 5px">${inlineMd(t.slice(5))}</h5>`);
+      } else if (t.startsWith('### ')) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<h4 style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:#444;border-bottom:1px solid #ececec;padding-bottom:4px;margin:16px 0 7px">${inlineMd(t.slice(4))}</h4>`);
+      } else if (t.startsWith('## ')) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<h3 style="font-size:13px;font-weight:900;color:#222;border-bottom:1px solid #ddd;padding-bottom:5px;margin:20px 0 10px">${inlineMd(t.slice(3))}</h3>`);
+      } else if (t.startsWith('# ')) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<h2 style="font-size:16px;font-weight:900;color:#10100e;border-bottom:2px solid #10100e;padding-bottom:6px;margin:24px 0 12px">${inlineMd(t.slice(2))}</h2>`);
+      } else if (t.startsWith('- ') || t.startsWith('* ')) {
+        if (!inList) { out.push('<ul style="margin:6px 0 10px;padding-left:18px">'); inList = true; }
+        out.push(`<li style="margin-bottom:3px;line-height:1.65">${inlineMd(t.slice(2))}</li>`);
+      } else {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<p style="margin:0 0 8px;line-height:1.7">${inlineMd(t)}</p>`);
+      }
+    }
+    if (inList) out.push('</ul>');
+    return out.join('\n');
+  }
+
+  const name = safeDownloadName(report.investigation_id || 'raptor-report');
+  const findings = report.findings || [];
+  const attribution = (report.attribution || [])[0];
+  const ts = new Date().toUTCString();
+  const confPct = attribution ? Math.round((attribution.confidence_score || 0) * 100) : 0;
+
+  const findingsHtml = findings.map((f, i) => `
+    <div class="finding">
+      <div class="finding-hdr">
+        <span class="step">${i + 1}</span>
+        <code>${esc(f.technique_id || '')}</code>
+        <span class="tname">${esc(f.technique_name || '')}</span>
+        <span class="badge ${(f.confidence || '').toLowerCase()}">${esc(f.confidence || 'UNKNOWN')}</span>
+        <span class="phase">${esc(f.kill_chain_phase || '')}</span>
+      </div>
+      <div class="ev-body">${inlineMd(f.evidence_summary || 'No evidence summary.')}</div>
+    </div>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🦅 RAPTOR — ${esc(report.name || name)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;font-size:11px;color:#10100e;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{max-width:840px;margin:0 auto;padding:36px 40px}
+  .cover{display:grid;grid-template-columns:auto 1fr;gap:20px 28px;align-items:start;border-bottom:3px solid #10100e;padding-bottom:28px;margin-bottom:32px}
+  .raptor-glyph{width:56px;height:56px;display:grid;place-items:center;background:#10100e;color:#fff;font-size:28px;border-radius:4px}
+  .cover-text .eyebrow{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:#888;margin-bottom:6px}
+  .cover-text h1{font-size:24px;font-weight:900;line-height:1.15;margin-bottom:6px}
+  .cover-text .subtitle{font-size:11px;color:#555}
+  .meta-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px}
+  .meta-box{border:1px solid #d8d8d8;border-radius:4px;padding:10px 12px;background:#fafafa}
+  .meta-box strong{display:block;font-size:18px;font-weight:900;margin-bottom:2px}
+  .meta-box span{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:#666}
+  h2.section{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#888;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:28px 0 14px}
+  .attr-card{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;border:2px solid #10100e;border-radius:6px;padding:14px 16px;background:#fafafa;page-break-inside:avoid}
+  .attr-name{font-size:18px;font-weight:900}
+  .attr-meta{font-size:10px;color:#555;margin-top:4px}
+  .attr-score{font-size:36px;font-weight:900;text-align:right;line-height:1}
+  .attr-label{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:#888;text-align:right;margin-top:4px}
+  .finding{border:1px solid #e0e0e0;border-left:3px solid #b42318;border-radius:4px;padding:10px 12px;margin-bottom:8px;page-break-inside:avoid;background:#fff}
+  .finding-hdr{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+  .step{width:20px;height:20px;display:grid;place-items:center;background:#10100e;color:#fff;font-size:9px;font-weight:900;border-radius:3px;flex-shrink:0}
+  .finding-hdr code{background:#f0f0f0;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:700;flex-shrink:0}
+  .tname{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;text-transform:uppercase;flex-shrink:0;background:#fee;color:#b42318}
+  .badge.medium,.badge.high{background:#fff3cd;color:#8a5b00}
+  .badge.low,.badge.unknown{background:#f0f0f0;color:#555}
+  .phase{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:1px;flex-shrink:0}
+  .ev-body{font-size:10px;color:#444;line-height:1.6}
+  .ev-body p{margin:0 0 4px}
+  .narrative{line-height:1.7;color:#333;border:1px solid #e8e8e8;border-radius:4px;padding:16px;background:#fafafa;font-size:10.5px}
+  .narrative p{margin:0 0 8px}
+  .narrative ul{margin:6px 0 10px;padding-left:18px}
+  .narrative li{margin-bottom:3px}
+  .footer{margin-top:36px;border-top:1px solid #e0e0e0;padding-top:12px;font-size:9px;color:#aaa;display:flex;justify-content:space-between;gap:12px}
+  @media print{
+    .page{padding:18px 24px;max-width:100%}
+    h2.section{page-break-after:avoid}
+    .finding,.attr-card{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="cover">
+    <div class="raptor-glyph">🦅</div>
+    <div class="cover-text">
+      <div class="eyebrow">RAPTOR · Retrieval-Augmented Persistent Threat Orchestration</div>
+      <h1>Forensic Investigation Report</h1>
+      <div class="subtitle">${esc(report.name || 'Unnamed Investigation')}</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-box"><strong>${report.event_count || 0}</strong><span>Events</span></div>
+      <div class="meta-box"><strong>${findings.length}</strong><span>TTPs Detected</span></div>
+      <div class="meta-box"><strong>${attribution ? esc(attribution.apt_name || 'Unknown') : '—'}</strong><span>Top Actor</span></div>
+      <div class="meta-box"><strong>${confPct}%</strong><span>Confidence</span></div>
+    </div>
+  </div>
+
+  ${attribution ? `
+  <h2 class="section">Attribution Assessment</h2>
+  <div class="attr-card">
+    <div>
+      <div class="attr-name">${esc(attribution.apt_name || 'Unknown')}</div>
+      <div class="attr-meta">
+        Jaccard: ${(attribution.jaccard_score || 0).toFixed(3)} &nbsp;·&nbsp;
+        ${attribution.overlapping_ttps?.length || 0} overlapping TTPs &nbsp;·&nbsp;
+        ${attribution.ttp_count || 0} known actor TTPs
+      </div>
+    </div>
+    <div>
+      <div class="attr-score">${confPct}%</div>
+      <div class="attr-label">${esc(attribution.confidence_label || 'UNKNOWN')}</div>
+    </div>
+  </div>` : ''}
+
+  ${findings.length ? `<h2 class="section">Detected Techniques (${findings.length})</h2>${findingsHtml}` : ''}
+
+  ${report.narrative_report ? `
+  <h2 class="section">Analyst Narrative</h2>
+  <div class="narrative">${mdToHtml(report.narrative_report)}</div>` : ''}
+
+  <div class="footer">
+    <span>🦅 RAPTOR SOC Platform</span>
+    <span>${ts}</span>
+    <span>${esc(name)}</span>
+  </div>
+</div>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast?.('Allow popups to download PDF'); return; }
+  win.document.write(html);
+  win.document.close();
+  window.setTimeout(() => { try { win.print(); } catch (e) { /* ignore */ } }, 600);
+  showToast?.('🦅 PDF print dialog opened — use "Save as PDF"');
 }
 
 function safeMitreUrl(value) {
