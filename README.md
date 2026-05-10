@@ -92,12 +92,13 @@ config
 
 | Pipeline | Description |
 |---|---|
-| **Ingestion** | Parse raw logs (JSON, CEF, XML, plaintext), normalise to `RaptorEvent`, match Sigma-style rules |
+| **Ingestion** | Parse raw logs (JSON, CEF, XML, plaintext), normalise to `RaptorEvent`, match Sigma-style rules; Persistent raw evidence storage |
 | **RAG Analysis** | Hybrid semantic/BM25 retrieval against MITRE ATT&CK + APT reports; deterministic fallback when LLM disabled |
 | **Graph Build** | Persist attack graph into Neo4j; in-memory fallback when Neo4j unavailable |
 | **Attribution** | Jaccard-based TTP scoring across APT profiles; confidence gating (HIGH / MEDIUM / LOW / UNKNOWN) |
 | **Simulation** | Predict next adversary steps using ATT&CK playbook context; blocked at LOW/UNKNOWN confidence |
 | **Report** | Generate analyst-ready markdown report with timeline, MITRE overlay, and recommendations |
+| **Operations** | Append-only SQLite audit logging; CISA Known Exploited Vulnerabilities connector |
 
 ---
 
