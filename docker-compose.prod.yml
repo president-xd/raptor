@@ -41,7 +41,7 @@ services:
 
   redis:
     ports: !reset []
-    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--protected-mode", "yes", "--requirepass", "${REDIS_PASSWORD:?set_REDIS_PASSWORD}"]
 
   backend:
     ports: !reset []
@@ -74,6 +74,7 @@ services:
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:?set_NEO4J_PASSWORD}
       - ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}@elasticsearch:9200
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?set_REDIS_PASSWORD}@redis:6379
 
   worker:
     build:
@@ -104,7 +105,7 @@ services:
       - WEAVIATE_GRPC_URL=weaviate:50051
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:?set_WEAVIATE_API_KEY}
       - ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD:?set_ELASTIC_PASSWORD}@elasticsearch:9200
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?set_REDIS_PASSWORD}@redis:6379
     command: ["python", "worker.py"]
     volumes:
       - ./data:/app/data
