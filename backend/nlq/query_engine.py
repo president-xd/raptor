@@ -11,6 +11,7 @@ from loguru import logger
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import NLQ_CYPHER_PROMPT
+from llm_redactor import redact
 from rag.pipeline import call_llm
 from rag.retriever import HybridRetriever
 from rag.reranker import rerank_technique_results
@@ -50,6 +51,8 @@ class QueryEngine:
         Answer a natural language question by routing to the appropriate pipeline.
         Per spec Section 7.3.
         """
+        # Redact PII/secrets from the question before it reaches any LLM or log
+        question = redact(question)
         logger.info(f"NLQ: '{question}' (investigation: {investigation_id})")
 
         # Classify the question type
