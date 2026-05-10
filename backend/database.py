@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+import config as _config
 from config import (
     CISA_KEV_CACHE_PATH,
     CISA_KEV_URL,
@@ -48,6 +50,15 @@ ALLOWED_ELASTIC_POLL_UPDATE_COLUMNS: frozenset[str] = frozenset({
     "enabled", "query", "interval_seconds", "window_minutes", "last_polled_at",
     "last_status", "last_error", "investigation_count",
 })
+
+# Tables that _run_column_migrations is allowed to touch
+_ALLOWED_MIGRATION_TABLES: frozenset[str] = frozenset({
+    "investigations", "evidence_files", "audit_log",
+    "users", "auth_sessions", "job_queue", "parser_errors",
+})
+
+# Serialises audit-log writes within a single process so the hash chain never forks
+_audit_log_lock = threading.Lock()
 
 
 # ── Row / Result types ────────────────────────────────────────────────────────
@@ -94,7 +105,7 @@ class PostgresConnection:
 
     def __init__(self, timeout: float = 30.0) -> None:
         import psycopg  # type: ignore[import]
-        self._conn = psycopg.connect(RAPTOR_DATABASE_URL, connect_timeout=int(timeout))
+        self._conn = psycopg.connect(_config.RAPTOR_DATABASE_URL, connect_timeout=int(timeout))
         self.row_factory = None
 
     def close(self) -> None:
@@ -223,7 +234,7 @@ def _postgres_sql(sql: str, params: tuple) -> tuple[str, tuple]:
 
 def db_connect(timeout: float = 30.0):
     """Return a live database connection for the configured backend."""
-    if RAPTOR_DB_ENGINE == "postgresql":
+    if _config.RAPTOR_DB_ENGINE == "postgresql":
         return PostgresConnection(timeout=timeout)
     conn = sqlite3.connect(str(_db_path()), timeout=timeout, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -418,8 +429,8 @@ def init_db() -> None:
         (name, enabled, query, interval_seconds, window_minutes)
         VALUES ('default', ?, ?, ?, ?)
         """,
-        (1 if ELASTIC_POLL_ENABLED else 0, ELASTIC_POLL_QUERY,
-         ELASTIC_POLL_INTERVAL_SECONDS, ELASTIC_POLL_WINDOW_MINUTES),
+        (1 if _config.ELASTIC_POLL_ENABLED else 0, _config.ELASTIC_POLL_QUERY,
+         _config.ELASTIC_POLL_INTERVAL_SECONDS, _config.ELASTIC_POLL_WINDOW_MINUTES),
     )
     conn.execute(
         """
@@ -427,8 +438,8 @@ def init_db() -> None:
         SET enabled = ?, query = ?, interval_seconds = ?, window_minutes = ?
         WHERE name = 'default'
         """,
-        (1 if ELASTIC_POLL_ENABLED else 0, ELASTIC_POLL_QUERY,
-         ELASTIC_POLL_INTERVAL_SECONDS, ELASTIC_POLL_WINDOW_MINUTES),
+        (1 if _config.ELASTIC_POLL_ENABLED else 0, _config.ELASTIC_POLL_QUERY,
+         _config.ELASTIC_POLL_INTERVAL_SECONDS, _config.ELASTIC_POLL_WINDOW_MINUTES),
     )
 
     conn.execute(
@@ -440,6 +451,8 @@ def init_db() -> None:
 
 
 def _run_column_migrations(conn, table: str, migrations: dict[str, str]) -> None:
+    if table not in _ALLOWED_MIGRATION_TABLES:
+        raise ValueError(f"Migration target '{table}' is not in the allowed table list")
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     for column, statement in migrations.items():
         if column not in existing:
@@ -482,18 +495,21 @@ def db_update(inv_id: str, **kwargs: Any) -> None:
     conn.close()
 
 
-def db_list(limit: int = 25, principal: Optional[dict] = None) -> list[dict]:
+def db_list(limit: int = 25, offset: int = 0, principal: Optional[dict] = None) -> list[dict]:
     from auth_core import _has_role, _principal as make_principal
     principal = principal or make_principal("system", ["system"], "system")
     conn = db_connect()
     conn.row_factory = sqlite3.Row
     cols = "id, owner_id, tenant_id, name, source, input_bytes, status, progress, current_phase, error, event_count, technique_count, created_at, completed_at, attribution_json, graph_json"
     if _has_role(principal, "admin") or "service" in principal.get("roles", []):
-        rows = conn.execute(f"SELECT {cols} FROM investigations ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute(
+            f"SELECT {cols} FROM investigations ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
     else:
         rows = conn.execute(
-            f"SELECT {cols} FROM investigations WHERE tenant_id = ? AND (owner_id = ? OR owner_id = '') ORDER BY created_at DESC LIMIT ?",
-            (principal.get("tenant_id", "default"), principal.get("user_id", ""), limit),
+            f"SELECT {cols} FROM investigations WHERE tenant_id = ? AND (owner_id = ? OR owner_id = '') ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (principal.get("tenant_id", "default"), principal.get("user_id", ""), limit, offset),
         ).fetchall()
     conn.close()
     return [_summarize_investigation_row(dict(row)) for row in rows]
@@ -543,7 +559,7 @@ def store_evidence_file(investigation_id: str, content: bytes, metadata: Optiona
     sha256 = hashlib.sha256(content).hexdigest()
     created_at = _utcnow()
     retention_expires_at = datetime.fromtimestamp(
-        time.time() + max(EVIDENCE_RETENTION_DAYS, 1) * 86400, timezone.utc
+        time.time() + max(_config.EVIDENCE_RETENTION_DAYS, 1) * 86400, timezone.utc
     ).isoformat()
 
     conn = db_connect()
@@ -607,20 +623,34 @@ def audit_log(
     detail: Optional[dict] = None,
     ip_address: str = "",
 ) -> None:
-    """Append a tamper-evident audit entry (hash-chained)."""
+    """Append a tamper-evident audit entry (hash-chained).
+
+    The module-level _audit_log_lock serialises writes within a single process
+    so two concurrent requests never read the same prev_hash, which would fork
+    the chain and break tamper-evidence verification.
+    """
     timestamp = _utcnow()
     detail_json = json.dumps(detail or {}, default=str)
-    conn = db_connect()
-    prev = conn.execute("SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
-    prev_hash = prev[0] if prev and prev[0] else ""
-    entry_material = "|".join([timestamp, actor, action, investigation_id or "", detail_json, ip_address, prev_hash])
-    entry_hash = hashlib.sha256(entry_material.encode("utf-8")).hexdigest()
-    conn.execute(
-        "INSERT INTO audit_log (timestamp, actor, action, investigation_id, detail_json, ip_address, prev_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (timestamp, actor, action, investigation_id, detail_json, ip_address, prev_hash, entry_hash),
-    )
-    conn.commit()
-    conn.close()
+    with _audit_log_lock:
+        conn = db_connect()
+        try:
+            prev = conn.execute(
+                "SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = prev[0] if prev and prev[0] else ""
+            entry_material = "|".join(
+                [timestamp, actor, action, investigation_id or "", detail_json, ip_address, prev_hash]
+            )
+            entry_hash = hashlib.sha256(entry_material.encode("utf-8")).hexdigest()
+            conn.execute(
+                "INSERT INTO audit_log "
+                "(timestamp, actor, action, investigation_id, detail_json, ip_address, prev_hash, entry_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (timestamp, actor, action, investigation_id, detail_json, ip_address, prev_hash, entry_hash),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def list_audit_entries(limit: int = 100, investigation_id: Optional[str] = None) -> list[dict]:
@@ -826,7 +856,7 @@ def _redis_send_command(*parts: str) -> Optional[bytes]:
     """Minimal Redis RESP client — avoids an extra runtime dependency."""
     import socket
     try:
-        parsed = urlparse(REDIS_URL)
+        parsed = urlparse(_config.REDIS_URL)
         host = parsed.hostname or "localhost"
         port = parsed.port or 6379
         db_num = parsed.path.strip("/") if parsed.path and parsed.path != "/" else ""
@@ -896,7 +926,9 @@ def redis_get_json(key: str) -> Optional[dict]:
         return None
 
 
-def redis_set_json(key: str, value: dict, ttl_seconds: int = REDIS_CACHE_TTL_SECONDS) -> bool:
+def redis_set_json(key: str, value: dict, ttl_seconds: Optional[int] = None) -> bool:
+    if ttl_seconds is None:
+        ttl_seconds = _config.REDIS_CACHE_TTL_SECONDS
     payload = json.dumps(value, default=str)
     if ttl_seconds > 0:
         response = _redis_send_command("SET", key, payload, "EX", str(ttl_seconds))
@@ -914,32 +946,32 @@ def fetch_cisa_kev(refresh: bool = False) -> dict:
         cached = redis_get_json(cache_key)
         if cached:
             return cached
-        if CISA_KEV_CACHE_PATH.exists():
+        if _config.CISA_KEV_CACHE_PATH.exists():
             try:
-                return json.loads(CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
+                return json.loads(_config.CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
     try:
         import requests as _requests
         from config import validate_feed_url
-        feed_url = validate_feed_url(CISA_KEV_URL)
+        feed_url = validate_feed_url(_config.CISA_KEV_URL)
         resp = _requests.get(feed_url, timeout=30, headers={"User-Agent": "RAPTOR/1.0 threat-intel-connector"})
         resp.raise_for_status()
         if len(resp.content) > 25 * 1024 * 1024:
             raise ValueError("CISA KEV feed response is unexpectedly large")
         payload = resp.json()
     except Exception as exc:
-        if CISA_KEV_CACHE_PATH.exists():
+        if _config.CISA_KEV_CACHE_PATH.exists():
             logger.warning(f"CISA KEV refresh failed, using file cache: {exc}")
-            return json.loads(CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
+            return json.loads(_config.CISA_KEV_CACHE_PATH.read_text(encoding="utf-8"))
         from fastapi import HTTPException
-        detail = "Threat feed temporarily unavailable" if RAPTOR_PRODUCTION else f"CISA KEV feed unavailable: {exc}"
+        detail = "Threat feed temporarily unavailable" if _config.RAPTOR_PRODUCTION else f"CISA KEV feed unavailable: {exc}"
         raise HTTPException(status_code=503, detail=detail)
 
     payload["_raptor_cached_at"] = _utcnow()
-    payload["_raptor_source"] = CISA_KEV_URL
-    CISA_KEV_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    payload["_raptor_source"] = _config.CISA_KEV_URL
+    _config.CISA_KEV_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     redis_set_json(cache_key, payload)
     return payload
 
