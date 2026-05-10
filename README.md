@@ -1,4 +1,4 @@
-# RAPTOR
+# 🦅 RAPTOR
 
 **Retrieval-Augmented Persistent Threat Orchestration and Reasoning**
 
