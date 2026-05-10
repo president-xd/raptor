@@ -405,13 +405,15 @@ code {
 
 .top-header {
   display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(280px, 520px) minmax(360px, 1fr);
+  grid-template-columns: minmax(180px, 0.6fr) minmax(240px, 480px) minmax(280px, 1fr);
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   border-bottom: 1px solid var(--border);
   background: rgba(12, 14, 24, 0.9);
-  padding: 0 20px;
+  padding: 0 16px;
   backdrop-filter: blur(12px);
+  min-height: 52px;
+  height: auto;
 }
 
 .top-title strong {
@@ -578,6 +580,7 @@ code {
   display: grid;
   align-content: start;
   gap: 16px;
+  min-width: 0;
 }
 
 .metric-grid {
@@ -3588,3 +3591,562 @@ code {
     left: 10px;
   }
 }
+
+/* ── Disabled status dot ─────────────────────────────────────────────────── */
+.status-dot.disabled {
+  background: var(--muted);
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+/* ── Top header: prevent button row from pushing out of bounds ───────────── */
+.top-header {
+  min-height: 56px;
+  height: auto;
+  flex-wrap: wrap;
+}
+
+.top-actions {
+  align-items: center;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+/* ── Feeds page: prevent subsystem rows from overflowing ────────────────── */
+.feeds-page {
+  overflow: hidden auto;
+}
+
+.feed-row {
+  min-width: 0;
+}
+
+.feed-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.feed-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.feed-status {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Query workspace standalone ─────────────────────────────────────────── */
+.query-page.page-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  height: 100%;
+}
+
+.query-selector-panel {
+  flex: 0 0 auto;
+}
+
+.query-selector-hint {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.query-selector-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.query-selector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: rgba(18, 22, 36, 0.68);
+  text-align: left;
+  transition: border-color 0.16s, background 0.16s;
+}
+
+.query-selector-row:hover,
+.query-selector-row.active {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.query-selector-row > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.query-selector-row strong {
+  display: block;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-selector-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* paper skin overrides for query selector */
+.query-selector-row {
+  background: rgba(232, 232, 227, 0.5);
+  border-color: var(--border);
+}
+
+.query-selector-row:hover,
+.query-selector-row.active {
+  background: rgba(16, 16, 14, 0.05);
+  border-color: var(--text);
+}
+
+/* ── Chat placeholder ────────────────────────────────────────────────────── */
+.chat-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  color: var(--faint);
+}
+
+/* ── Detail header action buttons: don't overflow on small widths ─────── */
+.detail-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* ── Report row: prevent button overflow ─────────────────────────────── */
+.report-row {
+  flex-wrap: wrap;
+}
+
+.report-row > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* ── Simulation list: chip text wrap fix ─────────────────────────────── */
+.action-strip .panel-chip {
+  white-space: normal;
+  max-width: 280px;
+}
+
+/* ── Dashboard main grid: ensure no content bleeds over panels ─────── */
+.dashboard-main-grid {
+  overflow: hidden;
+}
+
+/* ── Inline error: word-break for long error strings ────────────────── */
+.inline-error span {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* ── Settings grid: prevent min-height collisions ───────────────────── */
+.settings-grid .setting-field {
+  min-height: unset;
+  padding: 10px 12px;
+}
+
+/* ── Kill chain boxes: horizontal scroll on small screens ─────────── */
+.killchain-boxes {
+  padding-bottom: 4px;
+}
+
+/* ── Graph canvas: improved node glow styles ────────────────────────── */
+.graph-node.compromised .node-core {
+  filter: drop-shadow(0 0 6px rgba(180, 35, 24, 0.55));
+}
+
+.graph-node.crown .node-core {
+  filter: drop-shadow(0 0 8px rgba(16, 16, 14, 0.4));
+}
+
+.graph-node.warning .node-core {
+  filter: drop-shadow(0 0 6px rgba(138, 91, 0, 0.45));
+}
+
+/* ── Graph lanes: stronger visual separation ────────────────────────── */
+.graph-lanes rect:nth-child(odd) {
+  fill: rgba(16, 16, 14, 0.03);
+}
+
+/* ── Attack timeline: better spacing ───────────────────────────────── */
+.attack-timeline {
+  min-height: 80px;
+}
+
+/* ── Forensic report tab action buttons ─────────────────────────────── */
+.killchain-boxes + * {
+  margin-top: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PRODUCTION UI — round 2 improvements
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Operations Feed: bounded scroll container ───────────────────── */
+.alert-feed-scroll {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 2px 4px 2px 2px;
+}
+
+/* ── Mini Attack Map: full redesign ──────────────────────────────── */
+.mini-map-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(16,16,14,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16,16,14,0.04) 1px, transparent 1px),
+    var(--bg-surface);
+  background-size: 28px 28px;
+}
+
+.mini-map-wrapper.empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.mini-map-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.mini-map-scroll svg {
+  display: block;
+}
+
+.mini-map-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(232,232,227,0.9);
+  flex-shrink: 0;
+}
+
+.mini-map-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--bg-base);
+  cursor: pointer;
+}
+
+.mini-map-open-btn:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+.mini-map-open-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Graph nodes: production-grade rectangular chip style ─────────── */
+.node-body {
+  fill: var(--bg-base);
+  stroke: var(--text);
+  stroke-width: 1.2;
+  transition: stroke-width 0.12s;
+}
+
+.graph-node.compromised .node-body {
+  fill: rgba(180,35,24,0.09);
+  stroke: var(--danger);
+  stroke-width: 1.6;
+}
+
+.graph-node.crown .node-body {
+  fill: rgba(109,40,217,0.09);
+  stroke: #6d28d9;
+  stroke-width: 1.8;
+}
+
+.graph-node.warning .node-body {
+  fill: rgba(138,91,0,0.08);
+  stroke: var(--warning);
+  stroke-width: 1.4;
+}
+
+.graph-node.external .node-body {
+  fill: rgba(248,248,241,0.65);
+  stroke: var(--muted);
+  stroke-dasharray: 5 3;
+}
+
+.graph-node.aggregate .node-body {
+  fill: rgba(16,16,14,0.04);
+  stroke: var(--muted);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+}
+
+.graph-node.selected .node-body {
+  stroke-width: 2.5;
+}
+
+.node-type-strip {
+  fill: var(--text);
+  opacity: 0.55;
+}
+
+.graph-node.compromised .node-type-strip { fill: var(--danger); opacity: 1; }
+.graph-node.crown .node-type-strip { fill: #6d28d9; opacity: 1; }
+.graph-node.warning .node-type-strip { fill: var(--warning); opacity: 0.85; }
+.graph-node.external .node-type-strip { fill: var(--muted); opacity: 0.4; }
+.graph-node.aggregate .node-type-strip { fill: var(--muted); opacity: 0.35; }
+
+.node-glyph-rect {
+  fill: var(--text);
+  text-anchor: middle;
+}
+
+.graph-node.compromised .node-glyph-rect { fill: var(--danger); }
+.graph-node.crown .node-glyph-rect { fill: #6d28d9; }
+.graph-node.warning .node-glyph-rect { fill: var(--warning); }
+.graph-node.external .node-glyph-rect { fill: var(--muted); }
+.graph-node.aggregate .node-glyph-rect { fill: var(--muted); }
+
+.node-status-dot {
+  fill: var(--danger);
+  animation: nodePulse 2s ease-in-out infinite;
+}
+
+.graph-node.crown .node-status-dot { fill: #6d28d9; }
+
+@keyframes nodePulse {
+  0%, 100% { opacity: 1; r: 4; }
+  50% { opacity: 0.5; r: 3; }
+}
+
+/* Override text-anchor for rect-based nodes */
+.graph-node .node-label {
+  text-anchor: start;
+  stroke: none;
+  stroke-width: 0;
+  paint-order: normal;
+  fill: var(--text);
+  font-weight: 700;
+}
+
+.graph-node .node-subtitle {
+  text-anchor: start;
+  stroke: none;
+  stroke-width: 0;
+  paint-order: normal;
+  fill: var(--muted);
+}
+
+.graph-node.compromised .node-label { fill: var(--danger); }
+.graph-node.crown .node-label { fill: #6d28d9; }
+.graph-node.warning .node-label { fill: var(--warning); }
+.graph-node.external .node-label { fill: var(--muted); }
+
+/* ── Forensic Report Tab: tabbed single-pane layout ──────────────── */
+.forensic-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.forensic-main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.forensic-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.forensic-findings-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.forensic-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.killchain-summary {
+  display: grid;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.killchain-phase {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--bg-elevated);
+}
+
+.killchain-phase.hot {
+  border-color: rgba(180,35,24,0.3);
+  color: var(--danger);
+  background: rgba(180,35,24,0.06);
+}
+
+.killchain-phase.warm {
+  border-color: rgba(138,91,0,0.28);
+  color: var(--warning);
+  background: rgba(138,91,0,0.05);
+}
+
+.killchain-phase.cool { color: var(--muted); }
+
+.killchain-phase strong {
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.forensic-list {
+  overflow-y: auto;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  padding-right: 4px;
+}
+
+.forensic-narrative {
+  overflow-y: auto;
+  padding-right: 4px;
+  min-height: 0;
+}
+
+.markdown-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-toolbar span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--faint);
+}
+
+/* ── Status muted: neutral display for disabled services ────────── */
+.status-muted {
+  color: var(--muted);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* ── Settings: prevent long value overflow from breaking boxes ──── */
+.settings-grid {
+  align-items: start;
+}
+
+.settings-grid .setting-field {
+  min-height: unset;
+  height: auto;
+  overflow: hidden;
+}
+
+.settings-grid .setting-field strong {
+  font-size: 11px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  max-width: 100%;
+}
+
+/* ── Subsystem page: fix text overflow in feed rows ─────────────── */
+.feeds-page .feed-name strong,
+.feeds-page .feed-name small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.feeds-page .feed-row {
+  align-items: flex-start;
+}
+
+/* ── Disabled status dot: highest specificity override ──────────── */
+span.status-dot.disabled {
+  background: var(--muted) !important;
+  box-shadow: none !important;
+  opacity: 0.55 !important;
+}
+
+/* ── Dashboard main grid: allow mini-map to show fully ──────────── */
+.dashboard-main-grid {
+  overflow: visible;
+}
+
