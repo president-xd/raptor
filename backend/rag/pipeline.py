@@ -11,6 +11,7 @@ from loguru import logger
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from llm_redactor import redact
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_PROVIDER, LLM_MODEL,
     LLM_FALLBACK_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS,
@@ -157,7 +158,7 @@ def build_augmented_prompt(events: List[RaptorEvent], context: Dict[str, List[Di
     for e in events[:20]:
         sigma_str = ','.join(e.sigma_matches) if e.sigma_matches else 'none'
         event_lines.append(
-            f"[{e.event_type}] {redact_sensitive_text(e.source_host)} Sigma:{sigma_str} | {redact_sensitive_text(e.raw[:300])[:150]}"
+            f"[{e.event_type}] {redact(e.source_host)} Sigma:{sigma_str} | {redact(e.raw[:300])[:150]}"
         )
 
     # Format retrieved ATT&CK context (cap description at 120 chars)
@@ -191,16 +192,6 @@ Map suspicious events to ATT&CK techniques. Use only IDs from the context above 
 
     return prompt
 
-
-def redact_sensitive_text(value: str) -> str:
-    """Best-effort telemetry redaction before external model use."""
-    import re
-    text = str(value or "")
-    text = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<ip>", text)
-    text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "<email>", text)
-    text = re.sub(r"(?i)(password|passwd|pwd|secret|token|apikey|api_key|authorization)\s*[:=]\s*[^,\s;]+", r"\1=<redacted>", text)
-    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "bearer <redacted>", text)
-    return text
 
 
 def _phase_for_technique(technique_id: str) -> str:
