@@ -421,7 +421,7 @@ def run_investigation(
         # Phase 6 — narrative report
         db_update(
             investigation_id, progress=85,
-            current_phase="Generating analyst report",
+            current_phase="Generating enterprise report",
         )
         from report.generator import generate_report
 
@@ -438,7 +438,11 @@ def run_investigation(
             "campaign_duration_hours": campaign_hours,
         }
         narrative = generate_report(
-            analysis, attribution_results, graph_summary, investigation_id
+            analysis,
+            attribution_results,
+            graph_summary,
+            investigation_id,
+            report_name=str(metadata.get("case_name") or metadata.get("filename") or ""),
         )
 
         db_update(
