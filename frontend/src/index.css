@@ -143,6 +143,17 @@ code {
   }
 }
 
+@keyframes drawerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .raptor-shell {
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
@@ -680,6 +691,10 @@ code {
   min-width: 0;
   min-height: 0;
   padding: 14px;
+}
+
+.panel-body {
+  min-width: 0;
 }
 
 .fill-panel {
@@ -1553,7 +1568,8 @@ code {
 .attack-timeline {
   grid-row: 5;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  align-items: stretch;
   gap: 8px;
   border-top: 1px solid var(--border);
   padding: 10px;
@@ -1561,14 +1577,19 @@ code {
 }
 
 .timeline-step {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   min-width: 0;
   border: 1px solid var(--border-soft);
   border-radius: 0;
   padding: 8px;
   background: rgba(232, 232, 227, 0.5);
+}
+
+.timeline-step > div:last-child {
+  min-width: 0;
 }
 
 .timeline-index {
@@ -1596,19 +1617,20 @@ code {
 .timeline-step span {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .timeline-step strong {
   color: var(--text);
   font-size: 12px;
+  line-height: 1.2;
 }
 
 .timeline-step span {
   color: var(--muted);
   font-size: 11px;
+  line-height: 1.25;
 }
 
 .node-panel {
@@ -1649,7 +1671,7 @@ code {
 .matrix-detail h2 {
   overflow-wrap: anywhere;
   margin: 1px 0 0;
-  color: #fff;
+  color: var(--text);
   font-size: 20px;
   line-height: 1.1;
 }
@@ -1745,6 +1767,7 @@ code {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
   grid-auto-rows: auto;
+  align-items: start;
   gap: 14px;
   height: 100%;
   overflow: auto;
@@ -1771,7 +1794,13 @@ code {
 }
 
 .attribution-hero {
-  grid-row: span 2;
+  min-height: 0;
+}
+
+.attribution-evidence-panel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: visible;
 }
 
 .gauge-row {
@@ -1896,21 +1925,60 @@ code {
 
 .similarity-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  align-items: stretch;
+  gap: 12px;
 }
 
 .similarity-card {
   display: grid;
+  align-content: start;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 10px;
+  overflow: hidden;
   background: rgba(18, 22, 36, 0.66);
 }
 
 .similarity-card > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text);
+  line-height: 1.3;
+}
+
+.similarity-card .detail-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.similarity-card .detail-row span,
+.similarity-card .detail-row strong {
+  min-width: 0;
+}
+
+.similarity-card .detail-row strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.similarity-card .ttp-stack.inline {
+  min-width: 0;
+}
+
+.similarity-card .ttp-stack code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.similarity-card .small-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .prediction-card {
@@ -1992,12 +2060,16 @@ code {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   height: 100%;
   min-height: 0;
 }
 
 .chat-context {
+  align-self: start;
+  justify-self: start;
+  width: fit-content;
+  max-width: min(100%, 760px);
   flex-wrap: wrap;
   gap: 10px;
   border: 1px solid var(--border-soft);
@@ -2012,7 +2084,9 @@ code {
 }
 
 .chat-context small {
+  min-width: 0;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .chat-history {
@@ -2050,6 +2124,7 @@ code {
   padding: 10px 12px;
   color: var(--text);
   background: rgba(18, 22, 36, 0.78);
+  white-space: pre-wrap;
 }
 
 .chat-message.analyst p {
@@ -2409,12 +2484,94 @@ code {
   font-size: 12px;
 }
 
+.matrix-detail-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(16, 16, 14, 0.18);
+}
+
 .matrix-detail {
   display: grid;
-  gap: 10px;
-  min-height: 112px;
-  margin-top: 14px;
-  padding: 14px;
+  align-content: start;
+  gap: 14px;
+  width: min(440px, calc(100vw - 28px));
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  border-left: 1px solid var(--border);
+  padding: 18px;
+  overflow: hidden auto;
+  animation: drawerSlideIn 0.22s ease-out;
+}
+
+.matrix-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.matrix-detail-header > div {
+  min-width: 0;
+}
+
+.matrix-detail-header span,
+.matrix-detail-section > span {
+  display: block;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.matrix-detail-header h2 {
+  margin: 3px 0 4px;
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1.05;
+}
+
+.matrix-detail-header strong {
+  display: block;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.matrix-detail-section {
+  display: grid;
+  gap: 7px;
+}
+
+.matrix-detail-section p {
+  color: var(--muted);
+  line-height: 1.62;
+}
+
+.matrix-detail-section a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.detail-list.compact {
+  margin: 4px 0 0;
+}
+
+.matrix-detail .detail-row {
+  grid-template-columns: minmax(96px, 0.34fr) minmax(0, 1fr);
+}
+
+.matrix-detail .detail-row strong {
+  font-family: var(--font-ui);
+  text-align: left;
 }
 
 .matrix-state {
@@ -3274,7 +3431,11 @@ code {
   }
 
   .attack-timeline {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  }
+
+  .forensic-findings-grid {
+    grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr);
   }
 }
 
@@ -3364,8 +3525,21 @@ code {
   .report-preview,
   .similarity-grid,
   .coverage-list,
-  .composer-grid {
+  .composer-grid,
+  .forensic-findings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .forensic-findings-grid > .evidence-panel {
+    grid-column: 1;
+    grid-row: auto;
+    height: auto;
+    max-height: none;
+  }
+
+  .forensic-sidebar,
+  .forensic-list {
+    overflow: visible;
   }
 
   .detail-header,
@@ -3449,6 +3623,10 @@ code {
   .matrix-grid {
     grid-template-columns: repeat(2, minmax(148px, 1fr));
     height: auto;
+  }
+
+  .matrix-detail {
+    width: min(420px, calc(100vw - 20px));
   }
 
   .matrix-toolbar {
@@ -3576,6 +3754,15 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .matrix-detail-layer {
+    background: rgba(16, 16, 14, 0.24);
+  }
+
+  .matrix-detail {
+    width: calc(100vw - 16px);
+    padding: 14px;
+  }
+
   .report-cover {
     min-height: 260px;
     padding: 14px;
@@ -3614,7 +3801,34 @@ code {
 
 /* ── Feeds page: prevent subsystem rows from overflowing ────────────────── */
 .feeds-page {
-  overflow: hidden auto;
+  grid-template-rows: minmax(180px, 0.9fr) minmax(210px, 1fr) minmax(230px, 1.05fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.feeds-page .subsystem-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.feeds-page .subsystem-panel .panel-header {
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.feeds-page .subsystem-panel .panel-body {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.feeds-page .feed-list {
+  display: grid;
+  gap: 10px;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
 }
 
 .feed-row {
@@ -3643,6 +3857,18 @@ code {
   text-overflow: ellipsis;
 }
 
+.feeds-page .system-note {
+  min-height: auto;
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
+.feeds-page .inline-error {
+  align-items: start;
+  max-height: 132px;
+  overflow: auto;
+}
+
 /* ── Query workspace standalone ─────────────────────────────────────────── */
 .query-page.page-panel {
   display: grid;
@@ -3664,13 +3890,13 @@ code {
 .query-selector-list {
   display: grid;
   gap: 8px;
-  max-height: 220px;
+  max-height: 280px;
   overflow: auto;
 }
 
 .query-selector-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
@@ -3684,10 +3910,15 @@ code {
   transition: border-color 0.16s, background 0.16s;
 }
 
-.query-selector-row:hover,
+.query-selector-row:not(:disabled):hover,
 .query-selector-row.active {
   border-color: rgba(59, 130, 246, 0.45);
   background: rgba(59, 130, 246, 0.1);
+}
+
+.query-selector-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .query-selector-row > div {
@@ -3707,9 +3938,8 @@ code {
   display: block;
   color: var(--muted);
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* paper skin overrides for query selector */
@@ -3718,7 +3948,7 @@ code {
   border-color: var(--border);
 }
 
-.query-selector-row:hover,
+.query-selector-row:not(:disabled):hover,
 .query-selector-row.active {
   background: rgba(16, 16, 14, 0.05);
   border-color: var(--text);
@@ -4017,10 +4247,17 @@ code {
 
 .forensic-findings-grid {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(420px, 1fr);
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+
+.forensic-findings-grid > .evidence-panel {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100%;
+  max-height: none;
 }
 
 .forensic-sidebar {
@@ -4150,3 +4387,27 @@ span.status-dot.disabled {
   overflow: visible;
 }
 
+@media (max-width: 1280px) {
+  .forensic-findings-grid {
+    grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .forensic-findings-grid {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .forensic-findings-grid > .evidence-panel {
+    grid-column: 1;
+    grid-row: auto;
+    height: auto;
+    max-height: none;
+  }
+
+  .forensic-sidebar,
+  .forensic-list {
+    overflow: visible;
+  }
+}
