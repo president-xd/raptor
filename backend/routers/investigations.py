@@ -25,7 +25,7 @@ from auth_core import (
     require_role,
 )
 from config import MAX_UPLOAD_BYTES
-from database import db_list, list_evidence_files
+from database import db_list, db_update, list_evidence_files
 from models import (
     EvidenceFileSummary,
     EvidenceListResponse,
@@ -37,7 +37,8 @@ from models import (
     InvestigationStatus,
 )
 from pipeline_runner import fetch_elasticsearch_logs, start_investigation_from_content
-from schema import AttributionResult, Finding
+from report.generator import build_enterprise_report, report_needs_upgrade
+from schema import AnalysisResult, AttributionResult, Finding
 
 router = APIRouter(tags=["investigations"])
 
@@ -197,6 +198,23 @@ async def get_report(
 
     attack_seq = json.loads(record["attack_sequence_json"]) if record.get("attack_sequence_json") else []
     anomalies = json.loads(record["anomalies_json"]) if record.get("anomalies_json") else []
+    narrative_report = record.get("narrative_report") or ""
+    if record.get("status") == "complete" and report_needs_upgrade(narrative_report):
+        analysis = AnalysisResult(
+            findings=findings,
+            attack_sequence=attack_seq,
+            anomalies=anomalies,
+        )
+        narrative_report = build_enterprise_report(
+            analysis,
+            attribution,
+            _graph_summary_from_record(record, findings),
+            investigation_id,
+            report_name=record.get("name") or "",
+            generation_note="Legacy or missing report upgraded and persisted by report view endpoint.",
+        )
+        db_update(investigation_id, narrative_report=narrative_report)
+        logger.info(f"Upgraded stored enterprise report for {investigation_id}")
 
     audit_log(request, "report.viewed", investigation_id, {"status": record["status"]})
     return InvestigationReport(
@@ -207,11 +225,58 @@ async def get_report(
         attack_sequence=attack_seq,
         anomalies=anomalies,
         attribution=attribution,
-        narrative_report=record.get("narrative_report") or "",
+        narrative_report=narrative_report,
         event_count=record.get("event_count") or 0,
         technique_count=record.get("technique_count") or 0,
         timestamp=record.get("created_at") or "",
     )
+
+
+def _graph_summary_from_record(record: dict, findings: list[Finding]) -> dict:
+    graph = {}
+    if record.get("graph_json"):
+        try:
+            graph = json.loads(record.get("graph_json") or "{}")
+        except Exception:
+            graph = {}
+    nodes = graph.get("nodes") if isinstance(graph, dict) else []
+    nodes = nodes if isinstance(nodes, list) else []
+    host_nodes = [
+        node for node in nodes
+        if str(node.get("node_type") or node.get("kind") or "").lower() == "host"
+    ]
+    compromised = 0
+    for node in host_nodes:
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if metadata.get("compromised") or node.get("compromised"):
+            compromised += 1
+    return {
+        "total_events": int(record.get("event_count") or 0),
+        "unique_hosts": len(host_nodes) or _host_count_from_findings(findings),
+        "hosts_compromised": compromised,
+        "campaign_duration_hours": 0.0,
+    }
+
+
+def _host_count_from_findings(findings: list[Finding]) -> int:
+    hosts: set[str] = set()
+    for finding in findings:
+        summary = finding.evidence_summary or ""
+        for marker in ('"host": "', '"source_host": "', '"dest_host": "'):
+            start = 0
+            while True:
+                index = summary.find(marker, start)
+                if index < 0:
+                    break
+                index += len(marker)
+                end = summary.find('"', index)
+                if end < 0:
+                    break
+                value = summary[index:end].strip()
+                if value:
+                    hosts.add(value)
+                start = end + 1
+    return len(hosts)
 
 
 @router.get("/api/v1/investigate/{investigation_id}/graph")

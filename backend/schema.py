@@ -76,9 +76,14 @@ class SimulationPrediction(BaseModel):
     """A single predicted next technique."""
     technique_id: str = ""
     technique_name: str = ""
+    tactic: str = ""
+    probability: int = 0
     rationale: str = ""
     likely_tools: List[str] = Field(default_factory=list)
+    preconditions: List[str] = Field(default_factory=list)
+    immediate_actions: List[str] = Field(default_factory=list)
     detection_guidance: str = ""
+    evidence_basis: str = ""
     urgency: str = "medium"  # critical | high | medium
 
 

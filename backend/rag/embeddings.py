@@ -34,6 +34,13 @@ def _deterministic_test_embedding(text: str, dim: int = 1024) -> np.ndarray:
 def get_model():
     """Lazy-load the embedding model."""
     global _model, _model_name
+    if _allow_test_fallback():
+        if _model_name != "deterministic-test":
+            logger.warning("Using deterministic test embeddings (RAPTOR_ALLOW_TEST_EMBEDDINGS=true)")
+        _model = None
+        _model_name = "deterministic-test"
+        return None
+
     if _model is None:
         try:
             from sentence_transformers import SentenceTransformer
@@ -64,7 +71,6 @@ def embed_texts(texts: Union[str, List[str]], prefix: str = "") -> np.ndarray:
         return np.array(embeddings)
 
     if _allow_test_fallback():
-        logger.warning("Using deterministic test embeddings (RAPTOR_ALLOW_TEST_EMBEDDINGS=true)")
         vectors = [_deterministic_test_embedding(t) for t in texts]
         return np.array(vectors)
 

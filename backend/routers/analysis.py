@@ -53,28 +53,62 @@ def simulate(request: Request, payload: SimulateRequest) -> SimulationResponse:
     if attribution is None:
         attribution = AttributionResult(**attribution_data[0])
 
-    observed_ttps = [
-        f.get("technique_id", "")
-        for f in json.loads(record.get("findings_json") or "[]")
-        if f.get("technique_id")
+    findings = [Finding(**item) for item in json.loads(record.get("findings_json") or "[]")]
+    attack_sequence = [
+        str(item or "").strip()
+        for item in json.loads(record.get("attack_sequence_json") or "[]")
+        if str(item or "").strip()
     ]
+    observed_ttps = []
+    for technique_id in [*attack_sequence, *(finding.technique_id for finding in findings)]:
+        if technique_id and technique_id not in observed_ttps:
+            observed_ttps.append(technique_id)
 
     compromised_hosts: list[str] = []
+    dc_compromised = False
     try:
         for node in json.loads(record.get("graph_json") or "{}").get("nodes", []):
-            if node.get("node_type") == "host" and node.get("metadata", {}).get("compromised"):
-                compromised_hosts.append(node.get("label") or node.get("id"))
+            metadata = node.get("metadata", {}) or {}
+            if node.get("node_type") == "host" and metadata.get("compromised"):
+                label = node.get("label") or node.get("id")
+                if label and label not in compromised_hosts:
+                    compromised_hosts.append(label)
+                dc_compromised = dc_compromised or bool(metadata.get("is_dc"))
     except Exception:
         pass
 
-    from simulation.predictor import predict_next_steps
+    privilege_level = (
+        "domain-controller foothold / probable domain-admin material exposed"
+        if dc_compromised
+        else "domain user / local admin exposure"
+        if any(f.kill_chain_phase == "credential-access" for f in findings)
+        else "initial user-level foothold"
+    )
+
+    from simulation.predictor import (
+        build_response_actions,
+        build_simulation_context_summary,
+        derive_current_stage,
+        predict_next_steps,
+    )
 
     predictions = predict_next_steps(
         attribution=attribution,
         compromised_hosts=compromised_hosts,
-        privilege_level="domain user / admin",
+        privilege_level=privilege_level,
+        observed_ttps=observed_ttps,
+        network_info=f"{record.get('event_count') or 0} events, {record.get('technique_count') or len(observed_ttps)} observed techniques",
+        findings=findings,
+        attack_sequence=attack_sequence,
+    )
+    context_summary = build_simulation_context_summary(
+        attribution=attribution,
+        findings=findings,
+        compromised_hosts=compromised_hosts,
         observed_ttps=observed_ttps,
     )
+    current_stage = derive_current_stage(observed_ttps, findings)
+    recommended_actions = build_response_actions(predictions)
     audit_log(
         request,
         "simulation.run",
@@ -86,6 +120,11 @@ def simulate(request: Request, payload: SimulateRequest) -> SimulationResponse:
         apt_group=attribution.apt_name,
         predictions=predictions,
         confidence=attribution.confidence_label,
+        context_summary=context_summary,
+        current_stage=current_stage,
+        observed_ttps=observed_ttps,
+        compromised_hosts=compromised_hosts,
+        recommended_actions=recommended_actions,
     )
 
 

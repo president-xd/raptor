@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -64,6 +64,11 @@ import {
   syncCisaKev,
   uploadInvestigation,
 } from '../api/raptorApi';
+
+const POLL_INTERVAL_MS = 15000;
+const ACTIVE_POLL_INTERVAL_MS = 5000;
+const TOAST_DURATION_MS = 2600;
+const PDF_PRINT_DELAY_MS = 600;
 
 const navGroups = [
   {
@@ -165,6 +170,7 @@ export default function Dashboard() {
   const [investigationsLoading, setInvestigationsLoading] = useState(true);
   const [investigationsError, setInvestigationsError] = useState('');
   const [selectedInvestigationId, setSelectedInvestigationId] = useState('');
+  const [simulationInvestigationId, setSimulationInvestigationId] = useState('');
   const [reportCache, setReportCache] = useState({});
   const [graphCache, setGraphCache] = useState({});
   const [evidenceCache, setEvidenceCache] = useState({});
@@ -187,10 +193,11 @@ export default function Dashboard() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [authError, setAuthError] = useState('');
 
+  const toastTimerRef = useRef(null);
   const showToast = useCallback((message) => {
     setToast(message);
-    window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => setToast(''), 2600);
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(''), TOAST_DURATION_MS);
   }, []);
 
   const loadHealth = useCallback(async () => {
@@ -279,20 +286,26 @@ export default function Dashboard() {
     }
   }, []);
 
+  const aptLoadingRef = useRef(false);
+  const aptProfilesCountRef = useRef(0);
   const loadAptProfiles = useCallback(async (force = false) => {
-    if (aptLoading || (!force && aptProfiles.length)) return;
+    if (aptLoadingRef.current || (!force && aptProfilesCountRef.current > 0)) return;
+    aptLoadingRef.current = true;
     setAptLoading(true);
     setAptError('');
     try {
       const response = await listAptProfiles({ includeTechniques: false });
-      setAptProfiles(response?.profiles || []);
+      const profiles = response?.profiles || [];
+      aptProfilesCountRef.current = profiles.length;
+      setAptProfiles(profiles);
     } catch (error) {
       setAptError(error.message || 'Failed to load APT profiles');
       if (error.status === 401 || error.status === 503) setAuthDialogOpen(true);
     } finally {
+      aptLoadingRef.current = false;
       setAptLoading(false);
     }
-  }, [aptLoading, aptProfiles.length]);
+  }, []);
 
   const loadAptProfileDetail = useCallback(async (name) => {
     try {
@@ -307,8 +320,8 @@ export default function Dashboard() {
   useEffect(() => {
     loadHealth();
     loadInvestigations();
-    const healthTimer = window.setInterval(loadHealth, 15000);
-    const investigationTimer = window.setInterval(() => loadInvestigations({ quiet: true }), 15000);
+    const healthTimer = window.setInterval(loadHealth, POLL_INTERVAL_MS);
+    const investigationTimer = window.setInterval(() => loadInvestigations({ quiet: true }), POLL_INTERVAL_MS);
     const refreshOnFocus = () => loadInvestigations({ quiet: true });
     const refreshOnVisibility = () => {
       if (document.visibilityState === 'visible') loadInvestigations({ quiet: true });
@@ -326,7 +339,7 @@ export default function Dashboard() {
   useEffect(() => {
     const hasActive = investigations.some((item) => ['queued', 'processing'].includes(item.statusRaw));
     if (!hasActive) return undefined;
-    const timer = window.setInterval(() => loadInvestigations(true), 5000);
+    const timer = window.setInterval(() => loadInvestigations(true), ACTIVE_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [investigations, loadInvestigations]);
 
@@ -339,16 +352,40 @@ export default function Dashboard() {
   const selectedEvidence = selectedInvestigation ? evidenceCache[selectedInvestigation.id] : null;
   const selectedMitreMatrix = selectedInvestigation ? mitreMatrixCache[selectedInvestigation.id] : mitreMatrixCache.__global || null;
   const selectedSimulation = selectedInvestigation ? simulationCache[selectedInvestigation.id] : null;
+  const completedInvestigations = useMemo(
+    () => investigations.filter((item) => item.statusRaw === 'complete'),
+    [investigations]
+  );
+  const simulationInvestigation = useMemo(() => {
+    const exact = investigations.find((item) => item.id === simulationInvestigationId);
+    return exact || completedInvestigations[0] || selectedInvestigation || investigations[0] || null;
+  }, [investigations, completedInvestigations, selectedInvestigation, simulationInvestigationId]);
+  const simulationReport = simulationInvestigation ? reportCache[simulationInvestigation.id] : null;
+  const simulationGraph = simulationInvestigation ? graphCache[simulationInvestigation.id] : null;
+  const standaloneSimulation = simulationInvestigation ? simulationCache[simulationInvestigation.id] : null;
+
+  useEffect(() => {
+    if (!investigations.length) return;
+    setSimulationInvestigationId((current) => {
+      if (current && investigations.some((item) => item.id === current)) return current;
+      return completedInvestigations[0]?.id || selectedInvestigation?.id || investigations[0]?.id || '';
+    });
+  }, [investigations, completedInvestigations, selectedInvestigation?.id]);
 
   useEffect(() => {
     if (!selectedInvestigation?.id) return;
     loadArtifacts(selectedInvestigation.id);
-  }, [selectedInvestigation?.id, selectedInvestigation?.statusRaw, selectedInvestigation?.progress, loadArtifacts]);
+  }, [selectedInvestigation?.id, selectedInvestigation?.statusRaw, loadArtifacts]);
+
+  useEffect(() => {
+    if (activePage !== 'simulation' || !simulationInvestigation?.id) return;
+    loadArtifacts(simulationInvestigation.id);
+  }, [activePage, simulationInvestigation?.id, simulationInvestigation?.statusRaw, loadArtifacts]);
 
   useEffect(() => {
     if (activePage !== 'mitre') return;
     loadMitreMatrix(selectedInvestigation?.id || '');
-  }, [activePage, selectedInvestigation?.id, selectedInvestigation?.statusRaw, selectedInvestigation?.progress, loadMitreMatrix]);
+  }, [activePage, selectedInvestigation?.id, selectedInvestigation?.statusRaw, loadMitreMatrix]);
 
   useEffect(() => {
     if (activePage === 'apt-library') loadAptProfiles();
@@ -520,11 +557,18 @@ export default function Dashboard() {
           )}
           {activePage === 'simulation' && (
             <StandaloneSimulationPage
-              investigation={selectedInvestigation}
-              simulation={selectedSimulation}
+              investigations={investigations}
+              investigation={simulationInvestigation}
+              report={simulationReport}
+              graph={simulationGraph}
+              simulation={standaloneSimulation}
               loading={simulationLoading}
               error={simulationError}
-              onRun={() => executeSimulation(selectedInvestigation?.id)}
+              onSelectInvestigation={(id) => {
+                setSimulationInvestigationId(id);
+                loadArtifacts(id);
+              }}
+              onRun={() => executeSimulation(simulationInvestigation?.id)}
             />
           )}
           {activePage === 'mitre' && (
@@ -587,7 +631,7 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
     <aside className="sidebar" aria-label="Primary navigation">
       <div className="brand-lockup">
         <div className="brand-mark">
-          <Shield size={19} />
+          <img className="brand-logo" src="/assets/raptor-logo.png" alt="" aria-hidden="true" />
         </div>
         <div>
           <div className="brand-title">RAPTOR</div>
@@ -607,9 +651,11 @@ function Sidebar({ activePage, onNavigate, health, healthError }) {
                   key={item.id}
                   type="button"
                   className={`nav-item ${active ? 'active' : ''}`}
+                  aria-label={item.label}
+                  aria-current={active ? 'page' : undefined}
                   onClick={() => onNavigate(item.id)}
                 >
-                  <Icon size={16} />
+                  <Icon size={16} aria-hidden="true" />
                   <span>{item.label}</span>
                   {item.badge && <span className="nav-badge">{item.badge}</span>}
                   {item.pulse && <span className="nav-pulse" />}
@@ -648,12 +694,13 @@ function TopHeader({ title, search, setSearch, health, healthError, onNewInvesti
   return (
     <header className="top-header">
       <div className="top-title">
-        <span>Retrieval-Augmented Persistent Threat Orchestration</span>
         <strong>{title}</strong>
       </div>
-      <label className="global-search">
-        <Search size={16} />
+      <label className="global-search" htmlFor="global-search-input">
+        <Search size={16} aria-hidden="true" />
         <input
+          id="global-search-input"
+          aria-label="Search investigations, TTPs, actors, and hosts"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search live investigations, TTPs, actors, hosts..."
@@ -664,12 +711,12 @@ function TopHeader({ title, search, setSearch, health, healthError, onNewInvesti
           <span className={`status-dot ${healthy ? 'online' : 'offline'}`} />
           {healthy ? 'All Systems Nominal' : 'Systems Degraded'}
         </button>
-        <button className="icon-button" type="button" title="Refresh" onClick={onRefresh}>
-          <RefreshCcw size={17} />
+        <button className="icon-button" type="button" title="Refresh" aria-label="Refresh API data" onClick={onRefresh}>
+          <RefreshCcw size={17} aria-hidden="true" />
         </button>
-        <button className="icon-button" type="button" title="Notifications" onClick={onNotifications}>
-          <Bell size={17} />
-          {!healthy && <span className="notification-dot" />}
+        <button className="icon-button" type="button" title="Notifications" aria-label="View notifications" onClick={onNotifications}>
+          <Bell size={17} aria-hidden="true" />
+          {!healthy && <span className="notification-dot" aria-label="System degraded" />}
         </button>
         {authDegraded && (
           <button className="secondary-button" type="button" onClick={onAuthenticate}>
@@ -693,13 +740,9 @@ function DashboardPage({
   metrics,
   operationFeed,
   coverage,
-  graph,
-  selectedInvestigation,
   onOpenInvestigation,
   onRefresh,
 }) {
-  const graphTarget = selectedInvestigation?.id || investigations.find((item) => item.statusRaw === 'complete')?.id || investigations[0]?.id;
-
   return (
     <div className="dashboard-layout page-panel">
       <div className="metric-grid">
@@ -708,9 +751,9 @@ function DashboardPage({
         ))}
       </div>
 
-      <div className="dashboard-main-grid">
+      <div className="dashboard-main-grid dashboard-main-grid-no-graph">
         <Panel
-          className="span-8"
+          className="span-8 dashboard-recent-panel"
           title="Recent Investigations"
           icon={Gauge}
           action={<button type="button" className="panel-chip" onClick={onRefresh}><RefreshCcw size={13} />Refresh</button>}
@@ -733,33 +776,26 @@ function DashboardPage({
           )}
         </Panel>
 
-        <Panel className="span-4" title="Operations Feed" icon={RadioTower}>
-          <div className="alert-feed-scroll">
-            {operationFeed.map((alert) => (
-              <div className={`alert-item ${alert.type}`} key={`${alert.time}-${alert.title}`}>
-                <span className="alert-dot" />
-                <div>
-                  <strong>{alert.title}</strong>
-                  <p>{alert.detail}</p>
+        <div className="dashboard-side-stack span-4">
+          <Panel className="dashboard-feed-panel" title="Operations Feed" icon={RadioTower}>
+            <div className="alert-feed-scroll">
+              {operationFeed.map((alert, index) => (
+                <div className={`alert-item ${alert.type}`} key={index}>
+                  <span className="alert-dot" />
+                  <div>
+                    <strong>{alert.title}</strong>
+                    <p>{alert.detail}</p>
+                  </div>
+                  <time>{alert.time}</time>
                 </div>
-                <time>{alert.time}</time>
-              </div>
-            ))}
-          </div>
-        </Panel>
+              ))}
+            </div>
+          </Panel>
 
-        <Panel className="span-8" title="Active Attack Graph Preview" icon={Network}
-          action={selectedInvestigation && <span className="panel-chip">{selectedInvestigation.name}</span>}
-        >
-          <MiniAttackMap
-            graph={graph}
-            onOpen={() => graphTarget && onOpenInvestigation(graphTarget)}
-          />
-        </Panel>
-
-        <Panel className="span-4" title="Kill Chain Coverage" icon={Layers3}>
-          <CoverageBars coverage={coverage} />
-        </Panel>
+          <Panel className="dashboard-coverage-panel" title="Kill Chain Coverage" icon={Layers3}>
+            <CoverageBars coverage={coverage} />
+          </Panel>
+        </div>
       </div>
     </div>
   );
@@ -1579,13 +1615,13 @@ function AttributionTab({ report }) {
           ))}
         </div>
       </Panel>
-      <Panel title="Evidence And Adjustments" icon={Activity}>
+      <Panel title="Scoring Inputs & Adjustments" icon={Activity} className="attribution-evidence-panel">
         <div className="similarity-grid">
           {attribution.map((actor) => (
             <div className="similarity-card" key={actor.apt_name}>
               <strong>{actor.apt_name}</strong>
               <Row label="Jaccard" value={actor.jaccard_score?.toFixed?.(3) || '0.000'} />
-              <Row label="Known TTPs" value={String(actor.ttp_count || 0)} />
+              <Row label="Actor Known TTPs" value={String(actor.ttp_count || 0)} />
               <Row label="Confidence" value={`${toPercent(actor.confidence_score)}%`} />
               <div className="ttp-stack inline">
                 {(actor.overlapping_ttps || []).slice(0, 8).map((ttp) => <code key={ttp}>{ttp}</code>)}
@@ -1601,56 +1637,121 @@ function AttributionTab({ report }) {
   );
 }
 
-function SimulationTab({ investigation, simulation, loading, error, onRun }) {
+function SimulationTab({ investigation, simulation, loading, error, onRun, showRun = true }) {
   const predictions = simulation?.predictions || [];
   const canRun = investigation?.statusRaw === 'complete';
   const notComplete = investigation && investigation.statusRaw !== 'complete';
+  const recommendedActions = simulation?.recommended_actions || [];
+  const contextStats = simulation ? [
+    simulation.apt_group ? `Actor ${simulation.apt_group}` : null,
+    simulation.current_stage ? `Stage ${formatPhase(simulation.current_stage)}` : null,
+    `${simulation.compromised_hosts?.length || investigation?.hosts || 0} hosts`,
+    `${simulation.observed_ttps?.length || investigation?.ttps || 0} TTPs`,
+  ].filter(Boolean) : [];
 
   const blockingReasons = [];
   if (!investigation) blockingReasons.push('No investigation selected');
   else if (notComplete) blockingReasons.push(`Investigation is ${investigation.status?.toLowerCase() || 'not complete'} (${investigation.progress || 0}%)`);
 
   return (
-    <div className="simulation-list">
-      <div className="action-strip">
-        <button type="button" className="primary-button" onClick={onRun} disabled={!canRun || loading}>
-          <Play size={16} />
-          {loading ? 'Running Simulation…' : 'Run Backend Simulation'}
-        </button>
-        {blockingReasons.map((reason) => (
-          <span key={reason} className="panel-chip">{reason}</span>
-        ))}
-      </div>
+    <div className="simulation-list compact">
+      {showRun && (
+        <div className="simulation-command-bar">
+          <div>
+            <strong>Next-Move Brief</strong>
+            <span>{predictions.length ? `${predictions.length} projected techniques` : 'Ready for contextual simulation'}</span>
+          </div>
+          <button type="button" className="primary-button" onClick={onRun} disabled={!canRun || loading}>
+            <Play size={16} />
+            {loading ? 'Running' : 'Run'}
+          </button>
+          {blockingReasons.map((reason) => (
+            <span key={reason} className="panel-chip">{reason}</span>
+          ))}
+        </div>
+      )}
       {error && <InlineError message={error} />}
+      {!!contextStats.length && (
+        <div className="simulation-context-note compact">
+          <CircleDot size={15} />
+          <span>{contextStats.join(' · ')}</span>
+        </div>
+      )}
+      {!!recommendedActions.length && (
+        <div className="simulation-actions compact">
+          <strong>Containment focus</strong>
+          <div>
+            {recommendedActions.slice(0, 4).map((action) => <span key={action}>{action}</span>)}
+          </div>
+        </div>
+      )}
       {!predictions.length && !loading && (
         <EmptyState
           icon={Play}
           title="No simulation output loaded"
-          detail="Run the backend simulation to generate next-step attack predictions based on the attributed APT group."
+          detail="Run the simulation to generate next-step attack predictions from this investigation."
         />
       )}
-      {predictions.map((prediction, index) => (
-        <article className={`prediction-card ${prediction.urgency || 'medium'}`} key={`${prediction.technique_id}-${index}`}>
-          <div className="prediction-number">{index + 1}</div>
-          <div className="prediction-body">
-            <div className="prediction-header">
-              <div>
-                <code>{prediction.technique_id}</code>
-                <h3>{prediction.technique_name}</h3>
+      {!!predictions.length && (
+        <div className="prediction-grid">
+          {predictions.map((prediction, index) => (
+            <article className={`prediction-card ${prediction.urgency || 'medium'}`} key={`${prediction.technique_id}-${index}`}>
+              <div className="prediction-card-top">
+                <div className="prediction-number">{index + 1}</div>
+                <div className="prediction-title">
+                  <code>{prediction.technique_id}</code>
+                  <h3>{prediction.technique_name}</h3>
+                </div>
+                <span className={`risk-pill ${prediction.urgency || 'medium'}`}>{prediction.urgency || 'medium'}</span>
               </div>
-              <span className={`risk-pill ${prediction.urgency || 'medium'}`}>{prediction.urgency || 'medium'}</span>
-            </div>
-            <p>{prediction.rationale}</p>
-            <div className="tool-strip">
-              {(prediction.likely_tools || []).map((tool) => <code key={tool}>{tool}</code>)}
-            </div>
-            <div className="detection-block">
-              <Shield size={15} />
-              <span>{prediction.detection_guidance}</span>
-            </div>
-          </div>
-        </article>
-      ))}
+              <div className="prediction-body">
+                <div className="prediction-kpis">
+                  <span>{formatPhase(prediction.tactic || 'unknown')}</span>
+                  <span>{prediction.probability || 0}% probability</span>
+                </div>
+                <div className="prediction-probability" aria-label={`Probability ${prediction.probability || 0}%`}>
+                  <div className="progress-track"><i style={{ width: `${Math.min(100, Math.max(0, prediction.probability || 0))}%` }} /></div>
+                </div>
+                <p>{truncate(prediction.rationale, 180)}</p>
+                <details className="prediction-disclosure">
+                  <summary>Evidence, actions, detection</summary>
+                  <div className="prediction-disclosure-body">
+                    {prediction.evidence_basis && (
+                      <div className="simulation-evidence-basis compact">
+                        <strong>Evidence basis</strong>
+                        <span>{prediction.evidence_basis}</span>
+                      </div>
+                    )}
+                    {!!(prediction.likely_tools || []).length && (
+                      <div className="tool-strip compact">
+                        {(prediction.likely_tools || []).map((tool) => <code key={tool}>{tool}</code>)}
+                      </div>
+                    )}
+                    {!!((prediction.preconditions || []).length || (prediction.immediate_actions || []).length) && (
+                      <div className="prediction-detail-grid">
+                        <div>
+                          <strong>Preconditions</strong>
+                          {(prediction.preconditions || []).map((item) => <span key={item}>{item}</span>)}
+                        </div>
+                        <div>
+                          <strong>Immediate actions</strong>
+                          {(prediction.immediate_actions || []).map((item) => <span key={item}>{item}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {prediction.detection_guidance && (
+                      <div className="detection-block compact">
+                        <Shield size={15} />
+                        <span>{prediction.detection_guidance}</span>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1725,30 +1826,41 @@ function QueryWorkspacePage({ investigation, investigations = [], report, embedd
 
   return (
     <div className={`query-page ${embedded ? 'embedded' : 'page-panel'}`}>
-      {!embedded && !isComplete && completedInvestigations.length > 0 && (
-        <Panel title="Select Investigation" icon={Archive} className="query-selector-panel">
-          <p className="query-selector-hint">
-            Intelligence Query requires a completed investigation. Select one below or complete an active investigation first.
-          </p>
-          <div className="query-selector-list">
-            {completedInvestigations.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`query-selector-row ${investigation?.id === item.id ? 'active' : ''}`}
-                onClick={() => onSelectInvestigation?.(item.id)}
+      {!embedded && investigations.length > 0 && (
+        <Panel title="Case Switcher" icon={Archive} className="query-selector-panel compact">
+          <div className="query-selector-control">
+            <label className="query-case-select">
+              <span>Investigation context</span>
+              <select
+                value={investigation?.id || ''}
+                onChange={(event) => onSelectInvestigation?.(event.target.value)}
+                aria-label="Select investigation context for intelligence query"
               >
-                <div>
-                  <strong>{item.name}</strong>
-                  <small>{shortId(item.id)} · {item.confidence}% confidence · {item.candidate || 'no attribution'}</small>
-                </div>
-                <StatusPill status="Complete" />
-              </button>
-            ))}
+                {!investigation?.id && <option value="">Select a completed case</option>}
+                {investigations.map((item) => {
+                  const queryReady = item.statusRaw === 'complete';
+                  return (
+                    <option key={item.id} value={item.id} disabled={!queryReady}>
+                      {shortId(item.id)} · {item.name} · {queryReady ? `${item.candidate || 'Unknown'} · ${item.confidence}%` : titleCase(item.statusRaw || item.status)}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <div className="query-selected-case">
+              <span>Loaded case</span>
+              <strong>{investigation?.name || 'No completed case selected'}</strong>
+              <small>
+                {investigation?.id
+                  ? `CASE ${shortId(investigation.id)} · ${investigation.candidate || 'no attribution'} · ${investigation.confidence}% confidence`
+                  : `${completedInvestigations.length} completed cases available`}
+              </small>
+              {investigation?.statusRaw && <StatusPill status={titleCase(investigation.statusRaw)} />}
+            </div>
           </div>
         </Panel>
       )}
-      {!embedded && !isComplete && !completedInvestigations.length && (
+      {!embedded && !investigations.length && (
         <EmptyState
           icon={MessageSquare}
           title="No completed investigations"
@@ -1899,16 +2011,10 @@ function ForensicReportTab({ report, evidence, showToast }) {
         {activeSection === 'narrative' && (
           <div className="forensic-narrative">
             {report.narrative_report ? (
-              <article className="markdown-report">
-                <div className="markdown-toolbar">
-                  <span>Backend Narrative Report</span>
-                  <button type="button" className="secondary-button" onClick={() => downloadMarkdown(report, showToast)} disabled={!report.narrative_report}>
-                    <FileDown size={13} />
-                    Download MD
-                  </button>
-                </div>
-                <pre>{report.narrative_report}</pre>
-              </article>
+              <EnterpriseReportView
+                report={report}
+                onDownload={() => downloadMarkdown(report, showToast)}
+              />
             ) : (
               <EmptyState icon={FileText} title="No narrative report" detail="The backend generates a narrative after analysis completes." />
             )}
@@ -1939,6 +2045,165 @@ function ForensicReportTab({ report, evidence, showToast }) {
       </div>
     </div>
   );
+}
+
+function EnterpriseReportView({ report, compact = false, onDownload }) {
+  const blocks = useMemo(
+    () => parseReportMarkdown(report?.narrative_report || ''),
+    [report?.narrative_report]
+  );
+  const title = report?.name || 'Enterprise Forensic Investigation Report';
+
+  return (
+    <article className={`markdown-report enterprise-report ${compact ? 'compact' : ''}`}>
+      {!compact && (
+        <div className="markdown-toolbar">
+          <span>Enterprise Report</span>
+          {onDownload && (
+            <button type="button" className="secondary-button" onClick={onDownload} disabled={!report?.narrative_report}>
+              <FileDown size={13} />
+              Download MD
+            </button>
+          )}
+        </div>
+      )}
+      <div className="enterprise-report-body" aria-label={`${title} narrative`}>
+        {blocks.map((block, index) => renderReportBlock(block, index))}
+      </div>
+    </article>
+  );
+}
+
+function renderReportBlock(block, index) {
+  if (block.type === 'heading') {
+    const Heading = block.level === 1 ? 'h1' : block.level === 2 ? 'h2' : 'h3';
+    return <Heading key={index}>{renderInlineText(block.text)}</Heading>;
+  }
+  if (block.type === 'paragraph') {
+    return <p key={index}>{renderInlineText(block.text)}</p>;
+  }
+  if (block.type === 'list') {
+    const List = block.ordered ? 'ol' : 'ul';
+    return (
+      <List key={index}>
+        {block.items.map((item, itemIndex) => (
+          <li key={itemIndex}>{renderInlineText(item)}</li>
+        ))}
+      </List>
+    );
+  }
+  if (block.type === 'table') {
+    return (
+      <div className="report-table-wrap" key={index}>
+        <table>
+          <thead>
+            <tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineText(cell)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineText(cell)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return null;
+}
+
+function parseReportMarkdown(markdown) {
+  const lines = String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('<!--'));
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: 'heading', level: heading[1].length, text: heading[2].trim() });
+      index += 1;
+      continue;
+    }
+    if (isTableLine(line) && isTableSeparator(lines[index + 1] || '')) {
+      const headers = splitMarkdownRow(line);
+      index += 2;
+      const rows = [];
+      while (index < lines.length && isTableLine(lines[index])) {
+        rows.push(splitMarkdownRow(lines[index]));
+        index += 1;
+      }
+      blocks.push({ type: 'table', headers, rows });
+      continue;
+    }
+    const ordered = line.match(/^\d+\.\s+(.+)$/);
+    const unordered = line.match(/^[-*]\s+(.+)$/);
+    if (ordered || unordered) {
+      const listItems = [];
+      const orderedList = Boolean(ordered);
+      while (index < lines.length) {
+        const current = lines[index].trim();
+        const match = orderedList ? current.match(/^\d+\.\s+(.+)$/) : current.match(/^[-*]\s+(.+)$/);
+        if (!match) break;
+        listItems.push(match[1].trim());
+        index += 1;
+      }
+      blocks.push({ type: 'list', ordered: orderedList, items: listItems });
+      continue;
+    }
+
+    const paragraph = [line];
+    index += 1;
+    while (index < lines.length) {
+      const current = lines[index].trim();
+      if (!current || current.startsWith('#') || isTableLine(current) || /^\d+\.\s+/.test(current) || /^[-*]\s+/.test(current)) break;
+      paragraph.push(current);
+      index += 1;
+    }
+    blocks.push({ type: 'paragraph', text: paragraph.join(' ') });
+  }
+
+  return blocks.length ? blocks : [{ type: 'paragraph', text: 'No report content was returned.' }];
+}
+
+function isTableLine(line) {
+  return /^\s*\|.+\|\s*$/.test(String(line || ''));
+}
+
+function isTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || '').trim());
+}
+
+function splitMarkdownRow(line) {
+  const marker = '\u0007';
+  return String(line || '')
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .replace(/\\\|/g, marker)
+    .split('|')
+    .map((cell) => cell.replaceAll(marker, '|').trim());
+}
+
+function renderInlineText(text) {
+  const parts = String(text || '').split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
 }
 
 function EvidencePanel({ finding, evidenceFiles = [] }) {
@@ -2096,6 +2361,12 @@ function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) 
 }
 
 function ActorModal({ actor, onClose, loading }) {
+  useEffect(() => {
+    const handleKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="actor-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
@@ -2133,7 +2404,6 @@ function ActorModal({ actor, onClose, loading }) {
 function MitrePage({ report, matrix, loading, error, onRefresh }) {
   const cells = useMemo(() => normalizeMitreMatrix(matrix, report?.findings || []), [matrix, report]);
   const [selected, setSelected] = useState(null);
-  const selectedUrl = safeMitreUrl(selected?.url);
 
   useEffect(() => {
     const techniques = cells.flatMap((column) => column.techniques);
@@ -2185,17 +2455,74 @@ function MitrePage({ report, matrix, loading, error, onRefresh }) {
           </section>
         ))}
       </div>
-      <aside className="matrix-detail">
-        <span>Technique Detail</span>
-        <h2>{selected?.id || 'None'}</h2>
-        <p>{selected?.name || 'No observed technique selected.'}</p>
-        {selected?.description && <p>{truncate(selected.description, 260)}</p>}
-        <div className={`matrix-state ${selected ? 'detected' : ''}`}>
-          {selected?.observed ? `Detected in selected investigation (${selected.confidence || 'unknown'})` : 'Not observed in selected investigation'}
+      {selected && (
+        <TechniqueDrawer
+          technique={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TechniqueDrawer({ technique, onClose }) {
+  const selectedUrl = safeMitreUrl(technique?.url);
+  const evidence = parseEvidenceSummary(technique?.evidence_summary);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="matrix-detail-layer" role="presentation" onClick={onClose}>
+      <aside
+        className="matrix-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${technique?.id || 'Technique'} detail`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="matrix-detail-header">
+          <div>
+            <span>Technique Detail</span>
+            <h2>{technique?.id || 'None'}</h2>
+            <strong>{technique?.name || 'No technique selected'}</strong>
+          </div>
+          <button type="button" className="ghost-icon" onClick={onClose} title="Close technique detail">
+            <X size={18} />
+          </button>
         </div>
-        {selected?.tactics?.length > 0 && <Row label="Tactics" value={selected.tactics.map(formatPhase).join(', ')} />}
-        {selected?.platforms?.length > 0 && <Row label="Platforms" value={selected.platforms.slice(0, 6).join(', ')} />}
-        {selected?.evidence_summary && <p>{selected.evidence_summary}</p>}
+
+        <div className={`matrix-state ${technique?.observed ? 'detected' : ''}`}>
+          {technique?.observed ? `Detected in selected investigation (${technique.confidence || 'unknown'})` : 'Not observed in selected investigation'}
+        </div>
+
+        {technique?.description && (
+          <section className="matrix-detail-section">
+            <span>Overview</span>
+            <p>{renderLinkedText(technique.description)}</p>
+          </section>
+        )}
+
+        <div className="detail-list">
+          {technique?.tactics?.length > 0 && <Row label="Tactics" value={technique.tactics.map(formatPhase).join(', ')} />}
+          {technique?.platforms?.length > 0 && <Row label="Platforms" value={technique.platforms.slice(0, 8).join(', ')} />}
+        </div>
+
+        {technique?.evidence_summary && (
+          <section className="matrix-detail-section">
+            <span>Investigation Evidence</span>
+            {evidence.summary && <p>{evidence.summary}</p>}
+            {!!evidence.rows.length && (
+              <div className="detail-list compact">
+                {evidence.rows.map(([label, value]) => <Row key={label} label={label} value={value} />)}
+              </div>
+            )}
+          </section>
+        )}
+
         {selectedUrl && (
           <a href={selectedUrl} target="_blank" rel="noreferrer" className="secondary-button mitre-link">
             <ExternalLink size={15} />
@@ -2205,6 +2532,53 @@ function MitrePage({ report, matrix, loading, error, onRefresh }) {
       </aside>
     </div>
   );
+}
+
+function renderLinkedText(text) {
+  const value = String(text || '');
+  const parts = [];
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > lastIndex) parts.push(value.slice(lastIndex, match.index));
+    const href = safeMitreUrl(match[2]);
+    if (href) {
+      parts.push(
+        <a href={href} target="_blank" rel="noreferrer" key={`${match[1]}-${match.index}`}>
+          {match[1]}
+        </a>
+      );
+    } else {
+      parts.push(match[1]);
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < value.length) parts.push(value.slice(lastIndex));
+  return parts;
+}
+
+function parseEvidenceSummary(summary) {
+  const value = String(summary || '');
+  const [lead] = value.split(/\bExample:\s*/i);
+  const readField = (field) => {
+    const match = value.match(new RegExp(`"${field}"\\s*:\\s*"([^"]*)`));
+    return match ? match[1].replace(/\\\\/g, '\\') : '';
+  };
+  const rows = [
+    ['Timestamp', readField('timestamp')],
+    ['Host', readField('host')],
+    ['User', readField('user')],
+    ['Process', readField('process')],
+    ['Command Line', readField('command_line')],
+  ].filter(([, rowValue]) => rowValue);
+
+  return {
+    summary: lead.trim() || 'Technique evidence was returned by the backend for this investigation.',
+    rows,
+  };
 }
 
 function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigationsChanged }) {
@@ -2271,7 +2645,7 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
       <Panel
         title="Backend Subsystems"
         icon={Database}
-        className="fill-panel"
+        className="fill-panel subsystem-panel subsystem-health-panel"
         action={(
           <button type="button" className="secondary-button" onClick={onRefresh}>
             <RefreshCcw size={15} />
@@ -2301,6 +2675,7 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
       <Panel
         title="CISA KEV Connector"
         icon={ShieldAlert}
+        className="subsystem-panel subsystem-kev-panel"
         action={(
           <button type="button" className="secondary-button" onClick={() => loadKev(true)} disabled={kevLoading}>
             <RefreshCcw size={15} />
@@ -2340,6 +2715,7 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
       <Panel
         title="Elasticsearch Poller"
         icon={Database}
+        className="subsystem-panel subsystem-elastic-panel"
         action={(
           <button type="button" className="secondary-button" onClick={runElasticPoll} disabled={elasticPolling}>
             <Play size={15} />
@@ -2376,18 +2752,145 @@ function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigations
   );
 }
 
-function StandaloneSimulationPage({ investigation, simulation, loading, error, onRun }) {
+function StandaloneSimulationPage({
+  investigations = [],
+  investigation,
+  report,
+  graph,
+  simulation,
+  loading,
+  error,
+  onSelectInvestigation,
+  onRun,
+}) {
+  const sortedInvestigations = [...investigations].sort((a, b) => {
+    if (a.statusRaw === 'complete' && b.statusRaw !== 'complete') return -1;
+    if (a.statusRaw !== 'complete' && b.statusRaw === 'complete') return 1;
+    return new Date(b.createdAtRaw || 0).getTime() - new Date(a.createdAtRaw || 0).getTime();
+  });
+
   return (
-    <div className="page-panel">
-      <Panel title={`Backend Simulation ${investigation ? `For ${shortId(investigation.id)}` : ''}`} icon={Play}>
-        <SimulationTab
+    <div className="page-panel simulation-page">
+      <Panel title="Cases" icon={Archive} className="simulation-case-panel">
+        <div className="simulation-case-list" role="listbox" aria-label="Completed investigations for simulation">
+          {!sortedInvestigations.length && (
+            <EmptyState icon={Archive} title="No investigations available" detail="Complete an investigation before running adversary next-move simulation." />
+          )}
+          {sortedInvestigations.map((item) => {
+            const selected = item.id === investigation?.id;
+            const disabled = item.statusRaw !== 'complete';
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`simulation-case-row ${selected ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
+                onClick={() => !disabled && onSelectInvestigation(item.id)}
+                disabled={disabled}
+                role="option"
+                aria-selected={selected}
+              >
+                <span className="case-row-top">
+                  <strong>{item.name}</strong>
+                  <StatusPill status={item.status} />
+                </span>
+                <span className="case-row-meta">
+                  CASE {shortId(item.id)} · {item.candidate || 'Unknown'} · {item.confidence}% · {item.ttps} TTPs
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Panel>
+      <div className="simulation-workbench">
+        <SimulationCaseBrief
           investigation={investigation}
+          report={report}
+          graph={graph}
           simulation={simulation}
           loading={loading}
-          error={error}
           onRun={onRun}
         />
+        <Panel title="Next-Move Brief" icon={Play} className="simulation-results-panel">
+          <SimulationTab
+            investigation={investigation}
+            simulation={simulation}
+            loading={loading}
+            error={error}
+            onRun={onRun}
+            showRun={false}
+          />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function SimulationCaseBrief({ investigation, report, graph, simulation, loading, onRun }) {
+  const meta = buildSimulationCaseMeta(investigation, report, graph, simulation);
+  if (!investigation) {
+    return (
+      <Panel title="Selected Case" icon={Target} className="simulation-brief-panel">
+        <EmptyState icon={Target} title="Select a completed investigation" detail="The simulation model needs a completed case so it can use findings, graph nodes, and attribution context." />
       </Panel>
+    );
+  }
+
+  return (
+    <Panel
+      title="Selected Case"
+      icon={Target}
+      className="simulation-brief-panel"
+      action={(
+        <button type="button" className="primary-button" onClick={onRun} disabled={investigation.statusRaw !== 'complete' || loading}>
+          <Play size={15} />
+          {loading ? 'Simulating' : 'Run'}
+        </button>
+      )}
+    >
+      <div className="simulation-brief">
+        <div className="simulation-brief-title">
+          <div>
+            <strong>{investigation.name}</strong>
+            <span>CASE {shortId(investigation.id)} · {meta.actor} · {investigation.confidence}% confidence</span>
+          </div>
+          <SeverityPill severity={investigation.severity} />
+        </div>
+        <div className="simulation-metric-grid">
+          <ReadOnlyMetric label="Actor Lead" value={meta.actor} />
+          <ReadOnlyMetric label="Current Stage" value={meta.stage} />
+          <ReadOnlyMetric label="Compromised Hosts" value={String(meta.hostCount)} />
+          <ReadOnlyMetric label="Observed TTPs" value={String(meta.ttpCount)} />
+        </div>
+        <details className="simulation-context-details">
+          <summary>Case context ({meta.hostCount} hosts, {meta.ttpCount} TTPs)</summary>
+          <div className="simulation-context-columns">
+            <div>
+              <span className="simulation-section-label">Assets in scope</span>
+              <div className="ttp-stack inline">
+                {meta.hosts.length ? meta.hosts.map((host) => <code key={host}>{host}</code>) : <code>none extracted</code>}
+              </div>
+            </div>
+            <div>
+              <span className="simulation-section-label">Observed sequence</span>
+              <div className="ttp-stack inline">
+                {meta.ttps.length ? meta.ttps.slice(0, 14).map((ttp) => <code key={ttp}>{ttp}</code>) : <code>none</code>}
+              </div>
+            </div>
+          </div>
+        </details>
+        {simulation?.context_summary && (
+          <p className="simulation-brief-summary">{truncate(simulation.context_summary, 180)}</p>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function ReadOnlyMetric({ label, value }) {
+  return (
+    <div className="simulation-metric">
+      <span>{label}</span>
+      <strong>{value || 'None'}</strong>
     </div>
   );
 }
@@ -2468,7 +2971,7 @@ function ReportsPage({ investigations, selectedInvestigation, reportCache = {}, 
           </div>
           <div className="report-snippet">
             {report?.narrative_report ? (
-              <pre>{report.narrative_report}</pre>
+              <EnterpriseReportView report={report} compact />
             ) : (
               <EmptyState icon={FileText} title={selectedInvestigation ? 'Loading report…' : 'Select an investigation'} />
             )}
@@ -2507,7 +3010,7 @@ function SettingsPage({ health, healthError, selectedInvestigation, onRefresh })
 
   return (
     <div className="page-panel settings-page">
-      <Panel title="Runtime Configuration" icon={SlidersHorizontal}>
+      <Panel title="Runtime Configuration" icon={SlidersHorizontal} className="runtime-settings-panel">
         <div className="settings-grid">
           <ReadOnlySetting label="Frontend API Base" value={API_BASE} />
           <ReadOnlySetting label="Backend Status" value={health?.status || 'unknown'} />
@@ -2527,6 +3030,7 @@ function SettingsPage({ health, healthError, selectedInvestigation, onRefresh })
       <Panel
         title="Append-only Audit Log"
         icon={Bell}
+        className="audit-log-panel"
         action={(
           <button type="button" className="secondary-button" onClick={loadAudit} disabled={auditLoading}>
             <RefreshCcw size={15} />
@@ -2534,27 +3038,29 @@ function SettingsPage({ health, healthError, selectedInvestigation, onRefresh })
           </button>
         )}
       >
-        {auditError && <InlineError message={auditError} />}
-        {!auditEntries.length && !auditError && (
-          <EmptyState
-            icon={Bell}
-            title={auditLoading ? 'Loading audit log' : 'No audit entries returned'}
-            detail="Audit entries are loaded from the backend SQLite audit endpoint."
-          />
-        )}
-        <div className="feed-list">
-          {auditEntries.map((entry) => (
-            <div className="feed-row" key={entry.id}>
-              <div className="feed-name">
-                <span className="status-dot online" />
-                <div>
-                  <strong>{entry.action}</strong>
-                  <small>{entry.investigation_id || 'system'} - {formatDate(entry.timestamp)} - {entry.actor || 'unknown'}</small>
+        <div className="audit-log-scroll">
+          {auditError && <InlineError message={auditError} />}
+          {!auditEntries.length && !auditError && (
+            <EmptyState
+              icon={Bell}
+              title={auditLoading ? 'Loading audit log' : 'No audit entries returned'}
+              detail="Audit entries are loaded from the backend SQLite audit endpoint."
+            />
+          )}
+          <div className="feed-list">
+            {auditEntries.map((entry) => (
+              <div className="feed-row" key={entry.id}>
+                <div className="feed-name">
+                  <span className="status-dot online" />
+                  <div>
+                    <strong>{entry.action}</strong>
+                    <small>{entry.investigation_id || 'system'} - {formatDate(entry.timestamp)} - {entry.actor || 'unknown'}</small>
+                  </div>
                 </div>
+                <span className="feed-status">{entry.ip_address || 'local'}</span>
               </div>
-              <span className="feed-status">{entry.ip_address || 'local'}</span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </Panel>
     </div>
@@ -2575,6 +3081,12 @@ function AuthSessionDialog({ error, onSubmit, onClose }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -2709,7 +3221,9 @@ function Panel({ title, icon: Icon, action, children, className = '' }) {
         </div>
         {action}
       </div>
-      {children}
+      <div className="panel-body">
+        {children}
+      </div>
     </section>
   );
 }
@@ -3010,6 +3524,50 @@ function buildCoverage(findings = []) {
       tone: score > 75 ? 'danger' : score > 35 ? 'warning' : 'accent',
     };
   });
+}
+
+function buildSimulationCaseMeta(investigation, report, graph, simulation) {
+  const attribution = report?.attribution?.[0];
+  const hosts = uniqueStrings([
+    ...(simulation?.compromised_hosts || []),
+    ...extractCompromisedHosts(graph),
+  ]);
+  const ttps = uniqueStrings([
+    ...(simulation?.observed_ttps || []),
+    ...(report?.attack_sequence || []),
+    ...(report?.findings || []).map((finding) => finding.technique_id),
+  ]);
+  const fallbackStage = (() => {
+    const lastTtp = (report?.attack_sequence || [])[Math.max(0, (report?.attack_sequence || []).length - 1)];
+    return lastTtp ? techniquePhase(report, lastTtp) : '';
+  })();
+
+  return {
+    actor: attribution?.apt_name || investigation?.candidate || simulation?.apt_group || 'Unknown',
+    stage: formatPhase(simulation?.current_stage || fallbackStage || 'unknown'),
+    hosts,
+    hostCount: hosts.length || investigation?.hosts || 0,
+    ttps,
+    ttpCount: ttps.length || investigation?.ttps || 0,
+  };
+}
+
+function extractCompromisedHosts(graph) {
+  return (graph?.nodes || [])
+    .filter((node) => node.node_type === 'host' && node.metadata?.compromised)
+    .map((node) => node.label || node.id)
+    .filter(Boolean);
+}
+
+function uniqueStrings(values = []) {
+  const seen = new Set();
+  return values
+    .map((value) => String(value || '').trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
 }
 
 function normalizeMitreMatrix(matrix, findings = []) {
@@ -3359,68 +3917,133 @@ function downloadPdf(report, showToast) {
 
   function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-  function inlineMd(text) {
-    let s = esc(text);
-    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    s = s.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:1px 4px;border-radius:3px">$1</code>');
-    return s;
+  function textOnly(value) {
+    return String(value || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/^#+\s+/gm, '')
+      .replace(/^[-*]\s+/gm, '')
+      .replace(/Generated by deterministic fallback[\s\S]*$/i, '')
+      .replace(/LLM\/RAG fallback used:[\s\S]*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
-  function mdToHtml(md) {
-    if (!md) return '';
-    const lines = md.split('\n');
-    const out = [];
-    let inList = false;
-    for (const line of lines) {
-      const t = line.trim();
-      if (/^[-*]{3,}$/.test(t)) {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push('<hr style="border:none;border-top:1px solid #e0e0e0;margin:14px 0">');
-      } else if (!t) {
-        if (inList) { out.push('</ul>'); inList = false; }
-      } else if (t.startsWith('#### ')) {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push(`<h5 style="font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#666;margin:14px 0 5px">${inlineMd(t.slice(5))}</h5>`);
-      } else if (t.startsWith('### ')) {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push(`<h4 style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:#444;border-bottom:1px solid #ececec;padding-bottom:4px;margin:16px 0 7px">${inlineMd(t.slice(4))}</h4>`);
-      } else if (t.startsWith('## ')) {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push(`<h3 style="font-size:13px;font-weight:900;color:#222;border-bottom:1px solid #ddd;padding-bottom:5px;margin:20px 0 10px">${inlineMd(t.slice(3))}</h3>`);
-      } else if (t.startsWith('# ')) {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push(`<h2 style="font-size:16px;font-weight:900;color:#10100e;border-bottom:2px solid #10100e;padding-bottom:6px;margin:24px 0 12px">${inlineMd(t.slice(2))}</h2>`);
-      } else if (t.startsWith('- ') || t.startsWith('* ')) {
-        if (!inList) { out.push('<ul style="margin:6px 0 10px;padding-left:18px">'); inList = true; }
-        out.push(`<li style="margin-bottom:3px;line-height:1.65">${inlineMd(t.slice(2))}</li>`);
-      } else {
-        if (inList) { out.push('</ul>'); inList = false; }
-        out.push(`<p style="margin:0 0 8px;line-height:1.7">${inlineMd(t)}</p>`);
-      }
+  function extractQuoted(summary, key) {
+    const match = String(summary || '').match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)`));
+    return match ? match[1] : '';
+  }
+
+  function uniqueValues(values) {
+    return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
+  }
+
+  function hostList(findings) {
+    return uniqueValues(findings.map((finding) => extractQuoted(finding.evidence_summary, 'host')));
+  }
+
+  function userList(findings) {
+    return uniqueValues(findings.map((finding) => extractQuoted(finding.evidence_summary, 'user')));
+  }
+
+  function riskLabel(findings) {
+    const phases = findings.map((finding) => String(finding.kill_chain_phase || '').toLowerCase());
+    if (phases.some((phase) => phase.includes('credential')) && phases.some((phase) => phase.includes('lateral'))) return 'High';
+    if (phases.some((phase) => phase.includes('credential') || phase.includes('lateral'))) return 'Elevated';
+    return findings.length ? 'Moderate' : 'Informational';
+  }
+
+  function evidenceStatement(finding) {
+    const phase = String(finding.kill_chain_phase || '').toLowerCase();
+    const name = finding.technique_name || finding.technique_id || 'Observed technique';
+    const host = extractQuoted(finding.evidence_summary, 'host');
+    const process = extractQuoted(finding.evidence_summary, 'process');
+    const command = extractQuoted(finding.evidence_summary, 'command_line');
+    const hostText = host ? ` on ${host}` : '';
+
+    if (finding.technique_id === 'T1059.001' || name.toLowerCase().includes('powershell')) {
+      return `PowerShell execution was observed${hostText}. Review encoded or non-interactive command use, parent process lineage, and script block telemetry.`;
     }
-    if (inList) out.push('</ul>');
-    return out.join('\n');
+    if (finding.technique_id === 'T1021.002' || name.toLowerCase().includes('admin shares')) {
+      return `Remote administrative share activity was observed${hostText}. Treat this as lateral movement evidence until validated against approved administration records.`;
+    }
+    if (finding.technique_id === 'T1003.001' || name.toLowerCase().includes('lsass')) {
+      return `Credential-access behavior targeting LSASS memory was observed${hostText}. Preserve memory and process telemetry before credential reset activity.`;
+    }
+    if (phase.includes('credential')) return `Credential-access activity was detected${hostText}. Prioritize account review and token/session invalidation.`;
+    if (phase.includes('lateral')) return `Lateral movement behavior was detected${hostText}. Validate remote access paths and isolate affected systems.`;
+    if (process || command) return `Process telemetry${hostText} matched local detection signatures for ${name}.`;
+    return textOnly(finding.evidence_summary) || `Structured analysis identified ${name}.`;
+  }
+
+  function sourceNote(finding) {
+    const host = extractQuoted(finding.evidence_summary, 'host');
+    const user = extractQuoted(finding.evidence_summary, 'user');
+    const process = extractQuoted(finding.evidence_summary, 'process');
+    const parts = ['Local detection signature'];
+    if (process) parts.push(`process ${process}`);
+    if (host) parts.push(`host ${host}`);
+    if (user) parts.push(`user ${user}`);
+    return parts.join(' | ');
+  }
+
+  function attackPathText(sequence, findings) {
+    if (!sequence?.length) return 'No ordered ATT&CK sequence was available in the backend report.';
+    return sequence.map((techniqueId, index) => {
+      const finding = findings.find((item) => item.technique_id === techniqueId);
+      const label = finding?.technique_name || techniqueId;
+      const phase = finding?.kill_chain_phase ? ` (${formatPhase(finding.kill_chain_phase)})` : '';
+      return `${index + 1}. ${esc(techniqueId)} ${esc(label)}${esc(phase)}`;
+    }).join('<br>');
+  }
+
+  function containmentItems(findings) {
+    const hosts = hostList(findings);
+    const users = userList(findings);
+    const items = [];
+    items.push(`Isolate ${hosts.length ? hosts.join(', ') : 'confirmed compromised hosts'} from user networks while preserving forensic access.`);
+    items.push(`Reset and revoke credentials${users.length ? ` associated with ${users.join(', ')}` : ' associated with affected systems'}, including privileged and service-account material.`);
+    items.push('Block and review remote administration paths used during the investigation window, especially SMB administrative shares.');
+    items.push('Hunt for the observed ATT&CK techniques across adjacent hosts, authentication logs, endpoint process telemetry, and egress records.');
+    items.push('Preserve volatile evidence, timeline artifacts, and raw process telemetry before destructive containment steps.');
+    return items;
+  }
+
+  function tableRows(rows) {
+    return rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
   }
 
   const name = safeDownloadName(report.investigation_id || 'raptor-report');
   const findings = report.findings || [];
   const attribution = (report.attribution || [])[0];
-  const ts = new Date().toUTCString();
+  const attributionCandidates = report.attribution || [];
+  const ts = new Date().toLocaleString();
   const confPct = attribution ? Math.round((attribution.confidence_score || 0) * 100) : 0;
-
-  const findingsHtml = findings.map((f, i) => `
-    <div class="finding">
-      <div class="finding-hdr">
-        <span class="step">${i + 1}</span>
-        <code>${esc(f.technique_id || '')}</code>
-        <span class="tname">${esc(f.technique_name || '')}</span>
-        <span class="badge ${(f.confidence || '').toLowerCase()}">${esc(f.confidence || 'UNKNOWN')}</span>
-        <span class="phase">${esc(f.kill_chain_phase || '')}</span>
-      </div>
-      <div class="ev-body">${inlineMd(f.evidence_summary || 'No evidence summary.')}</div>
-    </div>`).join('');
+  const affectedHosts = hostList(findings);
+  const affectedUsers = userList(findings);
+  const overallRisk = riskLabel(findings);
+  const summary = [
+    `RAPTOR reviewed ${report.event_count || 0} event${Number(report.event_count || 0) === 1 ? '' : 's'} and identified ${findings.length} ATT&CK technique${findings.length === 1 ? '' : 's'} across this investigation.`,
+    attribution
+      ? `The strongest attribution candidate is ${attribution.apt_name || 'Unknown'} at ${confPct}% confidence. Treat this as an intelligence lead, not a definitive actor claim.`
+      : 'No attribution candidate was strong enough to report as a primary actor assessment.',
+    `The observed sequence indicates ${overallRisk.toLowerCase()} operational risk${affectedHosts.length ? ` involving ${affectedHosts.join(', ')}` : ''}.`,
+  ];
+  const findingRows = findings.map((finding) => [
+    esc(finding.technique_id || ''),
+    esc(finding.technique_name || ''),
+    esc(formatPhase(finding.kill_chain_phase || 'unknown')),
+    esc(finding.confidence || 'unknown'),
+    esc(evidenceStatement(finding)),
+  ]);
+  const attributionRows = attributionCandidates.map((candidate) => [
+    esc(candidate.apt_name || 'Unknown'),
+    `${Math.round((candidate.confidence_score || 0) * 100)}%`,
+    esc(candidate.confidence_label || 'unknown'),
+    esc((candidate.overlapping_ttps || []).join(', ') || 'None reported'),
+  ]);
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -3428,92 +4051,142 @@ function downloadPdf(report, showToast) {
 <meta charset="UTF-8">
 <title>🦅 RAPTOR — ${esc(report.name || name)}</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;font-size:11px;color:#10100e;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .page{max-width:840px;margin:0 auto;padding:36px 40px}
-  .cover{display:grid;grid-template-columns:auto 1fr;gap:20px 28px;align-items:start;border-bottom:3px solid #10100e;padding-bottom:28px;margin-bottom:32px}
-  .raptor-glyph{width:56px;height:56px;display:grid;place-items:center;background:#10100e;color:#fff;font-size:28px;border-radius:4px}
-  .cover-text .eyebrow{font-size:9px;text-transform:uppercase;letter-spacing:2.5px;color:#888;margin-bottom:6px}
-  .cover-text h1{font-size:24px;font-weight:900;line-height:1.15;margin-bottom:6px}
-  .cover-text .subtitle{font-size:11px;color:#555}
-  .meta-row{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px}
-  .meta-box{border:1px solid #d8d8d8;border-radius:4px;padding:10px 12px;background:#fafafa}
-  .meta-box strong{display:block;font-size:18px;font-weight:900;margin-bottom:2px}
-  .meta-box span{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:#666}
-  h2.section{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#888;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:28px 0 14px}
-  .attr-card{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;border:2px solid #10100e;border-radius:6px;padding:14px 16px;background:#fafafa;page-break-inside:avoid}
-  .attr-name{font-size:18px;font-weight:900}
-  .attr-meta{font-size:10px;color:#555;margin-top:4px}
-  .attr-score{font-size:36px;font-weight:900;text-align:right;line-height:1}
-  .attr-label{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:#888;text-align:right;margin-top:4px}
-  .finding{border:1px solid #e0e0e0;border-left:3px solid #b42318;border-radius:4px;padding:10px 12px;margin-bottom:8px;page-break-inside:avoid;background:#fff}
-  .finding-hdr{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
-  .step{width:20px;height:20px;display:grid;place-items:center;background:#10100e;color:#fff;font-size:9px;font-weight:900;border-radius:3px;flex-shrink:0}
-  .finding-hdr code{background:#f0f0f0;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:700;flex-shrink:0}
-  .tname{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .badge{padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;text-transform:uppercase;flex-shrink:0;background:#fee;color:#b42318}
-  .badge.medium,.badge.high{background:#fff3cd;color:#8a5b00}
-  .badge.low,.badge.unknown{background:#f0f0f0;color:#555}
-  .phase{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:1px;flex-shrink:0}
-  .ev-body{font-size:10px;color:#444;line-height:1.6}
-  .ev-body p{margin:0 0 4px}
-  .narrative{line-height:1.7;color:#333;border:1px solid #e8e8e8;border-radius:4px;padding:16px;background:#fafafa;font-size:10.5px}
-  .narrative p{margin:0 0 8px}
-  .narrative ul{margin:6px 0 10px;padding-left:18px}
-  .narrative li{margin-bottom:3px}
-  .footer{margin-top:36px;border-top:1px solid #e0e0e0;padding-top:12px;font-size:9px;color:#aaa;display:flex;justify-content:space-between;gap:12px}
-  @media print{
-    .page{padding:18px 24px;max-width:100%}
-    h2.section{page-break-after:avoid}
-    .finding,.attr-card{page-break-inside:avoid}
-  }
+  @page{size:A4;margin:18mm 16mm}
+  *{box-sizing:border-box}
+  body{margin:0;color:#171717;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;line-height:1.55;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{max-width:820px;margin:0 auto;padding:28px 18px 34px}
+  .masthead{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;border-bottom:2px solid #171717;padding-bottom:16px;margin-bottom:18px}
+  .mark{font-size:28px;line-height:1}
+  .kicker{font-size:8.5px;text-transform:uppercase;letter-spacing:1.8px;color:#666;margin-bottom:5px}
+  h1{font-size:25px;line-height:1.08;margin:0 0 7px;font-weight:800}
+  .subtitle{font-size:11px;color:#444}
+  .doc-meta{text-align:right;font-size:9px;color:#555;line-height:1.5}
+  .doc-meta strong{display:block;color:#171717;font-size:10px}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;margin:20px 0 7px;padding-bottom:5px;border-bottom:1px solid #cfcfcf}
+  h3{font-size:12px;margin:12px 0 5px}
+  p{margin:0 0 7px}
+  .summary p{font-size:11px}
+  .keyline{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;border-top:1px solid #d8d8d8;border-bottom:1px solid #d8d8d8;padding:9px 0;margin:14px 0 2px}
+  .keyline span{display:block;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:#666}
+  .keyline strong{display:block;font-size:14px;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:7px 0 12px;page-break-inside:auto}
+  th{font-size:8px;text-transform:uppercase;letter-spacing:.8px;color:#555;text-align:left;border-bottom:1.5px solid #171717;padding:5px 5px}
+  td{vertical-align:top;border-bottom:1px solid #e3e3e3;padding:6px 5px}
+  tbody tr{page-break-inside:avoid}
+  .tech-col{width:78px}
+  .phase-col{width:90px}
+  .conf-col{width:72px}
+  .sequence{margin:6px 0 12px;padding-left:0;line-height:1.8}
+  ol{margin:6px 0 12px;padding-left:18px}
+  li{margin-bottom:4px}
+  .note{font-size:9.5px;color:#555;border-top:1px solid #d8d8d8;margin-top:10px;padding-top:7px}
+  .appendix{font-size:9.5px;color:#333}
+  .footer{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #d8d8d8;margin-top:24px;padding-top:8px;color:#777;font-size:8.5px}
+  @media print{.page{padding:0;max-width:100%}h2{page-break-after:avoid}.masthead,.keyline,tbody tr{page-break-inside:avoid}}
 </style>
 </head>
 <body>
 <div class="page">
-  <div class="cover">
-    <div class="raptor-glyph">🦅</div>
-    <div class="cover-text">
-      <div class="eyebrow">RAPTOR · Retrieval-Augmented Persistent Threat Orchestration</div>
+  <header class="masthead">
+    <div class="mark">🦅</div>
+    <div>
+      <div class="kicker">RAPTOR Security Operations</div>
       <h1>Forensic Investigation Report</h1>
-      <div class="subtitle">${esc(report.name || 'Unnamed Investigation')}</div>
+      <div class="subtitle">${esc(report.name || 'Unnamed investigation')}</div>
     </div>
-    <div class="meta-row">
-      <div class="meta-box"><strong>${report.event_count || 0}</strong><span>Events</span></div>
-      <div class="meta-box"><strong>${findings.length}</strong><span>TTPs Detected</span></div>
-      <div class="meta-box"><strong>${attribution ? esc(attribution.apt_name || 'Unknown') : '—'}</strong><span>Top Actor</span></div>
-      <div class="meta-box"><strong>${confPct}%</strong><span>Confidence</span></div>
+    <div class="doc-meta">
+      <strong>${esc(report.investigation_id || '')}</strong>
+      <span>Generated ${esc(ts)}</span><br>
+      <span>Internal Security Report</span>
     </div>
-  </div>
+  </header>
 
-  ${attribution ? `
-  <h2 class="section">Attribution Assessment</h2>
-  <div class="attr-card">
-    <div>
-      <div class="attr-name">${esc(attribution.apt_name || 'Unknown')}</div>
-      <div class="attr-meta">
-        Jaccard: ${(attribution.jaccard_score || 0).toFixed(3)} &nbsp;·&nbsp;
-        ${attribution.overlapping_ttps?.length || 0} overlapping TTPs &nbsp;·&nbsp;
-        ${attribution.ttp_count || 0} known actor TTPs
-      </div>
+  <section class="summary">
+    <h2>Executive Summary</h2>
+    ${summary.map((item) => `<p>${esc(item)}</p>`).join('')}
+    <div class="keyline">
+      <div><span>Events Reviewed</span><strong>${report.event_count || 0}</strong></div>
+      <div><span>Techniques</span><strong>${findings.length}</strong></div>
+      <div><span>Overall Risk</span><strong>${esc(overallRisk)}</strong></div>
+      <div><span>Top Candidate</span><strong>${attribution ? esc(attribution.apt_name || 'Unknown') : 'None'}</strong></div>
     </div>
-    <div>
-      <div class="attr-score">${confPct}%</div>
-      <div class="attr-label">${esc(attribution.confidence_label || 'UNKNOWN')}</div>
-    </div>
-  </div>` : ''}
+  </section>
 
-  ${findings.length ? `<h2 class="section">Detected Techniques (${findings.length})</h2>${findingsHtml}` : ''}
+  <section>
+    <h2>Scope And Observed Assets</h2>
+    <table>
+      <tbody>
+        ${tableRows([
+          ['Investigation ID', esc(report.investigation_id || '')],
+          ['Report Timestamp', esc(report.timestamp ? formatDate(report.timestamp) : 'Not provided')],
+          ['Affected Hosts', esc(affectedHosts.join(', ') || 'Not extracted from evidence summaries')],
+          ['Observed Users', esc(affectedUsers.join(', ') || 'Not extracted from evidence summaries')],
+        ])}
+      </tbody>
+    </table>
+  </section>
 
-  ${report.narrative_report ? `
-  <h2 class="section">Analyst Narrative</h2>
-  <div class="narrative">${mdToHtml(report.narrative_report)}</div>` : ''}
+  <section>
+    <h2>Attack Sequence</h2>
+    <p class="sequence">${attackPathText(report.attack_sequence || [], findings)}</p>
+  </section>
 
-  <div class="footer">
-    <span>🦅 RAPTOR SOC Platform</span>
-    <span>${ts}</span>
+  ${findings.length ? `
+  <section>
+    <h2>Validated Findings</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="tech-col">ATT&CK ID</th>
+          <th>Technique</th>
+          <th class="phase-col">Tactic</th>
+          <th class="conf-col">Confidence</th>
+          <th>Analyst Evidence Statement</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows(findingRows)}</tbody>
+    </table>
+  </section>` : ''}
+
+  <section>
+    <h2>Containment And Response Priorities</h2>
+    <ol>${containmentItems(findings).map((item) => `<li>${esc(item)}</li>`).join('')}</ol>
+  </section>
+
+  ${attributionCandidates.length ? `
+  <section>
+    <h2>Attribution Assessment</h2>
+    <p>Attribution is provided as an intelligence lead. The score is not a declaration of responsibility and should be weighed against external reporting, infrastructure, malware, and victimology.</p>
+    <table>
+      <thead>
+        <tr><th>Candidate</th><th>Confidence</th><th>Label</th><th>Overlapping TTPs</th></tr>
+      </thead>
+      <tbody>${tableRows(attributionRows)}</tbody>
+    </table>
+  </section>` : ''}
+
+  ${findings.length ? `
+  <section class="appendix">
+    <h2>Evidence Appendix</h2>
+    <table>
+      <thead>
+        <tr><th>Technique</th><th>Event References</th><th>Source Note</th></tr>
+      </thead>
+      <tbody>
+        ${tableRows(findings.map((finding) => [
+          esc(`${finding.technique_id || ''} ${finding.technique_name || ''}`.trim()),
+          esc((finding.event_ids || []).map(shortId).join(', ') || 'None reported'),
+          esc(sourceNote(finding)),
+        ]))}
+      </tbody>
+    </table>
+  </section>` : ''}
+
+  <p class="note">Prepared from structured RAPTOR investigation output. Review raw telemetry and case notes before external distribution.</p>
+  <footer class="footer">
+    <span>RAPTOR SOC Platform</span>
     <span>${esc(name)}</span>
-  </div>
+  </footer>
 </div>
 </body>
 </html>`;
@@ -3522,8 +4195,14 @@ function downloadPdf(report, showToast) {
   if (!win) { showToast?.('Allow popups to download PDF'); return; }
   win.document.write(html);
   win.document.close();
-  window.setTimeout(() => { try { win.print(); } catch (e) { /* ignore */ } }, 600);
-  showToast?.('🦅 PDF print dialog opened — use "Save as PDF"');
+  window.setTimeout(() => {
+    try {
+      win.print();
+    } catch {
+      showToast?.('Print dialog blocked — open the new tab and print manually');
+    }
+  }, PDF_PRINT_DELAY_MS);
+  showToast?.('Professional PDF report opened — use "Save as PDF"');
 }
 
 function safeMitreUrl(value) {

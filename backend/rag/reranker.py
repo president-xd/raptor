@@ -16,9 +16,18 @@ _reranker = None
 _TOKEN_RE = re.compile(r"[a-z0-9_.-]+")
 
 
+def _use_lexical_test_rerank() -> bool:
+    return os.environ.get("RAPTOR_ALLOW_TEST_EMBEDDINGS", "false").lower() == "true"
+
+
 def get_reranker():
     """Lazy-load the reranker model."""
     global _reranker
+    if _use_lexical_test_rerank():
+        logger.warning("Using lexical rerank fallback (RAPTOR_ALLOW_TEST_EMBEDDINGS=true)")
+        _reranker = None
+        return None
+
     if _reranker is None:
         try:
             from sentence_transformers import CrossEncoder

@@ -259,6 +259,11 @@ class SimulationResponse(BaseModel):
     apt_group: str
     predictions: List[SimulationPrediction] = Field(default_factory=list)
     confidence: str = ""
+    context_summary: str = ""
+    current_stage: str = ""
+    observed_ttps: List[str] = Field(default_factory=list)
+    compromised_hosts: List[str] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
 
 
 # ─── Query ────────────────────────────────────────────────────────────
