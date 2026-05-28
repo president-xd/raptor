@@ -42,6 +42,10 @@ import {
   Users,
   X,
   Zap,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Minus,
 } from 'lucide-react';
 import {
   API_BASE,
@@ -161,7 +165,8 @@ const graphLayout = {
   minHeight: 460,
   laneTop: 88,
   laneBottom: 92,
-  nodeStep: 58,
+  nodeStep: 62,
+  nodeStepCompact: 42,
 };
 
 export default function Dashboard() {
@@ -1235,6 +1240,68 @@ function AttackGraphTab({ graph, report }) {
   const normalized = useMemo(() => normalizeGraph(graph, graphMode), [graph, graphMode]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const selectedNode = normalized.nodes.find((node) => node.id === selectedNodeId) || normalized.nodes[0] || null;
+
+  /* ── Zoom & Pan state ──────────────────────────────── */
+  const ZOOM_MIN = 0.3;
+  const ZOOM_MAX = 3.0;
+  const ZOOM_STEP = 0.15;
+  const [zoom, setZoom] = useState(1);
+  const canvasRef = useRef(null);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const scrollOrigin = useRef({ x: 0, y: 0 });
+
+  const handleZoomIn = useCallback(() => setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2))), []);
+  const handleZoomOut = useCallback(() => setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2))), []);
+  const handleZoomFit = useCallback(() => {
+    setZoom(1);
+    if (canvasRef.current) { canvasRef.current.scrollTop = 0; canvasRef.current.scrollLeft = 0; }
+  }, []);
+
+  /* Ctrl/Cmd + Wheel zoom */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+      setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, +(z + delta).toFixed(2))));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [graphSubView]);
+
+  /* Middle-click or space+click drag pan */
+  const onPanStart = useCallback((e) => {
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+      e.preventDefault();
+      isPanning.current = true;
+      panStart.current = { x: e.clientX, y: e.clientY };
+      scrollOrigin.current = { x: canvasRef.current?.scrollLeft || 0, y: canvasRef.current?.scrollTop || 0 };
+      if (e.currentTarget) e.currentTarget.style.cursor = 'grabbing';
+    }
+  }, []);
+
+  const onPanMove = useCallback((e) => {
+    if (!isPanning.current || !canvasRef.current) return;
+    canvasRef.current.scrollLeft = scrollOrigin.current.x - (e.clientX - panStart.current.x);
+    canvasRef.current.scrollTop = scrollOrigin.current.y - (e.clientY - panStart.current.y);
+  }, []);
+
+  const onPanEnd = useCallback((e) => {
+    if (isPanning.current) {
+      isPanning.current = false;
+      if (e.currentTarget) e.currentTarget.style.cursor = '';
+    }
+  }, []);
+
+  /* Reset zoom on mode change */
+  useEffect(() => {
+    setZoom(1);
+    if (canvasRef.current) { canvasRef.current.scrollTop = 0; canvasRef.current.scrollLeft = 0; }
+  }, [graphMode]);
+
   const graphStats = useMemo(() => {
     const compromised = normalized.nodes.filter((node) => node.status === 'compromised').length;
     const crown = normalized.nodes.filter((node) => node.status === 'crown').length;
@@ -1293,6 +1360,12 @@ function AttackGraphTab({ graph, report }) {
             <span><i className="legend-dot" style={{ background: 'var(--indigo-deep)' }} />Technique</span>
             <span><i className="legend-dot" style={{ background: 'transparent', border: '1.5px solid var(--graphite)' }} />External</span>
           </div>
+          <div className="graph-zoom-controls">
+            <button type="button" className="graph-zoom-btn" onClick={handleZoomOut} title="Zoom out" aria-label="Zoom out" disabled={zoom <= ZOOM_MIN}><Minus size={14} /></button>
+            <span className="graph-zoom-label" title="Current zoom">{Math.round(zoom * 100)}%</span>
+            <button type="button" className="graph-zoom-btn" onClick={handleZoomIn} title="Zoom in" aria-label="Zoom in" disabled={zoom >= ZOOM_MAX}><Plus size={14} /></button>
+            <button type="button" className="graph-zoom-btn graph-zoom-fit" onClick={handleZoomFit} title="Fit to view" aria-label="Fit to view"><Maximize2 size={13} /></button>
+          </div>
         </div>
 
         <div className="graph-metrics" aria-label="Graph metrics">
@@ -1307,11 +1380,23 @@ function AttackGraphTab({ graph, report }) {
         {graphSubView === 'graph' && (
           <>
 
-            <div className="graph-canvas">
+            <div
+              className="graph-canvas"
+              ref={canvasRef}
+              onMouseDown={onPanStart}
+              onMouseMove={onPanMove}
+              onMouseUp={onPanEnd}
+              onMouseLeave={onPanEnd}
+            >
               <svg
                 className={normalized.isDense ? 'dense-graph' : ''}
                 viewBox={`0 0 1040 ${normalized.viewHeight}`}
-                style={{ height: `${normalized.viewHeight}px` }}
+                style={{
+                  height: `${normalized.viewHeight * zoom}px`,
+                  width: `${1040 * zoom}px`,
+                  minWidth: `${Math.max(920, 1040 * zoom)}px`,
+                  minHeight: `${Math.max(440, normalized.viewHeight * zoom)}px`,
+                }}
                 role="img"
                 aria-label="RAPTOR attack graph"
               >
@@ -1373,20 +1458,25 @@ function AttackGraphTab({ graph, report }) {
                   const markerRef = isDanger ? 'url(#graph-arrow-crit)' : isWarn ? 'url(#graph-arrow-warn)' : isObs ? 'url(#graph-arrow-succ)' : 'url(#graph-arrow)';
                   const edgeStroke = isDanger ? '#b42318' : isWarn ? '#8a5b00' : isObs ? '#146c43' : '#10100e';
                   const isDashed = isObs || edge.edge_type?.includes('exfil') || edge.edge_type?.includes('lateral');
+                  /* Reduce opacity for neutral edges when graph is dense */
+                  const edgeOpacity = normalized.isDense && !isDanger && !isWarn ? 0.45 : 1;
                   return (
-                    <g key={edge.id || id}>
+                    <g key={edge.id || id} opacity={edgeOpacity}>
                       <path id={id} d={path}
-                        fill="none" stroke={edgeStroke} strokeWidth="1.8" strokeLinecap="round"
+                        fill="none" stroke={edgeStroke} strokeWidth={normalized.isDense ? '1.3' : '1.8'} strokeLinecap="round"
                         strokeDasharray={isDashed ? '6 4' : '0'}
                         markerEnd={markerRef}
                       />
-                      <text
-                        x={midX} y={midY + curve * 0.16 - 10}
-                        fontFamily="var(--font-mono)" fontSize="9" fontWeight="700"
-                        textAnchor="middle" letterSpacing="1.2"
-                        fill="rgba(16,16,14,0.7)"
-                        style={{ paintOrder: 'stroke', stroke: '#f8f8f1', strokeWidth: 4, textTransform: 'uppercase' }}
-                      >{truncate(compactGraphText(edge.label || edge.edge_type), 18)}</text>
+                      {/* Hide edge labels when graph is dense to reduce clutter */}
+                      {(!normalized.isDense || isDanger || isWarn) && (
+                        <text
+                          x={midX} y={midY + curve * 0.16 - 10}
+                          fontFamily="var(--font-mono)" fontSize={normalized.isDense ? '8' : '9'} fontWeight="700"
+                          textAnchor="middle" letterSpacing="1.2"
+                          fill="rgba(16,16,14,0.7)"
+                          style={{ paintOrder: 'stroke', stroke: '#f8f8f1', strokeWidth: 4, textTransform: 'uppercase' }}
+                        >{truncate(compactGraphText(edge.label || edge.edge_type), normalized.isDense ? 14 : 18)}</text>
+                      )}
                     </g>
                   );
                 })}
@@ -3992,9 +4082,11 @@ function normalizeGraph(graph, mode = 'priority') {
 
   const mappedNodes = [];
   const maxLaneCount = Math.max(1, ...graphLanes.map((_, laneIndex) => (laneGroups[laneIndex] || []).length));
+  /* Dynamic node step: use compact spacing when dense, standard otherwise */
+  const effectiveStep = isDense ? graphLayout.nodeStepCompact : graphLayout.nodeStep;
   const viewHeight = Math.max(
     graphLayout.minHeight,
-    graphLayout.laneTop + graphLayout.laneBottom + Math.max(0, maxLaneCount - 1) * graphLayout.nodeStep,
+    graphLayout.laneTop + graphLayout.laneBottom + Math.max(0, maxLaneCount - 1) * effectiveStep,
   );
   graphLanes.forEach((lane, laneIndex) => {
     const group = (laneGroups[laneIndex] || [])
@@ -4008,16 +4100,24 @@ function normalizeGraph(graph, mode = 'priority') {
           || String(a.label).localeCompare(String(b.label));
       });
 
+    /* Stagger nodes horizontally within lane to reduce overlap for large datasets */
+    const laneCenter = lane.x + lane.width / 2;
+    const laneHalf = lane.width * 0.38;
+
     group.forEach((node, index) => {
       const compact = isDense || node.kind === 'aggregate';
+      /* Alternate nodes left/right of center for better spread */
+      const staggerX = group.length > 6
+        ? (index % 2 === 0 ? -1 : 1) * (laneHalf * 0.35) * (1 - (index / group.length) * 0.3)
+        : stableOffset(node.id, compact ? 12 : 18);
       mappedNodes.push({
         ...node,
         compact,
         radius: node.radius || (node.kind === 'dc' ? 15 : node.status === 'compromised' ? 14 : 12),
         ringRadius: node.ringRadius || (node.kind === 'dc' ? 20 : 17),
         haloRadius: node.haloRadius || (node.kind === 'dc' ? 27 : 23),
-        x: lane.x + lane.width / 2 + stableOffset(node.id, compact ? 12 : 18),
-        y: graphLayout.laneTop + index * graphLayout.nodeStep,
+        x: laneCenter + staggerX,
+        y: graphLayout.laneTop + index * effectiveStep,
       });
     });
   });
@@ -4134,7 +4234,9 @@ function graphNodeStyle(node) {
 function edgeCurve(edge, source, target, index) {
   const type = String(edge.edge_type || '');
   const base = type.includes('lateral') || source.x > target.x ? 54 : type.includes('observed') ? -42 : 32;
-  return base + ((index % 3) - 1) * 14;
+  /* Spread edge curves more when index is high to reduce overlap */
+  const spread = ((index % 5) - 2) * 12;
+  return base + spread;
 }
 
 function nodeGlyph(node) {

@@ -1413,8 +1413,7 @@ code {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px 14px;
   border-bottom: 1px solid var(--border);
   padding: 10px 14px;
   background: var(--paper);
@@ -1451,6 +1450,58 @@ code {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* ── Zoom Controls ─────────────────────────────────── */
+.graph-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px;
+  background: var(--linen);
+  flex-shrink: 0;
+}
+
+.graph-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.graph-zoom-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.graph-zoom-btn:disabled {
+  color: var(--graphite);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.graph-zoom-btn.graph-zoom-fit {
+  margin-left: 2px;
+  border-left: 1px solid var(--border-soft);
+  padding-left: 4px;
+}
+
+.graph-zoom-label {
+  min-width: 38px;
+  text-align: center;
+  font: 700 10px/1 var(--font-mono);
+  color: var(--graphite);
+  letter-spacing: 0.02em;
+  user-select: none;
 }
 
 .graph-metrics {
@@ -1515,13 +1566,19 @@ code {
   min-height: 0;
   overflow: auto;
   background: var(--paper);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+
+.graph-canvas::-webkit-scrollbar { width: 7px; height: 7px; }
+.graph-canvas::-webkit-scrollbar-track { background: transparent; }
+.graph-canvas::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.graph-canvas::-webkit-scrollbar-thumb:hover { background: var(--graphite); }
+.graph-canvas::-webkit-scrollbar-corner { background: transparent; }
 
 .graph-canvas svg {
   display: block;
-  width: 100%;
-  min-width: 920px;
-  min-height: 440px;
+  transition: width 0.15s ease, height 0.15s ease;
 }
 
 #graph-arrow path {
