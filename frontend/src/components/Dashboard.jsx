@@ -2222,14 +2222,14 @@ function ForensicReportTab({ report, evidence, showToast }) {
               </button>
             ))}
           </div>
-          <div className="button-row">
-            <button type="button" className="secondary-button" onClick={() => downloadMarkdown(report, showToast)} disabled={!report?.narrative_report}>
-              <FileDown size={14} />
-              MD
+          <div className="fr-export-row">
+            <button type="button" className="secondary-button fr-export-btn" onClick={() => downloadMarkdown(report, showToast)} disabled={!report?.narrative_report}>
+              <FileDown size={13} />
+              <span>MD</span>
             </button>
-            <button type="button" className="primary-button" onClick={() => downloadPdf(report, showToast)}>
-              <Download size={14} />
-              PDF
+            <button type="button" className="primary-button fr-export-btn" onClick={() => downloadPdf(report, showToast)}>
+              <Download size={13} />
+              <span>PDF</span>
             </button>
           </div>
         </div>
@@ -2237,31 +2237,37 @@ function ForensicReportTab({ report, evidence, showToast }) {
         {activeSection === 'findings' && (
           <div className="forensic-findings-grid">
             <div className="forensic-sidebar">
-              <div className="killchain-summary">
+              {/* Kill Chain phase pills */}
+              <div className="fr-phase-stack">
                 {hotPhases.slice(0, 8).map((item) => (
-                  <div key={item.phase} className={`killchain-phase ${item.score > 75 ? 'hot' : item.score > 35 ? 'warm' : 'cool'}`}>
+                  <div key={item.phase} className={`fr-phase-pill ${item.score > 75 ? 'hot' : item.score > 35 ? 'warm' : 'cool'}`}>
                     <span>{formatPhase(item.phase)}</span>
                     <strong>{item.count}</strong>
                   </div>
                 ))}
               </div>
+
+              {/* Finding cards */}
               <div className="forensic-list">
                 {!findings.length && <EmptyState icon={Layers3} title="No findings recorded yet" />}
-                {findings.map((finding) => (
-                  <button
-                    type="button"
-                    key={finding.technique_id}
-                    className={`forensic-card ${selectedFinding?.technique_id === finding.technique_id ? 'active' : ''}`}
-                    onClick={() => setSelectedFindingId(finding.technique_id)}
-                  >
-                    <code>{finding.technique_id}</code>
-                    <div>
-                      <strong>{finding.technique_name || finding.technique_id}</strong>
-                      <span>{formatPhase(finding.kill_chain_phase)}</span>
-                    </div>
-                    <ChevronRight size={15} />
-                  </button>
-                ))}
+                {findings.map((finding) => {
+                  const isActive = selectedFinding?.technique_id === finding.technique_id;
+                  return (
+                    <button
+                      type="button"
+                      key={finding.technique_id}
+                      className={`fr-finding-card ${isActive ? 'active' : ''}`}
+                      onClick={() => setSelectedFindingId(finding.technique_id)}
+                    >
+                      <div className="fr-finding-top">
+                        <span className="ttp-chip">{finding.technique_id}</span>
+                        <ChevronRight size={14} className="fr-finding-arrow" />
+                      </div>
+                      <strong className="fr-finding-name">{finding.technique_name || finding.technique_id}</strong>
+                      <span className="fr-finding-phase">{formatPhase(finding.kill_chain_phase)}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <EvidencePanel finding={selectedFinding} evidenceFiles={evidenceFiles} />
@@ -2286,18 +2292,30 @@ function ForensicReportTab({ report, evidence, showToast }) {
             {!evidenceFiles.length ? (
               <EmptyState icon={FileText} title="No raw evidence files" detail="Evidence metadata is returned by the backend evidence endpoint." />
             ) : (
-              <div className="feed-list">
-                {evidenceFiles.map((item) => (
-                  <div className="feed-row" key={item.id || item.sha256}>
-                    <div className="feed-name">
-                      <span className="status-dot online" />
-                      <div>
-                        <strong>{item.original_filename || 'raw evidence'}</strong>
-                        <small>{formatBytes(item.size_bytes)} · {item.source || 'unknown'} · {shortId(item.sha256)}</small>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="fr-evidence-table-wrap">
+                <table className="fr-evidence-table">
+                  <thead>
+                    <tr>
+                      <th>File</th>
+                      <th>Source</th>
+                      <th>Hash</th>
+                      <th>Size</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {evidenceFiles.map((item) => (
+                      <tr key={item.id || item.sha256}>
+                        <td>
+                          <strong>{item.original_filename || 'raw evidence'}</strong>
+                          <small>{item.content_type || 'unknown type'}</small>
+                        </td>
+                        <td>{item.source || 'unknown'}</td>
+                        <td className="fr-evidence-hash">{shortId(item.sha256)}</td>
+                        <td className="fr-evidence-size">{formatBytes(item.size_bytes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -2307,77 +2325,193 @@ function ForensicReportTab({ report, evidence, showToast }) {
   );
 }
 
+/* Clean raw evidence text: strip JSON blobs and return a readable sentence */
+function cleanEvidenceText(text) {
+  if (!text) return '';
+  /* Remove "Example: {...}" patterns */
+  let cleaned = String(text).replace(/\s*Example:\s*\{[^}]*\}?/gi, '').trim();
+  /* Remove trailing truncated JSON fragments */
+  cleaned = cleaned.replace(/\s*Example:\s*\{"[^"]*$/gi, '').trim();
+  /* Remove stray JSON fragments */
+  cleaned = cleaned.replace(/\{"[^"]*":\s*"[^"]*"[^}]*\}?/g, '').trim();
+  /* Collapse whitespace */
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  /* Remove trailing commas or colons */
+  cleaned = cleaned.replace(/[,;:]+$/, '').trim();
+  return cleaned || text;
+}
+
+/* Group parsed markdown blocks into numbered sections */
+function groupIntoSections(blocks) {
+  const sections = [];
+  let current = null;
+  let sectionNum = 0;
+  for (const block of blocks) {
+    if (block.type === 'heading' && block.level <= 2) {
+      if (block.level === 1) {
+        /* h1 goes to a preamble section with no number */
+        current = { title: block.text, num: null, level: 1, children: [] };
+      } else {
+        sectionNum += 1;
+        current = { title: block.text, num: sectionNum, level: 2, children: [] };
+      }
+      sections.push(current);
+    } else if (block.type === 'heading' && block.level === 3 && current) {
+      current.children.push(block);
+    } else if (current) {
+      current.children.push(block);
+    } else {
+      /* Content before any heading → put in a preamble */
+      current = { title: null, num: null, level: 0, children: [block] };
+      sections.push(current);
+    }
+  }
+  return sections;
+}
+
 function EnterpriseReportView({ report, compact = false, onDownload }) {
   const blocks = useMemo(
     () => parseReportMarkdown(report?.narrative_report || ''),
     [report?.narrative_report]
   );
+  const sections = useMemo(() => groupIntoSections(blocks), [blocks]);
   const title = report?.name || 'Enterprise Forensic Investigation Report';
   const findings = report?.findings || [];
   const attribution = report?.attribution || [];
   const topActor = attribution[0];
+  const sequence = report?.attack_sequence || [];
 
   const compromisedHosts = findings.filter((f) =>
     f.description?.toLowerCase().includes('compromised') || f.severity === 'critical'
   ).length;
   const totalHosts = (report?.hosts_affected ?? compromisedHosts) || 0;
 
+  /* Compute some stats for the executive banner */
+  const eventCount = report?.events_reviewed || findings.reduce((n, f) => n + (f.event_count || 0), 0) || 0;
+  const riskLevel = (() => {
+    const phases = findings.map((f) => String(f.kill_chain_phase || '').toLowerCase());
+    if (phases.some((p) => p.includes('credential')) && phases.some((p) => p.includes('lateral'))) return 'High';
+    if (phases.some((p) => p.includes('credential') || p.includes('lateral'))) return 'Elevated';
+    return findings.length ? 'Moderate' : 'Informational';
+  })();
+  const riskColor = { High: 'var(--oxblood)', Elevated: 'var(--brass)', Moderate: 'var(--graphite)', Informational: 'var(--forest)' }[riskLevel] || 'var(--graphite)';
+
   return (
     <article className={`narrative-report-doc ${compact ? 'compact' : ''}`}>
+      {/* ── COVER BLOCK ──────────────────────────────────────── */}
       {!compact && (
         <div className="narrative-report-cover">
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
-            <span className="narrative-stamp">CONFIDENTIAL · OP-RAPTOR</span>
-            <span style={{ font: '600 11px/1 var(--font-mono)', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--graphite)' }}>
-              FORENSIC REPORT · DRAFT v1
-            </span>
+          <div className="nr-cover-top">
+            <span className="narrative-stamp">CONFIDENTIAL</span>
+            <span className="nr-cover-label">FORENSIC INVESTIGATION REPORT</span>
           </div>
-          <div className="narrative-cover-title">{title}</div>
+          <h1 className="narrative-cover-title">{title}</h1>
           <div className="narrative-cover-meta">
-            {report?.id && (
-              <div>
-                <div className="eyebrow">Case ID</div>
-                <strong>{shortId(report.id)}</strong>
+            {report?.investigation_id && (
+              <div className="nr-meta-cell">
+                <span className="eyebrow">Case ID</span>
+                <strong><code>{shortId(report.investigation_id)}</code></strong>
               </div>
             )}
-            <div>
-              <div className="eyebrow">Severity</div>
+            <div className="nr-meta-cell">
+              <span className="eyebrow">Severity</span>
               <strong style={{ color: 'var(--brass)' }}>{report?.severity || 'Unknown'}</strong>
             </div>
             {topActor && (
-              <div>
-                <div className="eyebrow">Top Attribution</div>
+              <div className="nr-meta-cell">
+                <span className="eyebrow">Top Attribution</span>
                 <strong>{topActor.apt_name} · {toPercent(topActor.confidence_score)}%</strong>
               </div>
             )}
-            {totalHosts > 0 && (
-              <div>
-                <div className="eyebrow">Hosts Affected</div>
-                <strong style={{ color: 'var(--oxblood)' }}>{totalHosts}</strong>
-              </div>
-            )}
-            <div>
-              <div className="eyebrow">Prepared By</div>
+            <div className="nr-meta-cell">
+              <span className="eyebrow">Risk Assessment</span>
+              <strong style={{ color: riskColor }}>{riskLevel}</strong>
+            </div>
+            <div className="nr-meta-cell">
+              <span className="eyebrow">Prepared By</span>
               <strong>RAPTOR Engine v1.0.0</strong>
+            </div>
+            <div className="nr-meta-cell">
+              <span className="eyebrow">Report Date</span>
+              <strong>{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
             </div>
           </div>
         </div>
       )}
-      <div className="narrative-body" aria-label={`${title} narrative`}>
-        {blocks.map((block, index) => renderReportBlock(block, index))}
 
+      {/* ── STATS BANNER ─────────────────────────────────────── */}
+      <div className="nr-stats-banner">
+        <div className="nr-stat">
+          <span className="nr-stat-value">{eventCount || '—'}</span>
+          <span className="nr-stat-label">Events Reviewed</span>
+        </div>
+        <div className="nr-stat">
+          <span className="nr-stat-value">{findings.length}</span>
+          <span className="nr-stat-label">ATT&CK Techniques</span>
+        </div>
+        <div className="nr-stat">
+          <span className="nr-stat-value" style={{ color: riskColor }}>{riskLevel}</span>
+          <span className="nr-stat-label">Overall Risk</span>
+        </div>
+        {topActor && (
+          <div className="nr-stat">
+            <span className="nr-stat-value">{topActor.apt_name}</span>
+            <span className="nr-stat-label">Top Candidate · {toPercent(topActor.confidence_score)}%</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── BODY ─────────────────────────────────────────────── */}
+      <div className="narrative-body" aria-label={`${title} narrative`}>
+
+        {sections.map((section, sIdx) => {
+          /* h1 title block — skip, already in cover */
+          if (section.level === 1 && section.title?.toLowerCase().includes('forensic investigation')) {
+            return section.children.length > 0 ? (
+              <div className="narrative-section-body nr-preamble" key={sIdx}>
+                {section.children.map((b, i) => renderReportBlockStyled(b, i))}
+              </div>
+            ) : null;
+          }
+          /* Numbered h2 sections */
+          if (section.level === 2) {
+            return (
+              <section className="nr-section" key={sIdx}>
+                <div className="narrative-section-head">
+                  <span className="narrative-section-num">{String(section.num).padStart(2, '0')}</span>
+                  <h2 className="narrative-section-title">{renderInlineText(section.title)}</h2>
+                </div>
+                <div className="narrative-section-body">
+                  {section.children.map((b, i) => renderReportBlockStyled(b, i))}
+                </div>
+              </section>
+            );
+          }
+          /* Preamble / unheaded */
+          return (
+            <div className="narrative-section-body" key={sIdx}>
+              {section.children.map((b, i) => renderReportBlockStyled(b, i))}
+            </div>
+          );
+        })}
+
+        {/* ── INDICATORS OF COMPROMISE (from structured findings) ─ */}
         {findings.length > 0 && (
-          <section>
+          <section className="nr-section">
             <div className="narrative-section-head">
-              <span className="narrative-section-num">{String(blocks.filter((b) => b.type === 'heading' && b.level <= 2).length + 1).padStart(2, '0')}</span>
+              <span className="narrative-section-num">{String(sections.filter((s) => s.level === 2).length + 1).padStart(2, '0')}</span>
               <h2 className="narrative-section-title">Indicators of Compromise</h2>
             </div>
             <div className="narrative-section-body">
-              <div style={{ display: 'grid', gap: 8 }}>
-                {findings.slice(0, 8).map((f) => (
+              <div className="nr-ioc-grid">
+                {findings.map((f) => (
                   <div className="ioc-row" key={f.technique_id}>
-                    <span className="eyebrow" style={{ minWidth: 90 }}>{formatPhase(f.kill_chain_phase || 'unknown')}</span>
-                    <code>{f.technique_id} {f.technique_name || ''}</code>
+                    <span className="nr-ioc-phase">{formatPhase(f.kill_chain_phase || 'unknown')}</span>
+                    <code className="nr-ioc-id">{f.technique_id}</code>
+                    <span className="nr-ioc-name">{f.technique_name || ''}</span>
+                    <span className={`nr-ioc-conf nr-conf-${(f.confidence || 'unknown').toLowerCase()}`}>
+                      {(f.confidence || 'unk').toUpperCase()}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -2385,6 +2519,7 @@ function EnterpriseReportView({ report, compact = false, onDownload }) {
           </section>
         )}
 
+        {/* ── FOOTER ──────────────────────────────────────────── */}
         <div className="narrative-footer">
           <span>END OF REPORT</span>
           <span>Generated {new Date().toISOString().slice(0, 10)} · RAPTOR v1.0.0</span>
@@ -2394,35 +2529,42 @@ function EnterpriseReportView({ report, compact = false, onDownload }) {
   );
 }
 
-function renderReportBlock(block, index) {
+function renderReportBlockStyled(block, index) {
+  if (block.type === 'heading' && block.level === 3) {
+    return <h3 className="nr-h3" key={index}>{renderInlineText(block.text)}</h3>;
+  }
   if (block.type === 'heading') {
-    const Heading = block.level === 1 ? 'h1' : block.level === 2 ? 'h2' : 'h3';
-    return <Heading key={index}>{renderInlineText(block.text)}</Heading>;
+    return <h3 className="nr-h3" key={index}>{renderInlineText(block.text)}</h3>;
   }
   if (block.type === 'paragraph') {
-    return <p key={index}>{renderInlineText(block.text)}</p>;
+    /* Clean evidence JSON from paragraph text */
+    const cleaned = cleanEvidenceText(block.text);
+    return <p key={index}>{renderInlineText(cleaned)}</p>;
   }
   if (block.type === 'list') {
     const List = block.ordered ? 'ol' : 'ul';
     return (
-      <List key={index}>
+      <List key={index} className="nr-list">
         {block.items.map((item, itemIndex) => (
-          <li key={itemIndex}>{renderInlineText(item)}</li>
+          <li key={itemIndex}>{renderInlineText(cleanEvidenceText(item))}</li>
         ))}
       </List>
     );
   }
   if (block.type === 'table') {
     return (
-      <div className="report-table-wrap" key={index}>
-        <table>
+      <div className="nr-table-wrap" key={index}>
+        <table className="nr-table">
           <thead>
             <tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineText(cell)}</th>)}</tr>
           </thead>
           <tbody>
             {block.rows.map((row, rowIndex) => (
               <tr key={rowIndex}>
-                {row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineText(cell)}</td>)}
+                {row.map((cell, cellIndex) => {
+                  const cleaned = cleanEvidenceText(cell);
+                  return <td key={cellIndex}>{renderInlineText(cleaned)}</td>;
+                })}
               </tr>
             ))}
           </tbody>
@@ -2529,57 +2671,90 @@ function renderInlineText(text) {
 function EvidencePanel({ finding, evidenceFiles = [] }) {
   if (!finding) {
     return (
-      <aside className="evidence-panel">
+      <aside className="fr-detail-panel">
         <EmptyState icon={FileText} title="No finding selected" />
       </aside>
     );
   }
 
+  const confidenceColor = (c) => {
+    const v = String(c || '').toLowerCase();
+    if (v === 'high' || v === 'critical') return 'var(--oxblood)';
+    if (v === 'medium') return 'var(--brass)';
+    return 'var(--ink)';
+  };
+
   return (
-    <aside className="evidence-panel">
-      <div className="evidence-header">
-        <span>Evidence Detail</span>
-        <h2>{finding.technique_id}</h2>
+    <aside className="fr-detail-panel">
+      {/* Panel header */}
+      <div className="fr-detail-head">
+        <Target size={16} />
+        <span className="eyebrow-label">Evidence Detail · {finding.technique_id}</span>
       </div>
-      <div className="detail-list">
-        <Row label="Technique" value={finding.technique_name || finding.technique_id} />
-        <Row label="Phase" value={formatPhase(finding.kill_chain_phase)} />
-        <Row label="Confidence" value={finding.confidence} />
-        <Row label="Event Count" value={String(finding.event_ids?.length || 0)} />
-      </div>
-      <div className="evidence-summary">
-        <strong>Evidence Summary</strong>
-        <p>{finding.evidence_summary || 'No evidence summary was returned for this finding.'}</p>
-      </div>
-      <div className="ttp-stack">
-        <span>Event IDs</span>
-        <div>
-          {(finding.event_ids || []).slice(0, 12).map((eventId) => <code key={eventId}>{shortId(eventId)}</code>)}
+
+      {/* Serif title */}
+      <h2 className="fr-detail-title">{finding.technique_name || finding.technique_id}</h2>
+
+      {/* Detail rows */}
+      <div className="fr-detail-rows">
+        <div className="fr-detail-row">
+          <span>Technique</span>
+          <strong>{finding.technique_name || finding.technique_id}</strong>
+        </div>
+        <div className="fr-detail-row">
+          <span>Phase</span>
+          <strong>{formatPhase(finding.kill_chain_phase)}</strong>
+        </div>
+        <div className="fr-detail-row">
+          <span>Confidence</span>
+          <strong style={{ color: confidenceColor(finding.confidence) }}>{finding.confidence || 'unknown'}</strong>
+        </div>
+        <div className="fr-detail-row">
+          <span>Event Count</span>
+          <strong>{finding.event_ids?.length || 0}</strong>
         </div>
       </div>
-      <div className="evidence-summary">
-        <strong>Raw Evidence Files</strong>
-        {!evidenceFiles.length && <p>No persisted raw evidence metadata returned for this investigation.</p>}
-        {evidenceFiles.slice(0, 6).map((item) => (
-          <div className="feed-row compact" key={item.id || item.sha256}>
-            <div className="feed-name">
-              <span className="status-dot online" />
-              <div>
-                <strong>{item.original_filename || 'raw evidence'}</strong>
-                <small>{formatBytes(item.size_bytes)} - {item.source || 'unknown'} - {shortId(item.sha256)}</small>
-              </div>
-            </div>
-          </div>
-        ))}
+
+      {/* Evidence summary box */}
+      <div className="fr-evidence-box">
+        <span className="eyebrow-label">Evidence Summary</span>
+        <EvidenceSummaryBlock raw={finding.evidence_summary} />
       </div>
+
+      {/* Event IDs */}
+      {(finding.event_ids || []).length > 0 && (
+        <div className="fr-event-ids">
+          <span className="eyebrow-label">Event IDs</span>
+          <div className="fr-event-chips">
+            {(finding.event_ids || []).slice(0, 12).map((eventId) => (
+              <code key={eventId}>{shortId(eventId)}</code>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Raw evidence files */}
+      {evidenceFiles.length > 0 && (
+        <div className="fr-raw-files">
+          <span className="eyebrow-label">Raw Evidence Files</span>
+          {evidenceFiles.slice(0, 6).map((item) => (
+            <div className="fr-raw-file-row" key={item.id || item.sha256}>
+              <strong>{item.original_filename || 'raw evidence'}</strong>
+              <small>{formatBytes(item.size_bytes)} · {item.source || 'unknown'} · {shortId(item.sha256)}</small>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* MITRE link */}
       {finding.technique_id && (
         <a
           href={`https://attack.mitre.org/techniques/${finding.technique_id.replace('.', '/')}/`}
           target="_blank"
           rel="noreferrer"
-          className="secondary-button mitre-link"
+          className="fr-mitre-btn"
         >
-          <ExternalLink size={15} />
+          <ExternalLink size={13} />
           Open MITRE ATT&CK
         </a>
       )}
@@ -2871,7 +3046,18 @@ function MitrePage({ report, matrix, loading, error, onRefresh }) {
 
 function TechniqueDrawer({ technique, onClose }) {
   const selectedUrl = safeMitreUrl(technique?.url);
-  const evidence = parseEvidenceSummary(technique?.evidence_summary);
+  const evidence = useMemo(() => {
+    const parsed = parseEvidenceSummary(technique?.evidence_summary);
+    /* Flatten events into [label, value] rows for the drawer's compact layout */
+    const rows = [];
+    if (parsed.events.length > 0) {
+      const evt = parsed.events[0];
+      ['timestamp', 'host', 'source_host', 'user', 'process', 'command_line'].forEach((k) => {
+        if (evt[k]) rows.push([k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), evt[k]]);
+      });
+    }
+    return { summary: parsed.description || 'Technique evidence was returned by the backend for this investigation.', rows };
+  }, [technique?.evidence_summary]);
 
   useEffect(() => {
     const handleKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
@@ -2964,26 +3150,6 @@ function renderLinkedText(text) {
   return parts;
 }
 
-function parseEvidenceSummary(summary) {
-  const value = String(summary || '');
-  const [lead] = value.split(/\bExample:\s*/i);
-  const readField = (field) => {
-    const match = value.match(new RegExp(`"${field}"\\s*:\\s*"([^"]*)`));
-    return match ? match[1].replace(/\\\\/g, '\\') : '';
-  };
-  const rows = [
-    ['Timestamp', readField('timestamp')],
-    ['Host', readField('host')],
-    ['User', readField('user')],
-    ['Process', readField('process')],
-    ['Command Line', readField('command_line')],
-  ].filter(([, rowValue]) => rowValue);
-
-  return {
-    summary: lead.trim() || 'Technique evidence was returned by the backend for this investigation.',
-    rows,
-  };
-}
 
 function ThreatFeedsPage({ health, error, onRefresh, showToast, onInvestigationsChanged }) {
   const rows = healthRows(health, error);
@@ -4259,6 +4425,92 @@ function compactGraphText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function parseEvidenceSummary(raw) {
+  if (!raw) return { description: '', events: [] };
+  const text = String(raw);
+  /* Split on "Example:" boundaries to separate description from JSON examples */
+  const parts = text.split(/\s*Example:\s*/);
+  const description = (parts[0] || '').trim();
+  const events = [];
+  for (let i = 1; i < parts.length; i += 1) {
+    let fragment = parts[i].trim();
+    /* Try to extract a JSON object from the fragment */
+    const braceStart = fragment.indexOf('{');
+    if (braceStart === -1) continue;
+    fragment = fragment.slice(braceStart);
+    /* Find the matching closing brace, tolerating truncated JSON */
+    let depth = 0;
+    let end = -1;
+    for (let j = 0; j < fragment.length; j += 1) {
+      if (fragment[j] === '{') depth += 1;
+      if (fragment[j] === '}') { depth -= 1; if (depth === 0) { end = j; break; } }
+    }
+    const jsonStr = end > 0 ? fragment.slice(0, end + 1) : fragment;
+    try {
+      const obj = JSON.parse(jsonStr);
+      events.push(obj);
+    } catch {
+      /* Try to extract key-value pairs from partially valid JSON */
+      const pairs = {};
+      const kvRegex = /"([^"]+)"\s*:\s*(?:"([^"]*)"|(null|true|false|\d+))/g;
+      let match;
+      while ((match = kvRegex.exec(jsonStr)) !== null) {
+        pairs[match[1]] = match[2] !== undefined ? match[2] : match[3];
+      }
+      if (Object.keys(pairs).length > 0) events.push(pairs);
+    }
+  }
+  /* If no "Example:" pattern, try to parse the whole thing as JSON key-values */
+  if (!events.length && text.includes('"')) {
+    const pairs = {};
+    const kvRegex = /"([^"]+)"\s*:\s*(?:"([^"]*)"|(null|true|false|\d+))/g;
+    let match;
+    while ((match = kvRegex.exec(text)) !== null) {
+      pairs[match[1]] = match[2] !== undefined ? match[2] : match[3];
+    }
+    if (Object.keys(pairs).length > 0) events.push(pairs);
+  }
+  return { description, events };
+}
+
+function EvidenceSummaryBlock({ raw }) {
+  const { description, events } = useMemo(() => parseEvidenceSummary(raw), [raw]);
+
+  if (!raw) {
+    return <p className="fr-evidence-empty">No evidence summary was returned for this finding.</p>;
+  }
+
+  /* Priority display keys for the event cards */
+  const priorityKeys = ['timestamp', 'source_host', 'source_ip', 'dest_host', 'dest_ip', 'event_type', 'process', 'command_line'];
+  const labelKey = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <>
+      {description && <p className="fr-evidence-desc">{description}</p>}
+      {events.length > 0 && (
+        <div className="fr-evidence-events">
+          {events.map((evt, idx) => {
+            const keys = [...new Set([...priorityKeys.filter((k) => k in evt), ...Object.keys(evt).filter((k) => !priorityKeys.includes(k))])];
+            return (
+              <div className="fr-evidence-event" key={idx}>
+                <span className="fr-evidence-event-tag">Event {idx + 1}</span>
+                <div className="fr-evidence-event-rows">
+                  {keys.map((key) => (
+                    <div className="fr-evidence-kv" key={key}>
+                      <span>{labelKey(key)}</span>
+                      <code>{String(evt[key] ?? 'null')}</code>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function summarizeNode(node) {
   const metadata = node.metadata || {};
   if (node.node_type === 'host') {
@@ -4299,9 +4551,129 @@ function deriveSeverity(item, confidence) {
   return 'Low';
 }
 
+function buildCleanMarkdown(report) {
+  if (!report) return '';
+  const findings = report.findings || [];
+  const attribution = report.attribution || [];
+  const topActor = attribution[0];
+  const sequence = report.attack_sequence || [];
+
+  const riskLevel = (() => {
+    const phases = findings.map((f) => String(f.kill_chain_phase || '').toLowerCase());
+    if (phases.some((p) => p.includes('credential')) && phases.some((p) => p.includes('lateral'))) return 'High';
+    if (phases.some((p) => p.includes('credential') || p.includes('lateral'))) return 'Elevated';
+    return findings.length ? 'Moderate' : 'Informational';
+  })();
+
+  const lines = [];
+  lines.push('# RAPTOR — Forensic Investigation Report');
+  lines.push('');
+  lines.push(`**Case:** ${report.name || 'Unnamed Investigation'}  `);
+  lines.push(`**Investigation ID:** \`${report.investigation_id || '—'}\`  `);
+  lines.push(`**Severity:** ${report.severity || 'Unknown'} · **Risk Assessment:** ${riskLevel}  `);
+  if (topActor) lines.push(`**Top Attribution:** ${topActor.apt_name} at ${Math.round((topActor.confidence_score || 0) * 100)}% confidence  `);
+  lines.push(`**Prepared By:** RAPTOR Engine v1.0.0 · **Date:** ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}  `);
+  lines.push(`**Classification:** CONFIDENTIAL`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  /* Executive Summary */
+  lines.push('## 01 · Executive Summary');
+  lines.push('');
+  const eventCount = report.events_reviewed || findings.reduce((n, f) => n + (f.event_count || 0), 0) || 0;
+  lines.push(`RAPTOR reviewed **${eventCount}** event(s) and validated **${findings.length}** ATT&CK technique finding(s).`);
+  if (topActor) {
+    lines.push(`The strongest attribution candidate is **${topActor.apt_name}** at ${Math.round((topActor.confidence_score || 0) * 100)}% confidence (${topActor.confidence_label || 'UNKNOWN'}).`);
+  }
+  lines.push(`The case is assessed as **${riskLevel}** risk. Attribution remains an intelligence lead, not proof of actor identity.`);
+  lines.push('');
+
+  /* Scope */
+  lines.push('## 02 · Scope And Key Indicators');
+  lines.push('');
+  lines.push('| Indicator | Value |');
+  lines.push('| --- | --- |');
+  lines.push(`| Events Reviewed | ${eventCount} |`);
+  lines.push(`| ATT&CK Techniques | ${findings.length} |`);
+  lines.push(`| Overall Risk | ${riskLevel} |`);
+  if (topActor) lines.push(`| Top Candidate | ${topActor.apt_name} (${Math.round((topActor.confidence_score || 0) * 100)}%) |`);
+  lines.push('');
+
+  /* Attack Narrative */
+  if (sequence.length) {
+    lines.push('## 03 · Attack Sequence');
+    lines.push('');
+    sequence.forEach((tid, i) => {
+      const f = findings.find((x) => x.technique_id === tid);
+      const label = f?.technique_name || tid;
+      const phase = f?.kill_chain_phase ? ` (${formatPhase(f.kill_chain_phase)})` : '';
+      lines.push(`${i + 1}. \`${tid}\` ${label}${phase}`);
+    });
+    lines.push('');
+  }
+
+  /* Validated Findings */
+  if (findings.length) {
+    lines.push(`## 0${sequence.length ? '4' : '3'} · Validated ATT&CK Findings`);
+    lines.push('');
+    lines.push('| ATT&CK ID | Technique | Tactic | Confidence | Evidence Statement |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    findings.forEach((f) => {
+      const evidence = cleanEvidenceText(f.evidence_summary || '') || 'Structured analysis identified this technique.';
+      lines.push(`| \`${f.technique_id || ''}\` | ${f.technique_name || ''} | ${formatPhase(f.kill_chain_phase || 'unknown')} | ${f.confidence || 'unknown'} | ${evidence} |`);
+    });
+    lines.push('');
+  }
+
+  /* Containment */
+  lines.push('## Containment And Response Priorities');
+  lines.push('');
+  lines.push('- Isolate confirmed compromised hosts from user networks while preserving forensic access.');
+  lines.push('- Reset and revoke credentials associated with affected systems, including privileged and service-account material.');
+  lines.push('- Block and review remote administration paths used during the investigation window.');
+  lines.push('- Hunt for the observed ATT&CK techniques across adjacent hosts, authentication logs, and egress records.');
+  lines.push('- Preserve volatile evidence, timeline artifacts, and raw process telemetry before destructive containment steps.');
+  lines.push('');
+
+  /* Attribution */
+  if (attribution.length) {
+    lines.push('## Attribution Assessment');
+    lines.push('');
+    lines.push('> Attribution is provided as an intelligence lead. The score is not a declaration of responsibility.');
+    lines.push('');
+    lines.push('| Candidate | Confidence | Label | Overlapping TTPs |');
+    lines.push('| --- | --- | --- | --- |');
+    attribution.forEach((a) => {
+      lines.push(`| ${a.apt_name || 'Unknown'} | ${Math.round((a.confidence_score || 0) * 100)}% | ${a.confidence_label || 'unknown'} | ${(a.overlapping_ttps || []).join(', ') || 'None reported'} |`);
+    });
+    lines.push('');
+  }
+
+  /* Evidence Appendix */
+  if (findings.length) {
+    lines.push('## Evidence Appendix');
+    lines.push('');
+    lines.push('| Technique | Event References | Source Note |');
+    lines.push('| --- | --- | --- |');
+    findings.forEach((f) => {
+      lines.push(`| \`${f.technique_id || ''}\` ${f.technique_name || ''} | ${(f.event_ids || []).map(shortId).join(', ') || 'None'} | Local detection signature |`);
+    });
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+  lines.push(`*END OF REPORT — Generated ${new Date().toISOString().slice(0, 10)} · RAPTOR v1.0.0*`);
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 function downloadMarkdown(report, showToast) {
-  if (!report?.narrative_report) return;
-  const blob = new Blob([report.narrative_report], { type: 'text/markdown;charset=utf-8' });
+  if (!report) return;
+  const md = buildCleanMarkdown(report);
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -4318,20 +4690,6 @@ function downloadPdf(report, showToast) {
 
   function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
-  function textOnly(value) {
-    return String(value || '')
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/^#+\s+/gm, '')
-      .replace(/^[-*]\s+/gm, '')
-      .replace(/Generated by deterministic fallback[\s\S]*$/i, '')
-      .replace(/LLM\/RAG fallback used:[\s\S]*$/i, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
   function extractQuoted(summary, key) {
     const match = String(summary || '').match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)`));
     return match ? match[1] : '';
@@ -4341,253 +4699,253 @@ function downloadPdf(report, showToast) {
     return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
   }
 
-  function hostList(findings) {
-    return uniqueValues(findings.map((finding) => extractQuoted(finding.evidence_summary, 'host')));
+  function hostList(fds) {
+    return uniqueValues(fds.flatMap((f) => [extractQuoted(f.evidence_summary, 'host'), extractQuoted(f.evidence_summary, 'source_host')].filter(Boolean)));
   }
 
-  function userList(findings) {
-    return uniqueValues(findings.map((finding) => extractQuoted(finding.evidence_summary, 'user')));
+  function riskLabel(fds) {
+    const phases = fds.map((f) => String(f.kill_chain_phase || '').toLowerCase());
+    if (phases.some((p) => p.includes('credential')) && phases.some((p) => p.includes('lateral'))) return 'High';
+    if (phases.some((p) => p.includes('credential') || p.includes('lateral'))) return 'Elevated';
+    return fds.length ? 'Moderate' : 'Informational';
   }
 
-  function riskLabel(findings) {
-    const phases = findings.map((finding) => String(finding.kill_chain_phase || '').toLowerCase());
-    if (phases.some((phase) => phase.includes('credential')) && phases.some((phase) => phase.includes('lateral'))) return 'High';
-    if (phases.some((phase) => phase.includes('credential') || phase.includes('lateral'))) return 'Elevated';
-    return findings.length ? 'Moderate' : 'Informational';
-  }
-
-  function evidenceStatement(finding) {
-    const phase = String(finding.kill_chain_phase || '').toLowerCase();
-    const name = finding.technique_name || finding.technique_id || 'Observed technique';
-    const host = extractQuoted(finding.evidence_summary, 'host');
-    const process = extractQuoted(finding.evidence_summary, 'process');
-    const command = extractQuoted(finding.evidence_summary, 'command_line');
-    const hostText = host ? ` on ${host}` : '';
-
-    if (finding.technique_id === 'T1059.001' || name.toLowerCase().includes('powershell')) {
-      return `PowerShell execution was observed${hostText}. Review encoded or non-interactive command use, parent process lineage, and script block telemetry.`;
-    }
-    if (finding.technique_id === 'T1021.002' || name.toLowerCase().includes('admin shares')) {
-      return `Remote administrative share activity was observed${hostText}. Treat this as lateral movement evidence until validated against approved administration records.`;
-    }
-    if (finding.technique_id === 'T1003.001' || name.toLowerCase().includes('lsass')) {
-      return `Credential-access behavior targeting LSASS memory was observed${hostText}. Preserve memory and process telemetry before credential reset activity.`;
-    }
-    if (phase.includes('credential')) return `Credential-access activity was detected${hostText}. Prioritize account review and token/session invalidation.`;
-    if (phase.includes('lateral')) return `Lateral movement behavior was detected${hostText}. Validate remote access paths and isolate affected systems.`;
-    if (process || command) return `Process telemetry${hostText} matched local detection signatures for ${name}.`;
-    return textOnly(finding.evidence_summary) || `Structured analysis identified ${name}.`;
-  }
-
-  function sourceNote(finding) {
-    const host = extractQuoted(finding.evidence_summary, 'host');
-    const user = extractQuoted(finding.evidence_summary, 'user');
-    const process = extractQuoted(finding.evidence_summary, 'process');
-    const parts = ['Local detection signature'];
-    if (process) parts.push(`process ${process}`);
-    if (host) parts.push(`host ${host}`);
-    if (user) parts.push(`user ${user}`);
-    return parts.join(' | ');
-  }
-
-  function attackPathText(sequence, findings) {
-    if (!sequence?.length) return 'No ordered ATT&CK sequence was available in the backend report.';
-    return sequence.map((techniqueId, index) => {
-      const finding = findings.find((item) => item.technique_id === techniqueId);
-      const label = finding?.technique_name || techniqueId;
-      const phase = finding?.kill_chain_phase ? ` (${formatPhase(finding.kill_chain_phase)})` : '';
-      return `${index + 1}. ${esc(techniqueId)} ${esc(label)}${esc(phase)}`;
-    }).join('<br>');
-  }
-
-  function containmentItems(findings) {
-    const hosts = hostList(findings);
-    const users = userList(findings);
-    const items = [];
-    items.push(`Isolate ${hosts.length ? hosts.join(', ') : 'confirmed compromised hosts'} from user networks while preserving forensic access.`);
-    items.push(`Reset and revoke credentials${users.length ? ` associated with ${users.join(', ')}` : ' associated with affected systems'}, including privileged and service-account material.`);
-    items.push('Block and review remote administration paths used during the investigation window, especially SMB administrative shares.');
-    items.push('Hunt for the observed ATT&CK techniques across adjacent hosts, authentication logs, endpoint process telemetry, and egress records.');
-    items.push('Preserve volatile evidence, timeline artifacts, and raw process telemetry before destructive containment steps.');
-    return items;
-  }
-
-  function tableRows(rows) {
-    return rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+  function confBadge(conf) {
+    const c = String(conf || 'unknown').toLowerCase();
+    const bg = { high: '#fce8e6', medium: '#fef7e0', low: '#e6f4ea' }[c] || '#f0f0ec';
+    const fg = { high: '#b42318', medium: '#8a5b00', low: '#146c43' }[c] || '#686864';
+    return `<span style="display:inline-block;padding:2px 7px;border-radius:2px;background:${bg};color:${fg};font-size:8px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase">${esc(conf || 'unk')}</span>`;
   }
 
   const name = safeDownloadName(report.investigation_id || 'raptor-report');
   const findings = report.findings || [];
   const attribution = (report.attribution || [])[0];
   const attributionCandidates = report.attribution || [];
-  const ts = new Date().toLocaleString();
-  const confPct = attribution ? Math.round((attribution.confidence_score || 0) * 100) : 0;
-  const affectedHosts = hostList(findings);
-  const affectedUsers = userList(findings);
+  const eventCount = report.events_reviewed || report.event_count || findings.reduce((n, f) => n + (f.event_count || 0), 0) || 0;
   const overallRisk = riskLabel(findings);
-  const summary = [
-    `RAPTOR reviewed ${report.event_count || 0} event${Number(report.event_count || 0) === 1 ? '' : 's'} and identified ${findings.length} ATT&CK technique${findings.length === 1 ? '' : 's'} across this investigation.`,
-    attribution
-      ? `The strongest attribution candidate is ${attribution.apt_name || 'Unknown'} at ${confPct}% confidence. Treat this as an intelligence lead, not a definitive actor claim.`
-      : 'No attribution candidate was strong enough to report as a primary actor assessment.',
-    `The observed sequence indicates ${overallRisk.toLowerCase()} operational risk${affectedHosts.length ? ` involving ${affectedHosts.join(', ')}` : ''}.`,
-  ];
-  const findingRows = findings.map((finding) => [
-    esc(finding.technique_id || ''),
-    esc(finding.technique_name || ''),
-    esc(formatPhase(finding.kill_chain_phase || 'unknown')),
-    esc(finding.confidence || 'unknown'),
-    esc(evidenceStatement(finding)),
-  ]);
-  const attributionRows = attributionCandidates.map((candidate) => [
-    esc(candidate.apt_name || 'Unknown'),
-    `${Math.round((candidate.confidence_score || 0) * 100)}%`,
-    esc(candidate.confidence_label || 'unknown'),
-    esc((candidate.overlapping_ttps || []).join(', ') || 'None reported'),
-  ]);
+  const riskColor = { High: '#b42318', Elevated: '#8a5b00', Moderate: '#686864', Informational: '#146c43' }[overallRisk] || '#686864';
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const sequence = report.attack_sequence || [];
+
+  let sectionNum = 0;
+  const sec = (title) => { sectionNum += 1; return `<div class="sec-head"><span class="sec-num">${String(sectionNum).padStart(2, '0')}</span><h2>${esc(title)}</h2></div>`; };
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>🦅 RAPTOR — ${esc(report.name || name)}</title>
+<title>RAPTOR — ${esc(report.name || name)}</title>
 <style>
-  @page{size:A4;margin:18mm 16mm}
-  *{box-sizing:border-box}
-  body{margin:0;color:#171717;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:10.5px;line-height:1.55;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .page{max-width:820px;margin:0 auto;padding:28px 18px 34px}
-  .masthead{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;border-bottom:2px solid #171717;padding-bottom:16px;margin-bottom:18px}
-  .mark{font-size:28px;line-height:1}
-  .kicker{font-size:8.5px;text-transform:uppercase;letter-spacing:1.8px;color:#666;margin-bottom:5px}
-  h1{font-size:25px;line-height:1.08;margin:0 0 7px;font-weight:800}
-  .subtitle{font-size:11px;color:#444}
-  .doc-meta{text-align:right;font-size:9px;color:#555;line-height:1.5}
-  .doc-meta strong{display:block;color:#171717;font-size:10px}
-  h2{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;margin:20px 0 7px;padding-bottom:5px;border-bottom:1px solid #cfcfcf}
-  h3{font-size:12px;margin:12px 0 5px}
-  p{margin:0 0 7px}
-  .summary p{font-size:11px}
-  .keyline{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;border-top:1px solid #d8d8d8;border-bottom:1px solid #d8d8d8;padding:9px 0;margin:14px 0 2px}
-  .keyline span{display:block;font-size:8px;text-transform:uppercase;letter-spacing:1px;color:#666}
-  .keyline strong{display:block;font-size:14px;margin-top:2px}
-  table{width:100%;border-collapse:collapse;margin:7px 0 12px;page-break-inside:auto}
-  th{font-size:8px;text-transform:uppercase;letter-spacing:.8px;color:#555;text-align:left;border-bottom:1.5px solid #171717;padding:5px 5px}
-  td{vertical-align:top;border-bottom:1px solid #e3e3e3;padding:6px 5px}
-  tbody tr{page-break-inside:avoid}
-  .tech-col{width:78px}
-  .phase-col{width:90px}
-  .conf-col{width:72px}
-  .sequence{margin:6px 0 12px;padding-left:0;line-height:1.8}
-  ol{margin:6px 0 12px;padding-left:18px}
-  li{margin-bottom:4px}
-  .note{font-size:9.5px;color:#555;border-top:1px solid #d8d8d8;margin-top:10px;padding-top:7px}
-  .appendix{font-size:9.5px;color:#333}
-  .footer{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #d8d8d8;margin-top:24px;padding-top:8px;color:#777;font-size:8.5px}
-  @media print{.page{padding:0;max-width:100%}h2{page-break-after:avoid}.masthead,.keyline,tbody tr{page-break-inside:avoid}}
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+  @page{size:A4;margin:16mm 14mm}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#f8f8f1;color:#10100e;font-family:'IBM Plex Mono',monospace;font-size:10px;line-height:1.55;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .page{max-width:820px;margin:0 auto;background:#f8f8f1;min-height:100vh}
+
+  /* ── Cover ────────────── */
+  .cover{padding:32px 40px 26px;border-bottom:2px solid #10100e;position:relative}
+  .cover::after{content:'';position:absolute;bottom:-4px;left:40px;right:40px;height:1px;background:rgba(16,16,14,0.12)}
+  .cover-top{display:flex;gap:14px;align-items:center;margin-bottom:18px}
+  .stamp{display:inline-block;padding:5px 12px;border:2px solid #b42318;border-radius:2px;font:700 9px/1 'IBM Plex Mono',monospace;letter-spacing:0.22em;text-transform:uppercase;color:#b42318}
+  .cover-label{font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:0.22em;text-transform:uppercase;color:#686864}
+  .cover-title{font:600 32px/1.08 'IBM Plex Serif',Georgia,serif;letter-spacing:-0.015em;color:#10100e;margin:0 0 20px}
+  .cover-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 24px}
+  .meta-cell{display:flex;flex-direction:column;gap:3px}
+  .meta-label{font:600 8px/1 'IBM Plex Mono',monospace;letter-spacing:0.16em;text-transform:uppercase;color:#686864}
+  .meta-val{font:600 11px/1.3 'IBM Plex Mono',monospace;color:#10100e}
+
+  /* ── Stats ────────────── */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(16,16,14,0.12)}
+  .stat{padding:14px 18px;text-align:center;border-right:1px solid rgba(16,16,14,0.12);background:#f0f0ec}
+  .stat:last-child{border-right:none}
+  .stat-val{font:700 20px/1 'IBM Plex Mono',monospace;color:#10100e;font-variant-numeric:tabular-nums}
+  .stat-label{font:500 8px/1 'IBM Plex Mono',monospace;letter-spacing:0.16em;text-transform:uppercase;color:#686864;margin-top:4px}
+
+  /* ── Body ─────────────── */
+  .body{padding:32px 40px}
+
+  /* ── Sections ─────────── */
+  .sec-head{display:flex;gap:14px;align-items:baseline;margin:28px 0 12px;padding-bottom:7px;border-bottom:1.5px solid #10100e}
+  .sec-head:first-child{margin-top:0}
+  .sec-num{font:700 10px/1 'IBM Plex Mono',monospace;letter-spacing:0.20em;color:#b42318;flex-shrink:0}
+  .sec-head h2{font:600 20px/1.1 'IBM Plex Serif',Georgia,serif;letter-spacing:-0.012em;color:#10100e;margin:0}
+  .sec-body{margin-bottom:8px}
+  .sec-body p{font:400 12px/1.72 'IBM Plex Sans',sans-serif;color:#10100e;margin:0 0 8px}
+  .sec-body strong{font-weight:650}
+  .sec-body code{font:500 10px/1.4 'IBM Plex Mono',monospace;color:#b42318;padding:1px 4px;background:rgba(16,16,14,0.04);border:1px solid rgba(16,16,14,0.08);border-radius:2px}
+
+  /* ── Tables ──────────── */
+  .tbl-wrap{border:1px solid rgba(16,16,14,0.12);border-radius:3px;overflow:hidden;margin:6px 0 10px}
+  table{width:100%;border-collapse:collapse}
+  th{font:700 8px/1 'IBM Plex Mono',monospace;letter-spacing:0.16em;text-transform:uppercase;color:#686864;padding:8px 10px;text-align:left;background:#f0f0ec;border-bottom:1.5px solid rgba(16,16,14,0.12)}
+  td{font:400 10.5px/1.55 'IBM Plex Mono',monospace;color:#10100e;padding:6px 10px;border-bottom:1px solid rgba(16,16,14,0.05);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td:first-child{font-weight:600}
+  td code{font-size:10px;color:#b42318;padding:1px 3px;background:rgba(16,16,14,0.04);border-radius:2px}
+
+  /* ── Lists ───────────── */
+  ol,ul{margin:6px 0 10px;padding-left:20px}
+  li{font:400 12px/1.65 'IBM Plex Sans',sans-serif;color:#10100e;margin-bottom:4px}
+  li::marker{color:#b42318;font-weight:700}
+  ol li::marker{font:700 11px/1 'IBM Plex Mono',monospace}
+
+  /* ── IOC Grid ────────── */
+  .ioc-grid{display:grid;gap:4px;margin:6px 0}
+  .ioc{display:grid;grid-template-columns:120px 80px 1fr auto;gap:8px;padding:6px 10px;border:1px solid rgba(16,16,14,0.08);border-radius:2px;align-items:center}
+  .ioc-phase{font:600 8px/1 'IBM Plex Mono',monospace;letter-spacing:0.14em;text-transform:uppercase;color:#686864}
+  .ioc-id{font:700 10px/1 'IBM Plex Mono',monospace;color:#b42318}
+  .ioc-name{font:500 10.5px/1.4 'IBM Plex Sans',sans-serif;color:#10100e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ── Sequence ─────────── */
+  .seq-chain{display:flex;flex-wrap:wrap;gap:4px 2px;margin:8px 0 10px;align-items:center}
+  .seq-chip{display:inline-block;padding:3px 7px;border:1px solid rgba(16,16,14,0.12);border-radius:2px;font:600 9px/1 'IBM Plex Mono',monospace;color:#b42318;background:#f8f8f1}
+  .seq-arrow{font:400 10px/1 'IBM Plex Mono',monospace;color:#686864;padding:0 1px}
+
+  /* ── Footer ──────────── */
+  .footer{border-top:2px solid #10100e;padding-top:12px;margin-top:28px;display:flex;justify-content:space-between;font:600 8px/1 'IBM Plex Mono',monospace;letter-spacing:0.20em;text-transform:uppercase;color:#686864}
+
+  @media print{
+    body{background:#fff}
+    .page{background:#fff}
+    .stat{background:#f5f5f0}
+    .sec-head{page-break-after:avoid}
+    tbody tr{page-break-inside:avoid}
+  }
 </style>
 </head>
 <body>
 <div class="page">
-  <header class="masthead">
-    <div class="mark">🦅</div>
-    <div>
-      <div class="kicker">RAPTOR Security Operations</div>
-      <h1>Forensic Investigation Report</h1>
-      <div class="subtitle">${esc(report.name || 'Unnamed investigation')}</div>
+
+  <!-- COVER -->
+  <div class="cover">
+    <div class="cover-top">
+      <span class="stamp">CONFIDENTIAL</span>
+      <span class="cover-label">FORENSIC INVESTIGATION REPORT</span>
     </div>
-    <div class="doc-meta">
-      <strong>${esc(report.investigation_id || '')}</strong>
-      <span>Generated ${esc(ts)}</span><br>
-      <span>Internal Security Report</span>
+    <h1 class="cover-title">${esc(report.name || 'Forensic Investigation Report')}</h1>
+    <div class="cover-meta">
+      <div class="meta-cell"><span class="meta-label">Case ID</span><span class="meta-val"><code>${esc(shortId(report.investigation_id || ''))}</code></span></div>
+      <div class="meta-cell"><span class="meta-label">Severity</span><span class="meta-val" style="color:#8a5b00">${esc(report.severity || 'Unknown')}</span></div>
+      ${attribution ? `<div class="meta-cell"><span class="meta-label">Top Attribution</span><span class="meta-val">${esc(attribution.apt_name)} · ${Math.round((attribution.confidence_score || 0) * 100)}%</span></div>` : ''}
+      <div class="meta-cell"><span class="meta-label">Risk Assessment</span><span class="meta-val" style="color:${riskColor}">${esc(overallRisk)}</span></div>
+      <div class="meta-cell"><span class="meta-label">Prepared By</span><span class="meta-val">RAPTOR Engine v1.0.0</span></div>
+      <div class="meta-cell"><span class="meta-label">Report Date</span><span class="meta-val">${esc(dateStr)}</span></div>
     </div>
-  </header>
+  </div>
 
-  <section class="summary">
-    <h2>Executive Summary</h2>
-    ${summary.map((item) => `<p>${esc(item)}</p>`).join('')}
-    <div class="keyline">
-      <div><span>Events Reviewed</span><strong>${report.event_count || 0}</strong></div>
-      <div><span>Techniques</span><strong>${findings.length}</strong></div>
-      <div><span>Overall Risk</span><strong>${esc(overallRisk)}</strong></div>
-      <div><span>Top Candidate</span><strong>${attribution ? esc(attribution.apt_name || 'Unknown') : 'None'}</strong></div>
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat"><div class="stat-val">${eventCount || '—'}</div><div class="stat-label">Events Reviewed</div></div>
+    <div class="stat"><div class="stat-val">${findings.length}</div><div class="stat-label">ATT&CK Techniques</div></div>
+    <div class="stat"><div class="stat-val" style="color:${riskColor}">${esc(overallRisk)}</div><div class="stat-label">Overall Risk</div></div>
+    <div class="stat"><div class="stat-val">${attribution ? esc(attribution.apt_name) : '—'}</div><div class="stat-label">Top Candidate${attribution ? ` · ${Math.round((attribution.confidence_score || 0) * 100)}%` : ''}</div></div>
+  </div>
+
+  <!-- BODY -->
+  <div class="body">
+
+    <!-- Executive Summary -->
+    ${sec('Executive Summary')}
+    <div class="sec-body">
+      <p>RAPTOR reviewed <strong>${eventCount}</strong> event(s) and validated <strong>${findings.length}</strong> ATT&CK technique finding(s). ${attribution ? `The strongest attribution candidate is <strong>${esc(attribution.apt_name)}</strong> at ${Math.round((attribution.confidence_score || 0) * 100)}% confidence.` : ''}</p>
+      <p>The case is assessed as <strong>${esc(overallRisk)}</strong> risk based on observed technique confidence, affected hosts, credential exposure indicators, and lateral movement evidence. Attribution remains an intelligence lead, not proof of actor identity.</p>
     </div>
-  </section>
 
-  <section>
-    <h2>Scope And Observed Assets</h2>
-    <table>
-      <tbody>
-        ${tableRows([
-          ['Investigation ID', esc(report.investigation_id || '')],
-          ['Report Timestamp', esc(report.timestamp ? formatDate(report.timestamp) : 'Not provided')],
-          ['Affected Hosts', esc(affectedHosts.join(', ') || 'Not extracted from evidence summaries')],
-          ['Observed Users', esc(affectedUsers.join(', ') || 'Not extracted from evidence summaries')],
-        ])}
-      </tbody>
-    </table>
-  </section>
+    <!-- Scope -->
+    ${sec('Scope And Key Indicators')}
+    <div class="sec-body">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Indicator</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Events Reviewed</td><td>${eventCount}</td></tr>
+          <tr><td>ATT&CK Techniques</td><td>${findings.length}</td></tr>
+          <tr><td>Overall Risk</td><td style="color:${riskColor};font-weight:700">${esc(overallRisk)}</td></tr>
+          ${attribution ? `<tr><td>Top Candidate</td><td>${esc(attribution.apt_name)} (${Math.round((attribution.confidence_score || 0) * 100)}%)</td></tr>` : ''}
+          <tr><td>Affected Hosts</td><td>${esc(hostList(findings).join(', ') || 'Not extracted from evidence summaries')}</td></tr>
+        </tbody>
+      </table></div>
+    </div>
 
-  <section>
-    <h2>Attack Sequence</h2>
-    <p class="sequence">${attackPathText(report.attack_sequence || [], findings)}</p>
-  </section>
+    <!-- Attack Sequence -->
+    ${sequence.length ? `
+    ${sec('Attack Sequence')}
+    <div class="sec-body">
+      <div class="seq-chain">
+        ${sequence.map((tid, i) => {
+          const f = findings.find((x) => x.technique_id === tid);
+          const label = f ? esc(f.technique_name) : esc(tid);
+          return `<span class="seq-chip" title="${esc(label)}">${esc(tid)}</span>${i < sequence.length - 1 ? '<span class="seq-arrow">→</span>' : ''}`;
+        }).join('')}
+      </div>
+    </div>` : ''}
 
-  ${findings.length ? `
-  <section>
-    <h2>Validated Findings</h2>
-    <table>
-      <thead>
-        <tr>
-          <th class="tech-col">ATT&CK ID</th>
-          <th>Technique</th>
-          <th class="phase-col">Tactic</th>
-          <th class="conf-col">Confidence</th>
-          <th>Analyst Evidence Statement</th>
-        </tr>
-      </thead>
-      <tbody>${tableRows(findingRows)}</tbody>
-    </table>
-  </section>` : ''}
+    <!-- Validated Findings -->
+    ${findings.length ? `
+    ${sec('Validated ATT&CK Findings')}
+    <div class="sec-body">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th style="width:75px">ATT&CK ID</th><th>Technique</th><th style="width:100px">Tactic</th><th style="width:65px">Confidence</th><th>Evidence Statement</th></tr></thead>
+        <tbody>
+          ${findings.map((f) => {
+            const stmt = esc(cleanEvidenceText(f.evidence_summary || '') || 'Structured analysis identified this technique.');
+            return `<tr><td><code>${esc(f.technique_id || '')}</code></td><td>${esc(f.technique_name || '')}</td><td>${esc(formatPhase(f.kill_chain_phase || 'unknown'))}</td><td>${confBadge(f.confidence)}</td><td style="font-family:'IBM Plex Sans',sans-serif;font-size:10px">${stmt}</td></tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}
 
-  <section>
-    <h2>Containment And Response Priorities</h2>
-    <ol>${containmentItems(findings).map((item) => `<li>${esc(item)}</li>`).join('')}</ol>
-  </section>
+    <!-- Containment -->
+    ${sec('Containment And Response Priorities')}
+    <div class="sec-body">
+      <ol>
+        <li>Isolate confirmed compromised hosts from user networks while preserving forensic access.</li>
+        <li>Reset and revoke credentials associated with affected systems, including privileged and service-account material.</li>
+        <li>Block and review remote administration paths used during the investigation window, especially SMB administrative shares.</li>
+        <li>Hunt for the observed ATT&CK techniques across adjacent hosts, authentication logs, endpoint process telemetry, and egress records.</li>
+        <li>Preserve volatile evidence, timeline artifacts, and raw process telemetry before destructive containment steps.</li>
+      </ol>
+    </div>
 
-  ${attributionCandidates.length ? `
-  <section>
-    <h2>Attribution Assessment</h2>
-    <p>Attribution is provided as an intelligence lead. The score is not a declaration of responsibility and should be weighed against external reporting, infrastructure, malware, and victimology.</p>
-    <table>
-      <thead>
-        <tr><th>Candidate</th><th>Confidence</th><th>Label</th><th>Overlapping TTPs</th></tr>
-      </thead>
-      <tbody>${tableRows(attributionRows)}</tbody>
-    </table>
-  </section>` : ''}
+    <!-- Attribution -->
+    ${attributionCandidates.length ? `
+    ${sec('Attribution Assessment')}
+    <div class="sec-body">
+      <p style="font-style:italic;color:#686864;margin-bottom:8px">Attribution is provided as an intelligence lead. The score is not a declaration of responsibility and should be weighed against external reporting, infrastructure, malware, and victimology.</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Candidate</th><th>Confidence</th><th>Label</th><th>Overlapping TTPs</th></tr></thead>
+        <tbody>
+          ${attributionCandidates.map((a) => `<tr><td>${esc(a.apt_name || 'Unknown')}</td><td>${Math.round((a.confidence_score || 0) * 100)}%</td><td>${esc(a.confidence_label || 'unknown')}</td><td style="font-size:9px">${esc((a.overlapping_ttps || []).join(', ') || 'None reported')}</td></tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}
 
-  ${findings.length ? `
-  <section class="appendix">
-    <h2>Evidence Appendix</h2>
-    <table>
-      <thead>
-        <tr><th>Technique</th><th>Event References</th><th>Source Note</th></tr>
-      </thead>
-      <tbody>
-        ${tableRows(findings.map((finding) => [
-          esc(`${finding.technique_id || ''} ${finding.technique_name || ''}`.trim()),
-          esc((finding.event_ids || []).map(shortId).join(', ') || 'None reported'),
-          esc(sourceNote(finding)),
-        ]))}
-      </tbody>
-    </table>
-  </section>` : ''}
+    <!-- Evidence Appendix -->
+    ${findings.length ? `
+    ${sec('Evidence Appendix')}
+    <div class="sec-body">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Technique</th><th>Event References</th><th>Source Note</th></tr></thead>
+        <tbody>
+          ${findings.map((f) => `<tr><td><code>${esc(f.technique_id || '')}</code> ${esc(f.technique_name || '')}</td><td style="font-size:9px">${esc((f.event_ids || []).map(shortId).join(', ') || 'None reported')}</td><td>Local detection signature</td></tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>` : ''}
 
-  <p class="note">Prepared from structured RAPTOR investigation output. Review raw telemetry and case notes before external distribution.</p>
-  <footer class="footer">
-    <span>RAPTOR SOC Platform</span>
-    <span>${esc(name)}</span>
-  </footer>
+    <!-- IOC -->
+    ${findings.length ? `
+    ${sec('Indicators of Compromise')}
+    <div class="sec-body">
+      <div class="ioc-grid">
+        ${findings.map((f) => `<div class="ioc"><span class="ioc-phase">${esc(formatPhase(f.kill_chain_phase || 'unknown'))}</span><span class="ioc-id">${esc(f.technique_id || '')}</span><span class="ioc-name">${esc(f.technique_name || '')}</span>${confBadge(f.confidence)}</div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <div class="footer">
+      <span>END OF REPORT · RAPTOR v1.0.0</span>
+      <span>Generated ${esc(dateStr)}</span>
+    </div>
+  </div>
+
 </div>
 </body>
 </html>`;
