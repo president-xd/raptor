@@ -105,7 +105,7 @@ const pageTitles = {
   'apt-library': 'APT Library',
   query: 'Intelligence Query',
   'threat-feeds': 'Subsystem Health',
-  simulation: 'Simulation',
+  simulation: 'Adversary Simulation',
   mitre: 'MITRE ATT&CK Matrix',
   reports: 'Reports',
   settings: 'Settings',
@@ -138,10 +138,11 @@ const tacticOrder = [
 ];
 
 const graphLanes = [
-  { label: 'Identity', x: 32, width: 188 },
-  { label: 'Technique', x: 246, width: 258 },
-  { label: 'Asset', x: 530, width: 248 },
-  { label: 'Objective', x: 804, width: 204 },
+  { label: 'Identity', x: 20, width: 180 },
+  { label: 'Entry', x: 210, width: 200 },
+  { label: 'Technique', x: 420, width: 220 },
+  { label: 'Asset', x: 650, width: 200 },
+  { label: 'Objective', x: 860, width: 160 },
 ];
 
 const graphViewModes = [
@@ -526,6 +527,7 @@ export default function Dashboard() {
               profiles={aptProfiles}
               loading={aptLoading}
               error={aptError}
+              investigations={investigations}
               onRefresh={() => {
                 setAptProfiles([]);
                 loadAptProfiles(true);
@@ -769,7 +771,7 @@ function DashboardPage({
           )}
           {!!investigations.length && (
             <InvestigationTable
-              investigations={investigations.slice(0, 5)}
+              investigations={investigations.slice(0, 8)}
               compact
               onOpenInvestigation={onOpenInvestigation}
             />
@@ -810,7 +812,7 @@ function MetricCard({ label, value, hint, tone, icon: Icon }) {
         <small>{hint}</small>
       </div>
       <div className="metric-icon">
-        <Icon size={22} />
+        <Icon size={15} />
       </div>
     </article>
   );
@@ -1033,25 +1035,42 @@ function InvestigationComposer({ submitting, onSubmit, onClose }) {
 function InvestigationTable({ investigations, onOpenInvestigation, compact = false }) {
   return (
     <div className={`table-wrap ${compact ? 'compact' : ''}`}>
-      <table className="data-table">
+      <table className={`data-table ${compact ? 'dashboard-table' : ''}`}>
         <thead>
-          <tr>
-            <th>ID</th>
-            <th>Name</th>
-            <th>Severity</th>
-            <th>Attribution</th>
-            <th>Hosts/TTPs</th>
-            <th>Volume</th>
-            <th>Duration</th>
-            <th>Status</th>
-            <th>Date</th>
-            <th>Confidence</th>
-            <th />
-          </tr>
+          {compact ? (
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Severity</th>
+              <th>Attribution</th>
+              <th>Hosts</th>
+              <th>Volume</th>
+              <th>Duration</th>
+              <th>Status</th>
+            </tr>
+          ) : (
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Severity</th>
+              <th>Attribution</th>
+              <th>Hosts/TTPs</th>
+              <th>Volume</th>
+              <th>Duration</th>
+              <th>Status</th>
+              <th>Date</th>
+              <th>Confidence</th>
+              <th />
+            </tr>
+          )}
         </thead>
         <tbody>
           {investigations.map((item) => (
-            <tr key={item.id}>
+            <tr
+              key={item.id}
+              onClick={compact && item.statusRaw !== 'failed' ? () => onOpenInvestigation(item.id) : undefined}
+              className={compact ? 'clickable-row' : ''}
+            >
               <td><code>{shortId(item.id)}</code></td>
               <td>
                 <strong>{item.name}</strong>
@@ -1063,24 +1082,28 @@ function InvestigationTable({ investigations, onOpenInvestigation, compact = fal
               <td>{item.volume}</td>
               <td>{item.duration}</td>
               <td><StatusPill status={item.status} /></td>
-              <td>{item.date}</td>
-              <td>
-                <div className="confidence-cell">
-                  <span>{item.confidence}%</span>
-                  <div className="progress-track"><i style={{ width: `${item.confidence}%` }} /></div>
-                </div>
-              </td>
-              <td>
-                <button
-                  type="button"
-                  className="row-link"
-                  onClick={() => onOpenInvestigation(item.id)}
-                  disabled={item.statusRaw === 'failed'}
-                >
-                  Open
-                  <ArrowRight size={14} />
-                </button>
-              </td>
+              {!compact && (
+                <>
+                  <td>{item.date}</td>
+                  <td>
+                    <div className="confidence-cell">
+                      <span>{item.confidence}%</span>
+                      <div className="progress-track"><i style={{ width: `${item.confidence}%` }} /></div>
+                    </div>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="row-link"
+                      onClick={() => onOpenInvestigation(item.id)}
+                      disabled={item.statusRaw === 'failed'}
+                    >
+                      Open
+                      <ArrowRight size={14} />
+                    </button>
+                  </td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>
@@ -1208,16 +1231,18 @@ function InvestigationDetailPage({
 
 function AttackGraphTab({ graph, report }) {
   const [graphMode, setGraphMode] = useState('priority');
+  const [graphSubView, setGraphSubView] = useState('graph');
   const normalized = useMemo(() => normalizeGraph(graph, graphMode), [graph, graphMode]);
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const selectedNode = normalized.nodes.find((node) => node.id === selectedNodeId) || normalized.nodes[0] || null;
   const graphStats = useMemo(() => {
-    const compromised = normalized.nodes.filter((node) => node.status === 'compromised' || node.status === 'crown').length;
+    const compromised = normalized.nodes.filter((node) => node.status === 'compromised').length;
+    const crown = normalized.nodes.filter((node) => node.status === 'crown').length;
     return [
       { label: 'Visible', value: `${normalized.nodes.length}/${normalized.totalNodes}` },
       { label: 'Edges', value: `${normalized.edges.length}/${normalized.totalEdges}` },
-      { label: 'Compromised', value: compromised },
-      { label: 'Hidden', value: normalized.hiddenNodes },
+      { label: 'Compromised', value: compromised, tone: 'critical' },
+      { label: 'Crown', value: crown },
     ];
   }, [normalized]);
 
@@ -1243,218 +1268,212 @@ function AttackGraphTab({ graph, report }) {
     <div className="graph-tab">
       <div className="graph-workspace">
         <div className="graph-toolbar">
-          <div className="toolbar-group">
-            {graphViewModes.map((mode) => {
-              const Icon = mode.icon;
-              return (
-                <button
-                  key={mode.id}
-                  type="button"
-                  className={`tool-button ${graphMode === mode.id ? 'active' : ''}`}
-                  title={`${mode.label} graph view`}
-                  aria-label={`${mode.label} graph view`}
-                  onClick={() => setGraphMode(mode.id)}
-                >
-                  <Icon size={16} />
-                </button>
-              );
-            })}
+          <div className="segmented-control graph-sub-view-seg" role="tablist" aria-label="Graph sub-view">
+            {[
+              ['graph', 'Graph'],
+              ['killchain', 'Kill Chain'],
+              ['timeline', 'Timeline'],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={graphSubView === id}
+                className={graphSubView === id ? 'active' : ''}
+                onClick={() => setGraphSubView(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <div className="graph-legend">
-            <span><i className="legend-dot compromised" />Compromised</span>
-            <span><i className="legend-dot dc" />Crown DC</span>
-            <span><i className="legend-dot clean" />Host</span>
-            <span><i className="legend-dot" style={{ background: 'var(--warning)' }} />Technique</span>
-            <span><i className="legend-dot external" />User/Network</span>
+            <span><i className="legend-dot" style={{ background: 'var(--oxblood)' }} />Compromised</span>
+            <span><i className="legend-dot" style={{ background: 'var(--ink)' }} />Crown DC</span>
+            <span><i className="legend-dot" style={{ background: 'var(--forest)' }} />Host</span>
+            <span><i className="legend-dot" style={{ background: 'var(--indigo-deep)' }} />Technique</span>
+            <span><i className="legend-dot" style={{ background: 'transparent', border: '1.5px solid var(--graphite)' }} />External</span>
           </div>
         </div>
 
         <div className="graph-metrics" aria-label="Graph metrics">
           {graphStats.map((stat) => (
             <div className="graph-metric" key={stat.label}>
-              <strong>{stat.value}</strong>
+              <strong style={stat.tone === 'critical' ? { color: 'var(--oxblood)' } : undefined}>{stat.value}</strong>
               <span>{stat.label}</span>
             </div>
           ))}
         </div>
 
-        {(normalized.hiddenNodes > 0 || normalized.hiddenEdges > 0) && (
-          <div className="graph-notice">
-            <strong>{normalized.hiddenNodes} nodes and {normalized.hiddenEdges} edges summarized</strong>
-            <span>Showing the highest-signal investigation graph for readable analysis.</span>
-          </div>
+        {graphSubView === 'graph' && (
+          <>
+
+            <div className="graph-canvas">
+              <svg
+                className={normalized.isDense ? 'dense-graph' : ''}
+                viewBox={`0 0 1040 ${normalized.viewHeight}`}
+                style={{ height: `${normalized.viewHeight}px` }}
+                role="img"
+                aria-label="RAPTOR attack graph"
+              >
+                <defs>
+                  <marker id="graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#10100e" />
+                  </marker>
+                  <marker id="graph-arrow-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#b42318" />
+                  </marker>
+                  <marker id="graph-arrow-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#8a5b00" />
+                  </marker>
+                  <marker id="graph-arrow-succ" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#146c43" />
+                  </marker>
+                </defs>
+                <g className="graph-lanes" aria-hidden="true">
+                  {graphLanes.map((lane) => (
+                    <g key={lane.label}>
+                      <rect
+                        x={lane.x}
+                        y="56"
+                        width={lane.width}
+                        height={normalized.viewHeight - 100}
+                        fill="rgba(248,248,241,0.65)"
+                        stroke="rgba(16,16,14,0.10)"
+                        strokeDasharray="3 5"
+                      />
+                      <text
+                        x={lane.x + lane.width / 2}
+                        y="36"
+                        fontFamily="var(--font-mono)"
+                        fontSize="10"
+                        fontWeight="700"
+                        letterSpacing="2.4"
+                        textAnchor="middle"
+                        fill="rgba(16,16,14,0.55)"
+                        style={{ textTransform: 'uppercase' }}
+                      >
+                        {lane.label}
+                      </text>
+                    </g>
+                  ))}
+                </g>
+                {normalized.edges.map((edge, index) => {
+                  const source = nodesById[edge.source];
+                  const target = nodesById[edge.target];
+                  if (!source || !target) return null;
+                  const id = `edge-${index}`;
+                  const midX = (source.x + target.x) / 2;
+                  const midY = (source.y + target.y) / 2;
+                  const curve = edgeCurve(edge, source, target, index);
+                  const path = `M${source.x},${source.y} C${midX},${source.y + curve} ${midX},${target.y - curve} ${target.x},${target.y}`;
+                  const edgeCls = edgeClassName(edge);
+                  const isDanger = edgeCls.includes('danger-flow');
+                  const isWarn = edgeCls.includes('warning-flow');
+                  const isObs = edgeCls.includes('observed-flow');
+                  const markerRef = isDanger ? 'url(#graph-arrow-crit)' : isWarn ? 'url(#graph-arrow-warn)' : isObs ? 'url(#graph-arrow-succ)' : 'url(#graph-arrow)';
+                  const edgeStroke = isDanger ? '#b42318' : isWarn ? '#8a5b00' : isObs ? '#146c43' : '#10100e';
+                  const isDashed = isObs || edge.edge_type?.includes('exfil') || edge.edge_type?.includes('lateral');
+                  return (
+                    <g key={edge.id || id}>
+                      <path id={id} d={path}
+                        fill="none" stroke={edgeStroke} strokeWidth="1.8" strokeLinecap="round"
+                        strokeDasharray={isDashed ? '6 4' : '0'}
+                        markerEnd={markerRef}
+                      />
+                      <text
+                        x={midX} y={midY + curve * 0.16 - 10}
+                        fontFamily="var(--font-mono)" fontSize="9" fontWeight="700"
+                        textAnchor="middle" letterSpacing="1.2"
+                        fill="rgba(16,16,14,0.7)"
+                        style={{ paintOrder: 'stroke', stroke: '#f8f8f1', strokeWidth: 4, textTransform: 'uppercase' }}
+                      >{truncate(compactGraphText(edge.label || edge.edge_type), 18)}</text>
+                    </g>
+                  );
+                })}
+                {normalized.nodes.map((node) => {
+                  const isSelected = selectedNode?.id === node.id;
+                  const compact = node.compact;
+                  const nw = compact ? 90 : 150;
+                  const nh = compact ? 30 : 44;
+                  const nodeStyle = graphNodeStyle(node);
+                  return (
+                    <g
+                      key={node.id}
+                      className={`graph-node ${node.status} ${isSelected ? 'selected' : ''}`}
+                      transform={`translate(${node.x - nw / 2} ${node.y - nh / 2})`}
+                      style={{ cursor: 'pointer' }}
+                      role="button"
+                      tabIndex="0"
+                      onClick={() => setSelectedNodeId(node.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') setSelectedNodeId(node.id);
+                      }}
+                    >
+                      {isSelected && (
+                        <rect x={-5} y={-5} width={nw + 10} height={nh + 10} fill="none" stroke="#10100e" strokeWidth="1.5" strokeDasharray="3 4" rx="3" />
+                      )}
+                      <rect
+                        width={nw} height={nh} rx="2"
+                        fill={nodeStyle.fill}
+                        stroke={nodeStyle.stroke}
+                        strokeWidth={nodeStyle.strokeWidth}
+                        strokeDasharray={nodeStyle.dashed || '0'}
+                      />
+                      {node.status === 'crown' && (
+                        <polygon points={`${nw / 2 - 7},6 ${nw / 2 + 7},6 ${nw / 2},${-3}`} fill="#10100e" />
+                      )}
+                      {node.status === 'compromised' && (
+                        <>
+                          <circle cx={14} cy={nh / 2} r={6} fill="#b42318" />
+                          <text x={14} y={nh / 2 + 3.5} fontFamily="var(--font-mono)" fontSize="9" fontWeight="700" textAnchor="middle" fill="#f8f8f1">!</text>
+                        </>
+                      )}
+                      <text
+                        x={nw / 2} y={nh / 2 - (compact ? 0 : 2)}
+                        fontFamily="var(--font-mono)" fontSize={compact ? '9' : '11'} fontWeight="700"
+                        textAnchor="middle" fill={nodeStyle.title}
+                      >
+                        {truncate(node.displayLabel, compact ? 12 : 18)}
+                      </text>
+                      {!compact && (
+                        <text
+                          x={nw / 2} y={nh / 2 + 12}
+                          fontFamily="var(--font-mono)" fontSize="8.5"
+                          textAnchor="middle" fill={nodeStyle.sub} letterSpacing="0.4"
+                        >
+                          {truncate(node.subtitle, 20)}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+          </>
         )}
 
-        <div className="graph-canvas">
-          <svg
-            className={normalized.isDense ? 'dense-graph' : ''}
-            viewBox={`0 0 1040 ${normalized.viewHeight}`}
-            style={{ height: `${normalized.viewHeight}px` }}
-            role="img"
-            aria-label="RAPTOR attack graph"
-          >
-            <defs>
-              <pattern id="graph-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-                <path d="M 32 0 L 0 0 0 32" />
-              </pattern>
-              <filter id="node-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#10100e" floodOpacity="0.18" />
-              </filter>
-              <filter id="glow-danger" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-                <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.7  0 0 0 0 0.1  0 0 0 0 0.1  0 0 0 0.8 0" result="glow" />
-                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-              <filter id="glow-crown" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
-                <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.06  0 0 0 0 0.06  0 0 0 0 0.06  0 0 0 0.7 0" result="glow" />
-                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-              <filter id="glow-warning" x="-60%" y="-60%" width="220%" height="220%">
-                <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
-                <feColorMatrix in="blur" type="matrix" values="0.6 0 0 0 0.5  0 0 0 0 0.3  0 0 0 0 0  0 0 0 0.7 0" result="glow" />
-                <feMerge><feMergeNode in="glow" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-              <linearGradient id="lane-grad-0" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="rgba(59,130,246,0.05)" />
-                <stop offset="100%" stopColor="rgba(59,130,246,0.01)" />
-              </linearGradient>
-              <linearGradient id="lane-grad-1" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="rgba(138,91,0,0.04)" />
-                <stop offset="100%" stopColor="rgba(138,91,0,0.01)" />
-              </linearGradient>
-              <linearGradient id="lane-grad-2" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="rgba(180,35,24,0.05)" />
-                <stop offset="100%" stopColor="rgba(180,35,24,0.02)" />
-              </linearGradient>
-              <linearGradient id="lane-grad-3" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="rgba(16,16,14,0.04)" />
-                <stop offset="100%" stopColor="rgba(16,16,14,0.01)" />
-              </linearGradient>
-              <marker id="graph-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
-                <path d="M0,0 L9,4.5 L0,9 z" />
-              </marker>
-            </defs>
-            <rect className="graph-grid-fill" x="0" y="0" width="1040" height={normalized.viewHeight} />
-            <g className="graph-lanes" aria-hidden="true">
-              {graphLanes.map((lane, laneIndex) => (
-                <g key={lane.label}>
-                  <rect
-                    x={lane.x}
-                    y="28"
-                    width={lane.width}
-                    height={normalized.viewHeight - 118}
-                    fill={`url(#lane-grad-${laneIndex})`}
-                    stroke="rgba(16,16,14,0.08)"
-                    strokeWidth="1"
-                  />
-                  <rect x={lane.x} y="28" width="3" height={normalized.viewHeight - 118} fill={`url(#lane-grad-${laneIndex})`} opacity="0.7" />
-                  <text x={lane.x + 12} y="20" fontSize="10" fontWeight="900" textAnchor="start" fill="rgba(16,16,14,0.38)" style={{ textTransform: 'uppercase', letterSpacing: '1.2px' }}>{lane.label}</text>
-                </g>
-              ))}
-            </g>
-            {normalized.edges.map((edge, index) => {
-              const source = nodesById[edge.source];
-              const target = nodesById[edge.target];
-              if (!source || !target) return null;
-              const id = `edge-${index}`;
-              const midX = (source.x + target.x) / 2;
-              const midY = (source.y + target.y) / 2;
-              const curve = edgeCurve(edge, source, target, index);
-              const path = `M${source.x},${source.y} C${midX},${source.y + curve} ${midX},${target.y - curve} ${target.x},${target.y}`;
-              const isHighRisk = edge.edge_type?.includes('lateral') || edge.edge_type?.includes('sequence') || edge.edge_type?.includes('exfil');
-              return (
-                <g className={`graph-edge ${edgeClassName(edge)}`} key={edge.id || id}>
-                  <path id={id} d={path} markerEnd="url(#graph-arrow)" />
-                  {isHighRisk && (
-                    <circle r="5" className="edge-particle">
-                      <animateMotion dur={`${2.5 + (index % 4) * 0.6}s`} repeatCount="indefinite">
-                        <mpath href={`#${id}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                  {!isHighRisk && (
-                    <circle r="3.5" className="edge-particle" opacity="0.55">
-                      <animateMotion dur={`${4 + (index % 3)}s`} repeatCount="indefinite">
-                        <mpath href={`#${id}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                  <text x={midX} y={midY + curve * 0.16 - 10}>{truncate(compactGraphText(edge.label || edge.edge_type), 18)}</text>
-                </g>
-              );
-            })}
-            {normalized.nodes.map((node) => {
-              const isSelected = selectedNode?.id === node.id;
-              const compact = node.compact;
-              const nw = compact ? 72 : 96;
-              const nh = compact ? 26 : 34;
-              const glowFilter = node.status === 'compromised' ? 'url(#glow-danger)'
-                : node.status === 'crown' ? 'url(#glow-crown)'
-                  : node.status === 'warning' ? 'url(#glow-warning)'
-                    : 'url(#node-shadow)';
-              return (
-                <g
-                  key={node.id}
-                  className={`graph-node ${node.status} ${isSelected ? 'selected' : ''}`}
-                  transform={`translate(${node.x - nw / 2} ${node.y - nh / 2})`}
-                  role="button"
-                  tabIndex="0"
-                  onClick={() => setSelectedNodeId(node.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') setSelectedNodeId(node.id);
-                  }}
-                  filter={glowFilter}
-                >
-                  {/* Node body */}
-                  <rect
-                    className="node-body"
-                    width={nw} height={nh} rx="5"
-                    strokeWidth={isSelected ? '2' : '1.5'}
-                  />
-                  {/* Type badge strip on left */}
-                  <rect className="node-type-strip" width="4" height={nh} rx="2" />
-                  {/* Glyph */}
-                  <text
-                    className="node-glyph-rect"
-                    x="14" y={nh / 2 + 4}
-                    fontSize={node.kind === 'dc' ? '10' : '8'}
-                    fontWeight="900"
-                    textAnchor="middle"
-                  >
-                    {nodeGlyph(node)}
-                  </text>
-                  {/* Label */}
-                  <text
-                    className="node-label"
-                    x="24" y={compact ? nh / 2 + 4 : nh / 2 + 1}
-                    fontSize={compact ? '8' : '9'}
-                    textAnchor="start"
-                  >
-                    {truncate(node.displayLabel, compact ? 10 : 11)}
-                  </text>
-                  {/* Subtitle */}
-                  {!compact && (
-                    <text
-                      className="node-subtitle"
-                      x="24" y={nh / 2 + 12}
-                      fontSize="7.5"
-                      textAnchor="start"
-                    >
-                      {truncate(node.subtitle, 13)}
-                    </text>
-                  )}
-                  {/* Status indicator dot */}
-                  {(node.status === 'compromised' || node.status === 'crown') && (
-                    <circle cx={nw - 7} cy="7" r="4" className="node-status-dot" />
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </div>
+        {graphSubView === 'killchain' && (
+          <KillChainSubView
+            report={report}
+            normalized={normalized}
+            onSelectNode={(nodeId) => {
+              setSelectedNodeId(nodeId);
+              setGraphSubView('graph');
+            }}
+          />
+        )}
 
-        <AttackTimeline report={report} />
+        {graphSubView === 'timeline' && (
+          <TimelineSubView
+            report={report}
+            normalized={normalized}
+            onSelectNode={(nodeId) => {
+              setSelectedNodeId(nodeId);
+              setGraphSubView('graph');
+            }}
+          />
+        )}
       </div>
       <NodeSidePanel node={selectedNode} onClose={() => setSelectedNodeId('')} />
     </div>
@@ -1511,6 +1530,7 @@ function NodeSidePanel({ node, onClose }) {
 
   const iconMap = { host: Server, user: Users, technique: Layers3, dc: Lock, external: Globe, aggregate: Network };
   const Icon = iconMap[node.kind] || Cpu;
+  const kindLabel = node.kind === 'dc' ? 'Crown' : node.kind === 'technique' ? 'Technique' : node.kind?.toUpperCase() || 'NODE';
   const metadataEntries = Object.entries(node.metadata || {})
     .filter(([key, value]) => value !== null && value !== undefined && typeof value !== 'object' && key !== 'labels')
     .slice(0, 8);
@@ -1519,33 +1539,231 @@ function NodeSidePanel({ node, onClose }) {
     <aside className="node-panel">
       <div className="node-panel-header">
         <div className={`node-panel-icon ${node.status}`}>
-          <Icon size={20} />
+          <Icon size={18} />
         </div>
-        <div>
-          <span>{node.kind}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span className="eyebrow-label">{kindLabel}</span>
           <h2>{node.label}</h2>
+          <div className="node-panel-subtitle">{node.subtitle}</div>
         </div>
         <button type="button" className="ghost-icon" onClick={onClose} title="Close node detail">
           <X size={16} />
         </button>
       </div>
       <p className="node-summary">{node.summary}</p>
-      <div className="detail-list">
-        <Row label="Type" value={node.kind} />
-        <Row label="Status" value={node.status} />
+      <div className="node-detail-rows">
+        <div className="node-detail-row"><span>Type</span><strong>{node.kind}</strong></div>
+        {node.metadata?.tactic && <div className="node-detail-row"><span>Tactic</span><strong>{node.metadata.tactic}</strong></div>}
+        <div className="node-detail-row"><span>Status</span><strong>{node.status}</strong></div>
         {metadataEntries.map(([key, value]) => (
-          <Row key={key} label={formatLabel(key)} value={String(value)} />
+          <div className="node-detail-row" key={key}><span>{formatLabel(key)}</span><strong>{String(value)}</strong></div>
         ))}
       </div>
       {node.techniques.length > 0 && (
-        <div className="ttp-stack">
-          <span>Related TTPs</span>
-          <div>
-            {node.techniques.map((ttp) => <code key={ttp}>{ttp}</code>)}
+        <div className="node-related-ttps">
+          <span className="eyebrow-label">Related TTPs</span>
+          <div className="node-ttp-chips">
+            {node.techniques.map((ttp) => <span className="ttp-chip" key={ttp}>{ttp}</span>)}
           </div>
         </div>
       )}
     </aside>
+  );
+}
+
+const killChainPhases = [
+  { id: 'reconnaissance', label: 'Recon', full: 'Reconnaissance' },
+  { id: 'resource-development', label: 'Res. Dev', full: 'Resource Development' },
+  { id: 'initial-access', label: 'Initial', full: 'Initial Access' },
+  { id: 'execution', label: 'Exec', full: 'Execution' },
+  { id: 'persistence', label: 'Persist', full: 'Persistence' },
+  { id: 'privilege-escalation', label: 'Priv Esc', full: 'Privilege Escalation' },
+  { id: 'defense-evasion', label: 'Evasion', full: 'Defense Evasion' },
+  { id: 'credential-access', label: 'Cred Acc', full: 'Credential Access' },
+  { id: 'discovery', label: 'Discover', full: 'Discovery' },
+  { id: 'lateral-movement', label: 'Lateral', full: 'Lateral Movement' },
+  { id: 'collection', label: 'Collect', full: 'Collection' },
+  { id: 'command-and-control', label: 'C2', full: 'Command & Control' },
+  { id: 'exfiltration', label: 'Exfil', full: 'Exfiltration' },
+  { id: 'impact', label: 'Impact', full: 'Impact' },
+];
+
+function KillChainSubView({ report, normalized, onSelectNode }) {
+  const findings = report?.findings || [];
+  const [activePhase, setActivePhase] = useState('');
+
+  const phaseData = useMemo(() => {
+    return killChainPhases.map((phase) => {
+      const phaseFindings = findings.filter((f) => {
+        const fp = String(f.kill_chain_phase || f.tactic || '').toLowerCase().replace(/[_ ]/g, '-');
+        return fp === phase.id || fp.includes(phase.id.split('-')[0]);
+      });
+      const severity = phaseFindings.some((f) => f.confidence === 'high' || f.severity === 'critical') ? 'crit'
+        : phaseFindings.some((f) => f.confidence === 'medium' || f.severity === 'warning') ? 'warn'
+        : null;
+      return {
+        ...phase,
+        obs: phaseFindings.length,
+        ttps: phaseFindings.map((f) => f.technique_id).filter(Boolean),
+        hot: severity,
+        desc: phaseFindings.length
+          ? phaseFindings.map((f) => f.description || f.technique_name || f.technique_id).join('. ')
+          : `No ${phase.full.toLowerCase()} activity observed in this investigation.`,
+      };
+    });
+  }, [findings]);
+
+  const totalObserved = phaseData.filter((p) => p.obs > 0).length;
+
+  useEffect(() => {
+    if (!activePhase) {
+      const firstActive = phaseData.find((p) => p.obs > 0);
+      setActivePhase(firstActive?.id || phaseData[0]?.id || '');
+    }
+  }, [phaseData, activePhase]);
+
+  const activePh = phaseData.find((p) => p.id === activePhase) || phaseData[0];
+
+  return (
+    <div className="killchain-grid-view">
+      <div className="killchain-phase-grid">
+        {phaseData.map((ph) => {
+          const isActive = ph.id === activePhase;
+          const hotClass = ph.hot === 'crit' ? 'hot-crit' : ph.hot === 'warn' ? 'hot-warn' : '';
+          return (
+            <button
+              key={ph.id}
+              type="button"
+              className={`killchain-card ${hotClass} ${isActive ? 'active' : ''} ${ph.obs === 0 ? 'empty' : ''}`}
+              onClick={() => setActivePhase(ph.id)}
+            >
+              <span className="killchain-card-label">{ph.label}</span>
+              <strong className="killchain-card-count">{ph.obs}</strong>
+              <span className="killchain-card-status">{ph.obs ? 'observed' : 'none'}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="killchain-detail-panel">
+        <div className="eyebrow">Phase Detail</div>
+        <h3 className="killchain-detail-title">{activePh?.full}</h3>
+        <div className="killchain-detail-pills">
+          {activePh?.hot === 'crit' && <SeverityPill severity="critical">{activePh.obs} observed</SeverityPill>}
+          {activePh?.hot === 'warn' && <SeverityPill severity="warning">{activePh.obs} observed</SeverityPill>}
+          {!activePh?.hot && activePh?.obs > 0 && <StatusPill status="complete">{activePh.obs} observed</StatusPill>}
+          {activePh?.obs === 0 && <StatusPill status="complete">no activity</StatusPill>}
+        </div>
+        <p className="killchain-detail-desc">{activePh?.desc}</p>
+        {activePh?.ttps.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Observed TTPs</div>
+            <div className="ttp-chip-row">
+              {activePh.ttps.map((ttp) => <code key={ttp} className="ttp-chip">{ttp}</code>)}
+            </div>
+          </>
+        )}
+        <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Coverage</div>
+        <p className="killchain-coverage-stat">
+          {totalObserved} of 14 kill-chain phases observed ({Math.round(totalObserved / 14 * 100)}%).
+        </p>
+        {activePh?.obs > 0 && (
+          <button
+            type="button"
+            className="secondary-button killchain-see-graph-btn"
+            onClick={() => {
+              const matchNode = normalized.nodes.find((n) => {
+                const nodeTactics = n.metadata?.tactic || n.metadata?.kill_chain_phase || '';
+                return String(nodeTactics).toLowerCase().includes(activePh.id.split('-')[0]);
+              });
+              if (matchNode) onSelectNode(matchNode.id);
+            }}
+          >
+            <Network size={14} />
+            See in Graph
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimelineSubView({ report, normalized, onSelectNode }) {
+  const findings = report?.findings || [];
+  const attackSequence = report?.attack_sequence || [];
+
+  const events = useMemo(() => {
+    const items = [];
+
+    findings.forEach((finding, index) => {
+      const severity = finding.confidence === 'high' || finding.severity === 'critical' ? 'crit'
+        : finding.confidence === 'medium' || finding.severity === 'warning' ? 'warn'
+        : finding.confidence === 'low' ? 'succ'
+        : 'ink';
+      const matchNode = normalized.nodes.find((n) =>
+        n.label?.includes(finding.technique_id) || n.metadata?.technique_id === finding.technique_id
+      );
+      items.push({
+        t: `T+${String(Math.floor(index * 72 / 60)).padStart(2, '0')}:${String((index * 72) % 60).padStart(2, '0')}:00`,
+        time: finding.timestamp || `Step ${index + 1}`,
+        nodeId: matchNode?.id || null,
+        sev: severity,
+        title: `${finding.technique_id} ${finding.technique_name || ''}`.trim(),
+        sub: finding.description || formatPhase(finding.kill_chain_phase || 'unknown'),
+      });
+    });
+
+    if (!items.length && attackSequence.length) {
+      attackSequence.forEach((ttp, index) => {
+        items.push({
+          t: `T+${String(Math.floor(index * 60 / 60)).padStart(2, '0')}:${String((index * 60) % 60).padStart(2, '0')}:00`,
+          time: `Step ${index + 1}`,
+          nodeId: null,
+          sev: index === 0 ? 'crit' : 'ink',
+          title: ttp,
+          sub: techniquePhase(report, ttp),
+        });
+      });
+    }
+
+    if (!items.length) {
+      items.push({
+        t: 'T+00:00:00',
+        time: '',
+        nodeId: null,
+        sev: 'ink',
+        title: 'Investigation submitted',
+        sub: 'Waiting for backend analysis to populate the timeline.',
+      });
+    }
+
+    return items;
+  }, [findings, attackSequence, normalized.nodes, report]);
+
+  const sevColor = (s) =>
+    s === 'crit' ? 'var(--oxblood)' : s === 'warn' ? 'var(--brass)' : s === 'succ' ? 'var(--forest)' : 'var(--ink)';
+
+  return (
+    <div className="timeline-sub-view">
+      <div className="timeline-vertical-track">
+        <div className="timeline-vertical-line" />
+        {events.map((e, i) => (
+          <div
+            key={`${e.title}-${i}`}
+            className={`timeline-event-row ${e.nodeId ? 'clickable' : ''}`}
+            onClick={() => e.nodeId && onSelectNode(e.nodeId)}
+          >
+            <div className="timeline-dot" style={{ background: sevColor(e.sev), boxShadow: `0 0 0 2px var(--paper), 0 0 0 3px ${sevColor(e.sev)}` }} />
+            <div className="timeline-event-grid">
+              <code className="timeline-offset">{e.t}</code>
+              <span className="timeline-time">{e.time}</span>
+              <strong className="timeline-title" style={{ color: sevColor(e.sev) }}>{e.title}</strong>
+            </div>
+            <div className="timeline-event-sub">{e.sub}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1639,119 +1857,59 @@ function AttributionTab({ report }) {
 
 function SimulationTab({ investigation, simulation, loading, error, onRun, showRun = true }) {
   const predictions = simulation?.predictions || [];
-  const canRun = investigation?.statusRaw === 'complete';
-  const notComplete = investigation && investigation.statusRaw !== 'complete';
-  const recommendedActions = simulation?.recommended_actions || [];
-  const contextStats = simulation ? [
-    simulation.apt_group ? `Actor ${simulation.apt_group}` : null,
-    simulation.current_stage ? `Stage ${formatPhase(simulation.current_stage)}` : null,
-    `${simulation.compromised_hosts?.length || investigation?.hosts || 0} hosts`,
-    `${simulation.observed_ttps?.length || investigation?.ttps || 0} TTPs`,
-  ].filter(Boolean) : [];
+  const canRun = investigation?.statusRaw === 'complete' && !loading;
 
-  const blockingReasons = [];
-  if (!investigation) blockingReasons.push('No investigation selected');
-  else if (notComplete) blockingReasons.push(`Investigation is ${investigation.status?.toLowerCase() || 'not complete'} (${investigation.progress || 0}%)`);
+  const probToPill = (pred) => {
+    const p = pred.probability || 0;
+    if (p >= 60) return 'critical';
+    if (p >= 25) return 'medium';
+    return 'low';
+  };
 
   return (
-    <div className="simulation-list compact">
-      {showRun && (
-        <div className="simulation-command-bar">
-          <div>
-            <strong>Next-Move Brief</strong>
-            <span>{predictions.length ? `${predictions.length} projected techniques` : 'Ready for contextual simulation'}</span>
+    <div className="sim-tab-wrap">
+      <div className="sim-panel">
+        <div className="sim-panel-head">
+          <div className="sim-panel-head-left">
+            <Zap size={16} />
+            <span className="eyebrow-label">Next-Move Predictions</span>
           </div>
-          <button type="button" className="primary-button" onClick={onRun} disabled={!canRun || loading}>
-            <Play size={16} />
-            {loading ? 'Running' : 'Run'}
-          </button>
-          {blockingReasons.map((reason) => (
-            <span key={reason} className="panel-chip">{reason}</span>
-          ))}
+          {showRun && (
+            <button type="button" className="secondary-button sim-btn-sm" onClick={onRun} disabled={!canRun}>
+              <RefreshCcw size={13} />
+              Re-Run
+            </button>
+          )}
         </div>
-      )}
-      {error && <InlineError message={error} />}
-      {!!contextStats.length && (
-        <div className="simulation-context-note compact">
-          <CircleDot size={15} />
-          <span>{contextStats.join(' · ')}</span>
-        </div>
-      )}
-      {!!recommendedActions.length && (
-        <div className="simulation-actions compact">
-          <strong>Containment focus</strong>
-          <div>
-            {recommendedActions.slice(0, 4).map((action) => <span key={action}>{action}</span>)}
-          </div>
-        </div>
-      )}
-      {!predictions.length && !loading && (
-        <EmptyState
-          icon={Play}
-          title="No simulation output loaded"
-          detail="Run the simulation to generate next-step attack predictions from this investigation."
-        />
-      )}
-      {!!predictions.length && (
-        <div className="prediction-grid">
-          {predictions.map((prediction, index) => (
-            <article className={`prediction-card ${prediction.urgency || 'medium'}`} key={`${prediction.technique_id}-${index}`}>
-              <div className="prediction-card-top">
-                <div className="prediction-number">{index + 1}</div>
-                <div className="prediction-title">
-                  <code>{prediction.technique_id}</code>
-                  <h3>{prediction.technique_name}</h3>
-                </div>
-                <span className={`risk-pill ${prediction.urgency || 'medium'}`}>{prediction.urgency || 'medium'}</span>
-              </div>
-              <div className="prediction-body">
-                <div className="prediction-kpis">
-                  <span>{formatPhase(prediction.tactic || 'unknown')}</span>
-                  <span>{prediction.probability || 0}% probability</span>
-                </div>
-                <div className="prediction-probability" aria-label={`Probability ${prediction.probability || 0}%`}>
-                  <div className="progress-track"><i style={{ width: `${Math.min(100, Math.max(0, prediction.probability || 0))}%` }} /></div>
-                </div>
-                <p>{truncate(prediction.rationale, 180)}</p>
-                <details className="prediction-disclosure">
-                  <summary>Evidence, actions, detection</summary>
-                  <div className="prediction-disclosure-body">
-                    {prediction.evidence_basis && (
-                      <div className="simulation-evidence-basis compact">
-                        <strong>Evidence basis</strong>
-                        <span>{prediction.evidence_basis}</span>
-                      </div>
-                    )}
-                    {!!(prediction.likely_tools || []).length && (
-                      <div className="tool-strip compact">
-                        {(prediction.likely_tools || []).map((tool) => <code key={tool}>{tool}</code>)}
-                      </div>
-                    )}
-                    {!!((prediction.preconditions || []).length || (prediction.immediate_actions || []).length) && (
-                      <div className="prediction-detail-grid">
-                        <div>
-                          <strong>Preconditions</strong>
-                          {(prediction.preconditions || []).map((item) => <span key={item}>{item}</span>)}
-                        </div>
-                        <div>
-                          <strong>Immediate actions</strong>
-                          {(prediction.immediate_actions || []).map((item) => <span key={item}>{item}</span>)}
-                        </div>
-                      </div>
-                    )}
-                    {prediction.detection_guidance && (
-                      <div className="detection-block compact">
-                        <Shield size={15} />
-                        <span>{prediction.detection_guidance}</span>
-                      </div>
-                    )}
+        {error && <InlineError message={error} />}
+        {!predictions.length && !loading && (
+          <EmptyState
+            icon={Play}
+            title="No simulation output loaded"
+            detail="Run the simulation to generate next-step attack predictions from this investigation."
+          />
+        )}
+        {loading && <EmptyState icon={Activity} title="Running simulation" />}
+        {!!predictions.length && (
+          <div className="sim-prediction-grid">
+            {predictions.map((pred, idx) => (
+              <div className="sim-prediction-card" key={`${pred.technique_id}-${idx}`}>
+                <div className="sim-pred-top">
+                  <div>
+                    <span className="eyebrow-label">Predicted Next TTP</span>
+                    <div className="sim-pred-title">{pred.technique_name}</div>
                   </div>
-                </details>
+                  <span className={`severity-pill ${probToPill(pred)}`}>{pred.probability || 0}% likelihood</span>
+                </div>
+                <div className="sim-pred-chips">
+                  <span className="ttp-chip">{pred.technique_id}</span>
+                </div>
+                <p className="sim-pred-desc">{truncate(pred.rationale, 180)}</p>
               </div>
-            </article>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1760,6 +1918,7 @@ function QueryWorkspacePage({ investigation, investigations = [], report, embedd
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
+  const chatHistoryRef = useRef(null);
   const suggestions = [
     'Which hosts are compromised?',
     'Show lateral movement paths.',
@@ -1793,6 +1952,17 @@ function QueryWorkspacePage({ investigation, investigations = [], report, embedd
       ]);
     }
   }, [investigation?.id, investigation?.statusRaw]);
+
+  useEffect(() => {
+    const history = chatHistoryRef.current;
+    if (!history) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      history.scrollTop = history.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length, sending]);
 
   const send = async (text = input) => {
     const trimmed = text.trim();
@@ -1874,7 +2044,7 @@ function QueryWorkspacePage({ investigation, investigations = [], report, embedd
           <small>{investigation?.name || 'Select a completed investigation'}</small>
           {investigation?.statusRaw && <StatusPill status={titleCase(investigation.statusRaw)} />}
         </div>
-        <div className="chat-history">
+        <div className="chat-history" ref={chatHistoryRef}>
           {messages.map((message, index) => (
             <div className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
               <div className="message-avatar">{message.role === 'assistant' ? 'AI' : 'SA'}</div>
@@ -2053,22 +2223,82 @@ function EnterpriseReportView({ report, compact = false, onDownload }) {
     [report?.narrative_report]
   );
   const title = report?.name || 'Enterprise Forensic Investigation Report';
+  const findings = report?.findings || [];
+  const attribution = report?.attribution || [];
+  const topActor = attribution[0];
+
+  const compromisedHosts = findings.filter((f) =>
+    f.description?.toLowerCase().includes('compromised') || f.severity === 'critical'
+  ).length;
+  const totalHosts = (report?.hosts_affected ?? compromisedHosts) || 0;
 
   return (
-    <article className={`markdown-report enterprise-report ${compact ? 'compact' : ''}`}>
+    <article className={`narrative-report-doc ${compact ? 'compact' : ''}`}>
       {!compact && (
-        <div className="markdown-toolbar">
-          <span>Enterprise Report</span>
-          {onDownload && (
-            <button type="button" className="secondary-button" onClick={onDownload} disabled={!report?.narrative_report}>
-              <FileDown size={13} />
-              Download MD
-            </button>
-          )}
+        <div className="narrative-report-cover">
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+            <span className="narrative-stamp">CONFIDENTIAL · OP-RAPTOR</span>
+            <span style={{ font: '600 11px/1 var(--font-mono)', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--graphite)' }}>
+              FORENSIC REPORT · DRAFT v1
+            </span>
+          </div>
+          <div className="narrative-cover-title">{title}</div>
+          <div className="narrative-cover-meta">
+            {report?.id && (
+              <div>
+                <div className="eyebrow">Case ID</div>
+                <strong>{shortId(report.id)}</strong>
+              </div>
+            )}
+            <div>
+              <div className="eyebrow">Severity</div>
+              <strong style={{ color: 'var(--brass)' }}>{report?.severity || 'Unknown'}</strong>
+            </div>
+            {topActor && (
+              <div>
+                <div className="eyebrow">Top Attribution</div>
+                <strong>{topActor.apt_name} · {toPercent(topActor.confidence_score)}%</strong>
+              </div>
+            )}
+            {totalHosts > 0 && (
+              <div>
+                <div className="eyebrow">Hosts Affected</div>
+                <strong style={{ color: 'var(--oxblood)' }}>{totalHosts}</strong>
+              </div>
+            )}
+            <div>
+              <div className="eyebrow">Prepared By</div>
+              <strong>RAPTOR Engine v1.0.0</strong>
+            </div>
+          </div>
         </div>
       )}
-      <div className="enterprise-report-body" aria-label={`${title} narrative`}>
+      <div className="narrative-body" aria-label={`${title} narrative`}>
         {blocks.map((block, index) => renderReportBlock(block, index))}
+
+        {findings.length > 0 && (
+          <section>
+            <div className="narrative-section-head">
+              <span className="narrative-section-num">{String(blocks.filter((b) => b.type === 'heading' && b.level <= 2).length + 1).padStart(2, '0')}</span>
+              <h2 className="narrative-section-title">Indicators of Compromise</h2>
+            </div>
+            <div className="narrative-section-body">
+              <div style={{ display: 'grid', gap: 8 }}>
+                {findings.slice(0, 8).map((f) => (
+                  <div className="ioc-row" key={f.technique_id}>
+                    <span className="eyebrow" style={{ minWidth: 90 }}>{formatPhase(f.kill_chain_phase || 'unknown')}</span>
+                    <code>{f.technique_id} {f.technique_name || ''}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        <div className="narrative-footer">
+          <span>END OF REPORT</span>
+          <span>Generated {new Date().toISOString().slice(0, 10)} · RAPTOR v1.0.0</span>
+        </div>
       </div>
     </article>
   );
@@ -2267,7 +2497,7 @@ function EvidencePanel({ finding, evidenceFiles = [] }) {
   );
 }
 
-function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) {
+function AptLibraryPage({ profiles, loading, error, investigations, onRefresh, onLoadProfile }) {
   const [region, setRegion] = useState('All');
   const [selectedActor, setSelectedActor] = useState(null);
   const [selectedActorLoading, setSelectedActorLoading] = useState(false);
@@ -2328,7 +2558,7 @@ function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) 
         {actors.map((actor) => (
           <button
             type="button"
-            className={`apt-card region-${slug(actor.nation_state || 'unknown')}`}
+            className="apt-card"
             key={actor.name}
             onClick={() => handleActorOpen(actor)}
           >
@@ -2339,13 +2569,8 @@ function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) 
             <h2>{actor.name}</h2>
             <p>{actor.aliases?.slice(0, 3).join(', ') || 'No aliases listed'}</p>
             <div className="apt-card-meta">
-              <span>{actor.technique_count} known TTPs</span>
+              <code className="ttp-chip">{actor.technique_count || 0} known TTPs</code>
             </div>
-            {!!(actor.techniques || []).length && (
-              <div className="ttp-stack inline">
-                {(actor.techniques || []).slice(0, 5).map((ttp) => <code key={ttp}>{ttp}</code>)}
-              </div>
-            )}
           </button>
         ))}
       </div>
@@ -2353,6 +2578,7 @@ function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) 
         <ActorModal
           actor={selectedActor}
           loading={selectedActorLoading}
+          investigations={investigations}
           onClose={() => setSelectedActor(null)}
         />
       )}
@@ -2360,41 +2586,129 @@ function AptLibraryPage({ profiles, loading, error, onRefresh, onLoadProfile }) 
   );
 }
 
-function ActorModal({ actor, onClose, loading }) {
+function ActorModal({ actor, onClose, loading, investigations }) {
   useEffect(() => {
     const handleKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const aliases = actor.aliases?.join(', ') || actor.name;
+  const origin = actor.origin || actor.nation_state || 'Unknown';
+  const firstSeen = actor.first_seen || actor.created || '';
+  const targets = actor.target_sectors?.join(', ') || actor.description?.slice(0, 80) || '';
+
+  const recentCases = useMemo(() => {
+    if (actor.recent_cases?.length) return actor.recent_cases;
+    if (!investigations?.length) return [];
+    const actorName = actor.name?.toLowerCase() || '';
+    const actorAliases = (actor.aliases || []).map((a) => a.toLowerCase());
+    return investigations
+      .filter((inv) => {
+        const candidate = (inv.candidate || '').toLowerCase();
+        return candidate === actorName || actorAliases.some((alias) => candidate.includes(alias));
+      })
+      .slice(0, 5)
+      .map((inv) => ({
+        id: inv.id,
+        name: inv.name,
+        severity: inv.severity,
+        confidence: inv.confidence,
+        closed: inv.completedAt || inv.date,
+      }));
+  }, [actor, investigations]);
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="actor-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div>
-            <span>{actor.nation_state || 'Unknown'} threat actor</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="modal-pill-row">
+              <span className="modal-pill">{actor.nation_state || 'Unknown'}</span>
+              <span className="modal-pill stix">STIX</span>
+              <code className="ttp-chip">{actor.technique_count || 0} known TTPs</code>
+            </div>
             <h2>{actor.name}</h2>
+            <div className="modal-aliases">{aliases}</div>
           </div>
           <button type="button" className="ghost-icon" onClick={onClose} title="Close actor details">
             <X size={18} />
           </button>
         </div>
-        <div className="modal-grid">
-          <Row label="Nation State" value={actor.nation_state || 'Unknown'} />
-          <Row label="Known TTPs" value={String(actor.technique_count || 0)} />
-          <Row label="Aliases" value={actor.aliases?.join(', ') || 'None listed'} />
-        </div>
-        <div className="modal-section">
-          <span>Known TTPs</span>
-          {loading ? (
-            <p>Loading techniques...</p>
-          ) : (actor.techniques || []).length ? (
-            <div className="ttp-stack inline">
-              {(actor.techniques || []).map((ttp) => <code key={ttp}>{ttp}</code>)}
+        <div className="modal-body-content">
+          <div className="modal-detail-grid">
+            <div className="modal-detail-field">
+              <span className="eyebrow">Origin</span>
+              <div className="modal-detail-value">{origin}</div>
             </div>
-          ) : (
-            <p>No techniques returned for this actor.</p>
-          )}
+            <div className="modal-detail-field">
+              <span className="eyebrow">First Seen</span>
+              <div className="modal-detail-value">{firstSeen || 'Unknown'}</div>
+            </div>
+            <div className="modal-detail-field">
+              <span className="eyebrow">Region</span>
+              <div className="modal-detail-value">{actor.nation_state || 'Unknown'}</div>
+            </div>
+            <div className="modal-detail-field">
+              <span className="eyebrow">Targets</span>
+              <div className="modal-detail-value">{targets || 'Unknown'}</div>
+            </div>
+            <div className="modal-detail-field">
+              <span className="eyebrow">Known TTPs</span>
+              <div className="modal-detail-value">{actor.technique_count || 0} (from local STIX corpus)</div>
+            </div>
+            <div className="modal-detail-field">
+              <span className="eyebrow">Last Updated</span>
+              <div className="modal-detail-value">{actor.updated || actor.modified || 'Unknown'}</div>
+            </div>
+          </div>
+
+          <div className="modal-section">
+            <span>Sample TTPs in Corpus</span>
+            {loading ? (
+              <p>Loading techniques...</p>
+            ) : (actor.techniques || []).length ? (
+              <div className="ttp-chip-row">
+                {(actor.techniques || []).slice(0, 8).map((ttp) => <code key={ttp} className="ttp-chip">{ttp}</code>)}
+              </div>
+            ) : (
+              <p>No techniques returned for this actor.</p>
+            )}
+          </div>
+
+          <div className="modal-section">
+            <span>Recent Cases Attributed</span>
+            {recentCases.length ? (
+              <table className="data-table">
+                <thead>
+                  <tr><th>Case</th><th>Severity</th><th>Confidence</th><th>Closed</th></tr>
+                </thead>
+                <tbody>
+                  {recentCases.map((c) => (
+                    <tr key={c.id || c.name}>
+                      <td><strong>{c.name}</strong><small>{shortId(c.id)}</small></td>
+                      <td><SeverityPill severity={c.severity} /></td>
+                      <td>{c.confidence}%</td>
+                      <td>{c.closed || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ font: '400 12px/1.5 var(--font-mono)', color: 'var(--graphite)', margin: 0 }}>No cases attributed to this actor.</p>
+            )}
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button">
+              <ExternalLink size={13} />
+              Open in MITRE ATT&CK
+            </button>
+            <button type="button" className="primary-button">
+              <Download size={13} />
+              Export Profile
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2763,134 +3077,106 @@ function StandaloneSimulationPage({
   onSelectInvestigation,
   onRun,
 }) {
-  const sortedInvestigations = [...investigations].sort((a, b) => {
-    if (a.statusRaw === 'complete' && b.statusRaw !== 'complete') return -1;
-    if (a.statusRaw !== 'complete' && b.statusRaw === 'complete') return 1;
-    return new Date(b.createdAtRaw || 0).getTime() - new Date(a.createdAtRaw || 0).getTime();
-  });
-
-  return (
-    <div className="page-panel simulation-page">
-      <Panel title="Cases" icon={Archive} className="simulation-case-panel">
-        <div className="simulation-case-list" role="listbox" aria-label="Completed investigations for simulation">
-          {!sortedInvestigations.length && (
-            <EmptyState icon={Archive} title="No investigations available" detail="Complete an investigation before running adversary next-move simulation." />
-          )}
-          {sortedInvestigations.map((item) => {
-            const selected = item.id === investigation?.id;
-            const disabled = item.statusRaw !== 'complete';
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`simulation-case-row ${selected ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
-                onClick={() => !disabled && onSelectInvestigation(item.id)}
-                disabled={disabled}
-                role="option"
-                aria-selected={selected}
-              >
-                <span className="case-row-top">
-                  <strong>{item.name}</strong>
-                  <StatusPill status={item.status} />
-                </span>
-                <span className="case-row-meta">
-                  CASE {shortId(item.id)} · {item.candidate || 'Unknown'} · {item.confidence}% · {item.ttps} TTPs
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </Panel>
-      <div className="simulation-workbench">
-        <SimulationCaseBrief
-          investigation={investigation}
-          report={report}
-          graph={graph}
-          simulation={simulation}
-          loading={loading}
-          onRun={onRun}
-        />
-        <Panel title="Next-Move Brief" icon={Play} className="simulation-results-panel">
-          <SimulationTab
-            investigation={investigation}
-            simulation={simulation}
-            loading={loading}
-            error={error}
-            onRun={onRun}
-            showRun={false}
-          />
-        </Panel>
-      </div>
-    </div>
+  const completedInvs = useMemo(() =>
+    [...investigations]
+      .filter((i) => i.statusRaw === 'complete')
+      .sort((a, b) => new Date(b.createdAtRaw || 0).getTime() - new Date(a.createdAtRaw || 0).getTime()),
+    [investigations]
   );
-}
+  const predictions = simulation?.predictions || [];
+  const canRun = investigation?.statusRaw === 'complete' && !loading;
 
-function SimulationCaseBrief({ investigation, report, graph, simulation, loading, onRun }) {
-  const meta = buildSimulationCaseMeta(investigation, report, graph, simulation);
-  if (!investigation) {
-    return (
-      <Panel title="Selected Case" icon={Target} className="simulation-brief-panel">
-        <EmptyState icon={Target} title="Select a completed investigation" detail="The simulation model needs a completed case so it can use findings, graph nodes, and attribution context." />
-      </Panel>
-    );
-  }
+  const probToPill = (pred) => {
+    const p = pred.probability || 0;
+    if (p >= 60) return 'critical';
+    if (p >= 25) return 'medium';
+    return 'low';
+  };
 
   return (
-    <Panel
-      title="Selected Case"
-      icon={Target}
-      className="simulation-brief-panel"
-      action={(
-        <button type="button" className="primary-button" onClick={onRun} disabled={investigation.statusRaw !== 'complete' || loading}>
-          <Play size={15} />
-          {loading ? 'Simulating' : 'Run'}
-        </button>
+    <div className="page-panel sim-standalone">
+      {/* ── Case Selector ───────────────────────────────────── */}
+      <div className="sim-selector-bar">
+        <div className="sim-selector-left">
+          <span className="eyebrow-label">Case Selector</span>
+          <select
+            className="sim-case-select"
+            value={investigation?.id || ''}
+            onChange={(e) => e.target.value && onSelectInvestigation(e.target.value)}
+          >
+            <option value="" disabled>Select a case</option>
+            {completedInvs.map((inv) => (
+              <option key={inv.id} value={inv.id}>
+                {shortId(inv.id)} &middot; {inv.name}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="secondary-button sim-btn-sm" onClick={onRun} disabled={!canRun}>
+            <RefreshCcw size={13} />
+            Reload
+          </button>
+        </div>
+        <span className="status-pill complete">{completedInvs.length} cases &middot; complete</span>
+      </div>
+
+      {/* ── Loaded Case Bar ─────────────────────────────────── */}
+      {investigation && (
+        <div className="sim-loaded-bar">
+          <span className="eyebrow-label">Loaded Case</span>
+          <code>{shortId(investigation.id)}</code>
+          <span className="sim-loaded-name">{investigation.name}</span>
+          <span style={{ flex: 1 }} />
+          <span className="sim-loaded-meta">
+            Top candidate: <strong>{investigation.candidate || 'Unknown'}</strong> &middot; {investigation.confidence}%
+          </span>
+        </div>
       )}
-    >
-      <div className="simulation-brief">
-        <div className="simulation-brief-title">
-          <div>
-            <strong>{investigation.name}</strong>
-            <span>CASE {shortId(investigation.id)} · {meta.actor} · {investigation.confidence}% confidence</span>
+
+      {/* ── Next-Move Predictions ───────────────────────────── */}
+      <div className="sim-predictions-section">
+        <div className="sim-predictions-header">
+          <div className="sim-predictions-label">
+            <Zap size={16} />
+            <span className="eyebrow-label">Next-Move Predictions</span>
           </div>
-          <SeverityPill severity={investigation.severity} />
+          <button type="button" className="secondary-button sim-btn-sm" onClick={onRun} disabled={!canRun}>
+            <RefreshCcw size={13} />
+            Re-Run
+          </button>
         </div>
-        <div className="simulation-metric-grid">
-          <ReadOnlyMetric label="Actor Lead" value={meta.actor} />
-          <ReadOnlyMetric label="Current Stage" value={meta.stage} />
-          <ReadOnlyMetric label="Compromised Hosts" value={String(meta.hostCount)} />
-          <ReadOnlyMetric label="Observed TTPs" value={String(meta.ttpCount)} />
-        </div>
-        <details className="simulation-context-details">
-          <summary>Case context ({meta.hostCount} hosts, {meta.ttpCount} TTPs)</summary>
-          <div className="simulation-context-columns">
-            <div>
-              <span className="simulation-section-label">Assets in scope</span>
-              <div className="ttp-stack inline">
-                {meta.hosts.length ? meta.hosts.map((host) => <code key={host}>{host}</code>) : <code>none extracted</code>}
+
+        {error && <InlineError message={error} />}
+
+        {!predictions.length && !loading && (
+          <EmptyState
+            icon={Play}
+            title="No simulation output loaded"
+            detail="Run the simulation to generate next-step attack predictions from this investigation."
+          />
+        )}
+
+        {loading && <EmptyState icon={Activity} title="Running simulation" />}
+
+        {!!predictions.length && (
+          <div className="sim-prediction-grid">
+            {predictions.map((pred, idx) => (
+              <div className="sim-prediction-card" key={`${pred.technique_id}-${idx}`}>
+                <div className="sim-pred-top">
+                  <div>
+                    <span className="eyebrow-label">Predicted Next TTP</span>
+                    <div className="sim-pred-title">{pred.technique_name}</div>
+                  </div>
+                  <span className={`severity-pill ${probToPill(pred)}`}>{pred.probability || 0}% likelihood</span>
+                </div>
+                <div className="sim-pred-chips">
+                  <span className="ttp-chip">{pred.technique_id}</span>
+                </div>
+                <p className="sim-pred-desc">{truncate(pred.rationale, 180)}</p>
               </div>
-            </div>
-            <div>
-              <span className="simulation-section-label">Observed sequence</span>
-              <div className="ttp-stack inline">
-                {meta.ttps.length ? meta.ttps.slice(0, 14).map((ttp) => <code key={ttp}>{ttp}</code>) : <code>none</code>}
-              </div>
-            </div>
+            ))}
           </div>
-        </details>
-        {simulation?.context_summary && (
-          <p className="simulation-brief-summary">{truncate(simulation.context_summary, 180)}</p>
         )}
       </div>
-    </Panel>
-  );
-}
-
-function ReadOnlyMetric({ label, value }) {
-  return (
-    <div className="simulation-metric">
-      <span>{label}</span>
-      <strong>{value || 'None'}</strong>
     </div>
   );
 }
@@ -3246,29 +3532,29 @@ function MiniAttackMap({ graph, onOpen }) {
   const viewH = Math.max(400, normalized.viewHeight);
 
   const laneColors = [
-    'rgba(59,130,246,0.06)',
+    'rgba(47,63,120,0.06)',
     'rgba(138,91,0,0.05)',
     'rgba(180,35,24,0.06)',
-    'rgba(60,60,60,0.04)',
+    'rgba(16,16,14,0.04)',
   ];
   const laneStroke = [
-    'rgba(59,130,246,0.15)',
+    'rgba(47,63,120,0.15)',
     'rgba(138,91,0,0.12)',
     'rgba(180,35,24,0.15)',
-    'rgba(60,60,60,0.10)',
+    'rgba(16,16,14,0.10)',
   ];
 
   const nodeColor = (node) => {
-    if (node.status === 'crown') return '#6d28d9';
-    if (node.status === 'compromised') return '#b42318';
-    if (node.status === 'warning') return '#8a5b00';
-    if (node.kind === 'user') return '#2f5f68';
+    if (node.status === 'crown') return 'var(--purple)';
+    if (node.status === 'compromised') return 'var(--danger)';
+    if (node.status === 'warning') return 'var(--warning)';
+    if (node.kind === 'user') return 'var(--indigo)';
     return 'var(--text)';
   };
   const nodeFill = (node) => {
-    if (node.status === 'crown') return 'rgba(109,40,217,0.12)';
-    if (node.status === 'compromised') return 'rgba(180,35,24,0.12)';
-    if (node.status === 'warning') return 'rgba(138,91,0,0.10)';
+    if (node.status === 'crown') return 'var(--purple-tint)';
+    if (node.status === 'compromised') return 'var(--danger-tint)';
+    if (node.status === 'warning') return 'var(--warning-tint)';
     return 'var(--bg-elevated)';
   };
 
@@ -3809,11 +4095,12 @@ function graphEdgeScore(edge, nodeMap) {
 
 function graphLaneForNode(node) {
   if (node.kind === 'aggregate') return Number.isFinite(Number(node.metadata?.lane_index)) ? Number(node.metadata.lane_index) : 0;
-  if (node.kind === 'dc') return 3;
-  if (node.node_type === 'host') return node.status === 'compromised' ? 2 : 3;
-  if (node.node_type === 'technique') return 1;
+  if (node.kind === 'dc') return 4;
+  if (node.node_type === 'host') return node.status === 'compromised' ? 3 : 4;
+  if (node.node_type === 'technique') return 2;
+  if (node.node_type === 'evidence') return 1;
   if (node.node_type === 'user' || node.node_type === 'network') return 0;
-  return 2;
+  return 3;
 }
 
 function stableOffset(value, range) {
@@ -3830,6 +4117,18 @@ function edgeClassName(edge) {
   if (type.includes('sequence') || type.includes('exfil') || type.includes('initial')) return `${type} danger-flow`;
   if (type.includes('discovery') || type.includes('observed')) return `${type} observed-flow`;
   return `${type} neutral-flow`;
+}
+
+function graphNodeStyle(node) {
+  const styles = {
+    crown:       { fill: '#fff',    stroke: '#10100e', strokeWidth: 2.6, sub: '#686864', title: '#10100e' },
+    compromised: { fill: '#f7e5e2', stroke: '#b42318', strokeWidth: 1.8, sub: '#7a160f', title: '#10100e' },
+    warning:     { fill: '#f5ecd6', stroke: '#8a5b00', strokeWidth: 1.8, sub: '#6f4900', title: '#10100e' },
+    external:    { fill: '#ecebe3', stroke: '#b42318', strokeWidth: 1.5, sub: '#686864', title: '#10100e', dashed: '4 3' },
+    aggregate:   { fill: '#ecebe3', stroke: '#686864', strokeWidth: 1.2, sub: '#686864', title: '#10100e', dashed: '4 3' },
+    clean:       { fill: '#fff',    stroke: '#10100e', strokeWidth: 1.6, sub: '#686864', title: '#10100e' },
+  };
+  return styles[node.status] || styles.clean;
 }
 
 function edgeCurve(edge, source, target, index) {
