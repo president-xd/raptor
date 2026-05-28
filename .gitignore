@@ -16,6 +16,7 @@ __pycache__/
 commit.sh
 .claude
 .agents
+Design
 
 frontend/node_modules/
 frontend/dist/
