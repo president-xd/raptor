@@ -33,7 +33,7 @@ This supports controlled production deployments with cleaner process isolation. 
 
 - `make validate` passes from a clean checkout.
 - PostgreSQL integration tests pass.
-- Security scan jobs pass: dependency audit, secret scan, filesystem scan, container scan.
+- CI passes: dependency audit, Gitleaks secret scan, and Trivy filesystem and container scans (`.github/workflows/ci.yml`), plus `make security-scan` locally.
 - Backup and restore drill completed for the target environment.
 - Evidence key rotation dry-run completed.
 - Audit hash chain verified on a backup copy.
