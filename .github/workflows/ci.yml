@@ -1,0 +1,210 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock pytest
+      - name: Run offline regression suite
+        run: pytest -q tests/ --ignore=tests/test_postgres_runtime_integration.py
+
+  postgres-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: raptor
+          POSTGRES_USER: raptor
+          POSTGRES_PASSWORD: raptor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U raptor -d raptor"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.lock pytest
+      - name: Run PostgreSQL integration test
+        env:
+          RAPTOR_DB_ENGINE: postgresql
+          RAPTOR_DATABASE_URL: postgresql://raptor:raptor@localhost:5432/raptor
+          RAPTOR_ALLOW_AUTH_DISABLED: "true"
+        run: pytest -q tests/test_postgres_runtime_integration.py
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+  frontend-e2e:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright tests
+        working-directory: frontend
+        run: npm run e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+  compose-validate:
+    name: Compose config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Seed a config-only .env
+        run: cp .env.example .env
+      - name: Validate production compose overlay
+        env:
+          RAPTOR_API_KEY: ci_raptor_api_key_with_enough_entropy
+          RAPTOR_BOOTSTRAP_ADMIN_PASSWORD: ci_bootstrap_admin_password_with_enough_entropy
+          EVIDENCE_ENCRYPTION_KEY: ci_evidence_key_with_enough_entropy_32_bytes
+          NEO4J_PASSWORD: ci_neo4j_password_with_enough_entropy
+          WEAVIATE_API_KEY: ci_weaviate_api_key_with_enough_entropy
+          ELASTIC_PASSWORD: ci_elastic_password_with_enough_entropy
+          REDIS_PASSWORD: ci_redis_password_with_enough_entropy
+          POSTGRES_PASSWORD: ci_postgres_password_with_enough_entropy
+          RAPTOR_FRONTEND_ORIGIN: https://raptor.example.invalid
+          RAPTOR_RATE_LIMIT_BACKEND: redis
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
+          echo "Production compose overlay renders cleanly."
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r backend/requirements.lock --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm audit (frontend)
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+  secret-scan:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  filesystem-scan:
+    name: Filesystem vulnerability scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-dirs: frontend/node_modules
+
+  container-scan:
+    name: Container image scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t raptor-backend:ci -f backend/Dockerfile .
+      - name: Build frontend image
+        run: docker build -t raptor-frontend:ci ./frontend
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: raptor-backend:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: raptor-frontend:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
