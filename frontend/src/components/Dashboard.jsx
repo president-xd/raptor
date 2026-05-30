@@ -4655,7 +4655,7 @@ function buildCleanMarkdown(report) {
   })();
 
   const lines = [];
-  lines.push('# RAPTOR — Forensic Investigation Report');
+  lines.push('# RAPTOR | Forensic Investigation Report');
   lines.push('');
   lines.push(`**Case:** ${report.name || 'Unnamed Investigation'}  `);
   lines.push(`**Investigation ID:** \`${report.investigation_id || '—'}\`  `);
@@ -4823,7 +4823,7 @@ function downloadPdf(report, showToast) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RAPTOR — ${esc(report.name || name)}</title>
+<title>RAPTOR | ${esc(report.name || name)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
   @page{size:A4;margin:16mm 14mm}

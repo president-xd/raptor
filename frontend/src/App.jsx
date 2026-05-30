@@ -22,7 +22,7 @@ class ErrorBoundary extends React.Component {
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           height: '100vh', gap: '12px', fontFamily: 'monospace', color: '#b42318', background: '#10100e',
         }}>
-          <strong style={{ fontSize: '18px' }}>RAPTOR — Render Error</strong>
+          <strong style={{ fontSize: '18px' }}>RAPTOR | Render Error</strong>
           <p style={{ color: '#888', maxWidth: '480px', textAlign: 'center' }}>
             {this.state.error.message || 'An unexpected error occurred.'}
           </p>
