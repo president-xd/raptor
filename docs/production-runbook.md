@@ -24,7 +24,7 @@ Production deployments must provide:
 - `RAPTOR_ACKNOWLEDGE_SQLITE_LIMITS=true` only when this is a deliberate single-node SQLite deployment. Prefer PostgreSQL for production.
 - Backups for `data/raptor.db`, `data/evidence/`, Neo4j, Weaviate, Elasticsearch, and Redis volumes.
 - Prometheus scraping and alerting using `observability/prometheus-rules.yml`.
-- Dependency, secret, filesystem, and container scanning in CI.
+- Dependency, secret, filesystem, and container scanning. These run in the committed GitHub Actions pipeline (`.github/workflows/ci.yml`) and locally via `make security-scan`.
 
 ## Identity And Access
 
@@ -124,7 +124,7 @@ make security-scan
 docker compose -f docker-compose.yml -f docker-compose.prod.yml config
 ```
 
-CI additionally runs PostgreSQL integration, secret scanning, filesystem vulnerability scanning, and container scanning.
+The CI pipeline (`.github/workflows/ci.yml`) additionally runs the PostgreSQL integration test against a live `postgres:16` service, Gitleaks secret scanning, and Trivy filesystem and container image scanning. The release pipeline (`.github/workflows/release.yml`) publishes images to GHCR and signs each digest with Cosign keyless.
 
 Before and after rollout, record runtime schema status and run a lightweight smoke/load probe:
 
