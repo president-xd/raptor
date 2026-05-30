@@ -35,7 +35,7 @@ Weekly:
 
 1. Run `scripts/ops/verify_audit_chain.py` on a backup copy.
 2. Restore the latest backup into an isolated environment.
-3. Review dependency/container scan results.
+3. Review CI dependency-audit and Trivy scan results (`.github/workflows/ci.yml`), or run `make security-scan` locally.
 
 Monthly:
 
