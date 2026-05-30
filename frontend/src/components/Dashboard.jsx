@@ -3437,6 +3437,115 @@ function StandaloneSimulationPage({
   );
 }
 
+function ReportPreviewCard({ report, investigation }) {
+  if (!report && !investigation) {
+    return (
+      <div className="rp-empty">
+        <FileText size={28} style={{ color: 'var(--graphite)', opacity: 0.5 }} />
+        <span>Select an investigation to preview its report</span>
+      </div>
+    );
+  }
+
+  const findings = report?.findings || [];
+  const attribution = report?.attribution || [];
+  const topActor = attribution[0];
+  const eventCount = report?.events_reviewed || report?.event_count || findings.reduce((n, f) => n + (f.event_count || 0), 0) || 0;
+  const riskLevel = (() => {
+    const phases = findings.map((f) => String(f.kill_chain_phase || '').toLowerCase());
+    if (phases.some((p) => p.includes('credential')) && phases.some((p) => p.includes('lateral'))) return 'High';
+    if (phases.some((p) => p.includes('credential') || p.includes('lateral'))) return 'Elevated';
+    return findings.length ? 'Moderate' : 'Informational';
+  })();
+  const riskColor = { High: 'var(--oxblood)', Elevated: 'var(--brass)', Moderate: 'var(--graphite)', Informational: 'var(--forest)' }[riskLevel] || 'var(--graphite)';
+  const name = report?.name || investigation?.name || 'Investigation Report';
+  const sequence = report?.attack_sequence || [];
+
+  if (!report) {
+    return (
+      <div className="rp-loading">
+        <div className="rp-loading-header">
+          <ShieldAlert size={22} />
+          <span className="eyebrow">{name}</span>
+        </div>
+        <div className="rp-loading-body">
+          <RefreshCcw size={16} className="spin" />
+          <span>Loading report data…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rp-card">
+      {/* Header */}
+      <div className="rp-header">
+        <span className="rp-stamp">CONFIDENTIAL</span>
+        <span className="rp-label">FORENSIC REPORT</span>
+      </div>
+      <h2 className="rp-title">{name}</h2>
+      <div className="rp-meta">
+        <div><span className="eyebrow">Case ID</span><strong><code>{shortId(report.investigation_id || '')}</code></strong></div>
+        <div><span className="eyebrow">Severity</span><strong style={{ color: 'var(--brass)' }}>{report.severity || 'Unknown'}</strong></div>
+        {topActor && <div><span className="eyebrow">Attribution</span><strong>{topActor.apt_name} · {toPercent(topActor.confidence_score)}%</strong></div>}
+        <div><span className="eyebrow">Risk</span><strong style={{ color: riskColor }}>{riskLevel}</strong></div>
+      </div>
+
+      {/* Stats row */}
+      <div className="rp-stats">
+        <div className="rp-stat"><span className="rp-stat-val">{eventCount || '—'}</span><span className="rp-stat-lbl">Events</span></div>
+        <div className="rp-stat"><span className="rp-stat-val">{findings.length}</span><span className="rp-stat-lbl">Techniques</span></div>
+        <div className="rp-stat"><span className="rp-stat-val" style={{ color: riskColor }}>{riskLevel}</span><span className="rp-stat-lbl">Risk</span></div>
+        {topActor && <div className="rp-stat"><span className="rp-stat-val">{topActor.apt_name}</span><span className="rp-stat-lbl">{toPercent(topActor.confidence_score)}%</span></div>}
+      </div>
+
+      {/* Executive summary */}
+      {report.narrative_report && (
+        <div className="rp-summary">
+          <span className="eyebrow">Executive Summary</span>
+          <p>{cleanEvidenceText((() => {
+            const match = report.narrative_report.match(/## Executive Summary\s+([\s\S]*?)(?=\n##|\n\|)/);
+            return match ? match[1].replace(/\*\*/g, '').trim().slice(0, 280) + (match[1].length > 280 ? '…' : '') : `RAPTOR validated ${findings.length} ATT&CK techniques across ${eventCount} events.`;
+          })())}</p>
+        </div>
+      )}
+
+      {/* Attack sequence preview */}
+      {sequence.length > 0 && (
+        <div className="rp-seq">
+          <span className="eyebrow">Attack Sequence</span>
+          <div className="rp-seq-chain">
+            {sequence.slice(0, 8).map((tid, i) => (
+              <React.Fragment key={tid}>
+                <code className="rp-seq-chip">{tid}</code>
+                {i < Math.min(7, sequence.length - 1) && <span className="rp-seq-arrow">→</span>}
+              </React.Fragment>
+            ))}
+            {sequence.length > 8 && <span className="rp-seq-more">+{sequence.length - 8} more</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Top findings preview */}
+      {findings.length > 0 && (
+        <div className="rp-findings">
+          <span className="eyebrow">Top Findings</span>
+          <div className="rp-findings-list">
+            {findings.slice(0, 5).map((f) => (
+              <div className="rp-finding-row" key={f.technique_id}>
+                <code>{f.technique_id}</code>
+                <span>{f.technique_name || ''}</span>
+                <span className={`rp-conf rp-conf-${(f.confidence || '').toLowerCase()}`}>{(f.confidence || 'unk').toUpperCase()}</span>
+              </div>
+            ))}
+            {findings.length > 5 && <div className="rp-finding-more">+{findings.length - 5} additional findings</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsPage({ investigations, selectedInvestigation, reportCache = {}, report, onSelect, showToast }) {
   const reportable = investigations.filter((item) => item.statusRaw === 'complete');
 
@@ -3453,72 +3562,52 @@ function ReportsPage({ investigations, selectedInvestigation, reportCache = {}, 
 
   return (
     <div className="page-panel reports-page">
-      <Panel title="Generated Backend Reports" icon={FileText}>
+      <Panel title="Generated Reports" icon={FileText}>
         <div className="report-list">
           {!reportable.length && (
             <EmptyState
               icon={FileText}
-              title="No completed investigations yet"
-              detail="Reports are produced by the backend after an investigation reaches complete."
+              title="No completed investigations"
+              detail="Reports are generated after an investigation reaches complete status."
             />
           )}
           {reportable.map((item) => {
             const itemReport = reportCache[item.id];
+            const isActive = selectedInvestigation?.id === item.id;
             return (
-              <div className={`report-row ${selectedInvestigation?.id === item.id ? 'active' : ''}`} key={item.id}>
+              <div className={`report-row ${isActive ? 'active' : ''}`} key={item.id} onClick={() => onSelect(item.id)}>
                 <div>
                   <strong>{item.name}</strong>
-                  <small>{shortId(item.id)} · {item.confidence}% confidence · completed {item.completedAt || item.date}</small>
+                  <small>{shortId(item.id)} · {item.confidence}% · {item.completedAt || item.date}</small>
                 </div>
-                <button type="button" className="secondary-button" onClick={() => onSelect(item.id)} title="Preview report">
-                  <Eye size={15} />
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => handleDownload(item, 'md')}
-                  disabled={!!itemReport && !itemReport?.narrative_report}
-                  title="Download Markdown"
-                >
-                  <FileDown size={15} />
-                  MD
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => handleDownload(item, 'pdf')}
-                  title="Download PDF"
-                >
-                  <Download size={15} />
-                  PDF
-                </button>
+                <div className="report-row-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={(e) => { e.stopPropagation(); handleDownload(item, 'md'); }}
+                    disabled={!!itemReport && !itemReport?.narrative_report}
+                    title="Download Markdown"
+                  >
+                    <FileDown size={13} />
+                    <span>MD</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={(e) => { e.stopPropagation(); handleDownload(item, 'pdf'); }}
+                    title="Download PDF"
+                  >
+                    <Download size={13} />
+                    <span>PDF</span>
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
       </Panel>
       <Panel title="Report Preview" icon={BookOpen}>
-        <div className="report-preview">
-          <div className="report-cover">
-            <ShieldAlert size={34} />
-            <span>RAPTOR Forensic Report</span>
-            <h2>{report?.name || selectedInvestigation?.name || 'No report selected'}</h2>
-            <small>{report?.timestamp ? formatDate(report.timestamp) : 'Select an investigation to preview'}</small>
-            {selectedInvestigation && (
-              <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <StatusPill status={selectedInvestigation.status} />
-                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{selectedInvestigation.confidence}% confidence</span>
-              </div>
-            )}
-          </div>
-          <div className="report-snippet">
-            {report?.narrative_report ? (
-              <EnterpriseReportView report={report} compact />
-            ) : (
-              <EmptyState icon={FileText} title={selectedInvestigation ? 'Loading report…' : 'Select an investigation'} />
-            )}
-          </div>
-        </div>
+        <ReportPreviewCard report={report} investigation={selectedInvestigation} />
       </Panel>
     </div>
   );

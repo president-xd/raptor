@@ -3696,37 +3696,268 @@ code {
   flex: 1;
 }
 
-.report-preview {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
-  gap: 14px;
+/* ── Report Preview Card (Reports page) ──────────────────────── */
+.rp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 300px;
+  color: var(--graphite);
+  font: 500 12px/1.4 var(--font-mono);
+  text-align: center;
 }
 
-.report-cover {
+.rp-loading {
   display: grid;
-  align-content: center;
-  gap: 10px;
-  min-height: 360px;
+  gap: 0;
   border: 1px solid var(--border);
-  border-radius: var(--r-base);
-  padding: 20px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.rp-loading-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--linen);
+  border-bottom: 1px solid var(--border);
   color: var(--ink);
+}
+.rp-loading-body {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  color: var(--graphite);
+  font: 500 12px/1.4 var(--font-mono);
+}
+
+.rp-card {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 0 1px 3px rgba(16, 16, 14, 0.06);
+}
+
+.rp-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 2px solid var(--ink);
+}
+.rp-stamp {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1.5px solid var(--oxblood);
+  border-radius: 2px;
+  font: 700 8px/1 var(--font-mono);
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--oxblood);
+}
+.rp-label {
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+.rp-title {
+  font: 600 22px/1.1 var(--font-serif);
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  margin: 0;
+  padding: 16px 20px 0;
+}
+
+.rp-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px 18px;
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.rp-meta div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rp-meta .eyebrow {
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+.rp-meta strong {
+  font: 600 11px/1.3 var(--font-mono);
+  color: var(--ink);
+}
+.rp-meta code {
+  font: 500 10px/1.3 var(--font-mono);
+  color: var(--ink);
+  background: transparent;
+  padding: 0;
+}
+
+/* Stats */
+.rp-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  border-bottom: 1px solid var(--border);
   background: var(--linen);
 }
-
-.report-cover h2 {
-  margin: 0;
+.rp-stat {
+  padding: 10px 14px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+.rp-stat:last-child { border-right: none; }
+.rp-stat-val {
+  display: block;
+  font: 700 16px/1 var(--font-mono);
   color: var(--ink);
-  font-size: 26px;
-  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.rp-stat-lbl {
+  display: block;
+  font: 500 7px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  margin-top: 3px;
 }
 
-.report-snippet {
-  color: var(--muted);
+/* Summary */
+.rp-summary {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.rp-summary .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+.rp-summary p {
+  font: 400 12px/1.65 var(--font-sans);
+  color: var(--ink);
+  margin: 0;
 }
 
-.report-snippet h3 {
-  color: var(--text);
+/* Sequence */
+.rp-seq {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.rp-seq .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+.rp-seq-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.rp-seq-chip {
+  display: inline-block;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: 600 9px/1 var(--font-mono);
+  color: var(--oxblood);
+  background: var(--paper);
+}
+.rp-seq-arrow {
+  font: 400 10px/1 var(--font-mono);
+  color: var(--graphite);
+}
+.rp-seq-more {
+  font: 500 9px/1 var(--font-mono);
+  color: var(--graphite);
+  padding-left: 4px;
+}
+
+/* Findings */
+.rp-findings {
+  padding: 14px 20px;
+}
+.rp-findings .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+.rp-findings-list {
+  display: grid;
+  gap: 4px;
+}
+.rp-finding-row {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(16, 16, 14, 0.08);
+  border-radius: 2px;
+  align-items: center;
+}
+.rp-finding-row code {
+  font: 700 10px/1 var(--font-mono);
+  color: var(--oxblood);
+  background: transparent;
+  padding: 0;
+}
+.rp-finding-row span {
+  font: 500 11px/1.3 var(--font-sans);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-conf {
+  font: 700 7px/1 var(--font-mono) !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: 2px;
+  background: var(--linen);
+  color: var(--graphite) !important;
+  white-space: nowrap !important;
+}
+.rp-conf.rp-conf-high   { background: rgba(180, 35, 24, 0.10); color: var(--oxblood) !important; }
+.rp-conf.rp-conf-medium { background: rgba(138, 91, 0, 0.10); color: var(--brass) !important; }
+.rp-conf.rp-conf-low    { background: rgba(20, 108, 67, 0.10); color: var(--forest) !important; }
+.rp-finding-more {
+  font: 500 10px/1.4 var(--font-mono);
+  color: var(--graphite);
+  padding: 4px 10px;
+}
+
+/* Report row improvements */
+.report-row {
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.report-row:hover {
+  background: var(--linen);
+}
+.report-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .settings-grid {
