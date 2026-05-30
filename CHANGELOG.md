@@ -1,5 +1,17 @@
 # RAPTOR Changelog
 
+## [Unreleased]
+
+### Added
+- Added a GitHub Actions CI pipeline (`.github/workflows/ci.yml`): backend tests, a PostgreSQL integration job against a live `postgres:16` service, frontend build, Playwright e2e, production compose validation, dependency audit (pip-audit + npm audit), Gitleaks secret scanning, and Trivy filesystem and container image scans.
+- Added a release pipeline (`.github/workflows/release.yml`) that builds and publishes backend and frontend images to GHCR, scans the published digests with Trivy, and signs them with Cosign keyless (Sigstore / OIDC).
+
+### Changed
+- Rewrote `README.md` for accuracy, including an explicit project-status table, and aligned the operational docs with what the repository actually ships.
+
+### Removed
+- Removed stale build artifacts: a leftover test database, an empty `backend/tests` directory, and stray `__pycache__` directories.
+
 ## [1.4.0] - 2026-04-29
 
 ### Added
@@ -7,7 +19,7 @@
 - Added PostgreSQL runtime metadata support with adapter translation, worker entrypoint, and a production compose overlay that provisions postgres and a worker service.
 - Added CSRF trusted origin checks for session-authenticated mutations, security headers, and request ID tracing.
 - Added AES-256-GCM evidence encryption with key identifiers and a decrypt helper.
-- Added CI workflow with backend tests, frontend build plus Playwright e2e, compose validation, and a PostgreSQL integration test.
+- Added `Makefile` quality gates (`make validate`, `make security-scan`, `make compose-config`) covering backend tests, frontend build, dependency audit, and production compose validation, plus a PostgreSQL integration test.
 - Added Playwright configuration and dashboard e2e coverage.
 
 ### Changed
