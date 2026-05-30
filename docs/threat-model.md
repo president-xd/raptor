@@ -29,8 +29,8 @@
 | Audit tampering | Append-only triggers plus hash chaining |
 | Worker loss | Durable `job_queue`, retry state, stale-lock recovery |
 | Infrastructure exposure | Localhost-bound compose defaults, production overlay removes infrastructure ports |
-| Vulnerable dependencies or images | CI dependency audit, npm audit, Trivy filesystem/container scans |
-| Secret leakage in repository | Gitleaks secret scan in CI and local artifact ignores |
+| Vulnerable dependencies or images | CI dependency audit (pip-audit + npm audit), Trivy filesystem and container image scans, plus `make security-scan` locally |
+| Secret leakage in repository | `.gitignore` excludes `.env`, databases, evidence, and build artifacts; CI runs a Gitleaks secret scan over full history |
 | Retention overrun | Evidence retention metadata plus `scripts/ops/cleanup_expired_evidence.py` |
 | Backup tampering | Backup checksums plus audit-chain verification before export |
 | Forged SSO headers | SSO headers are accepted only from `RAPTOR_TRUSTED_PROXY_CIDRS`; ingress must strip client-supplied identity headers |
