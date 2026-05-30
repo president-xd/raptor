@@ -721,7 +721,4 @@ Makefile                    Local quality gates and ops shortcuts
 
 ## License
 
-This repository does **not** currently include a license file. Without an
-explicit license, default copyright applies and no usage, modification, or
-redistribution rights are granted. Add a `LICENSE` file before distributing or
-open-sourcing the project, and update this section to match.
+This repository is under Apache License.
