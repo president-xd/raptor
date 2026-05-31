@@ -59,6 +59,8 @@ _ALLOWED_MIGRATION_TABLES: frozenset[str] = frozenset({
 
 # Serialises audit-log writes within a single process so the hash chain never forks
 _audit_log_lock = threading.Lock()
+# Cross-process serialisation key for the audit chain (PostgreSQL advisory lock).
+_AUDIT_ADVISORY_LOCK_KEY = 0x5241_5054  # "RAPT"
 
 
 # ── Row / Result types ────────────────────────────────────────────────────────
@@ -634,6 +636,14 @@ def audit_log(
     with _audit_log_lock:
         conn = db_connect()
         try:
+            # Serialise the read-prev + insert across processes as well as threads,
+            # so a concurrent API/worker cannot read the same prev_hash and fork
+            # the chain. PostgreSQL: transaction-scoped advisory lock (released on
+            # commit). SQLite: acquire the write lock before reading.
+            if _config.RAPTOR_DB_ENGINE == "postgresql":
+                conn.execute("SELECT pg_advisory_xact_lock(?)", (_AUDIT_ADVISORY_LOCK_KEY,))
+            else:
+                conn.execute("BEGIN IMMEDIATE")
             prev = conn.execute(
                 "SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1"
             ).fetchone()
