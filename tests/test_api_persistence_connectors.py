@@ -593,7 +593,7 @@ class ApiPersistenceConnectorTests(unittest.TestCase):
             RAPTOR_RATE_LIMIT_BACKEND="memory",
             RAPTOR_SESSION_COOKIE_SECURE=True,
             RAPTOR_BOOTSTRAP_ADMIN_PASSWORD="production-admin-password",
-            EVIDENCE_ENCRYPTION_KEY="production-evidence-key",
+            EVIDENCE_ENCRYPTION_KEY="production-evidence-key-with-32-plus-bytes-of-entropy",
             NEO4J_PASSWORD="production-neo4j-password",
             CORS_ALLOW_ORIGINS=["https://raptor.example.com"],
         )
