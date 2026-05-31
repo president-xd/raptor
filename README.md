@@ -42,20 +42,21 @@ single workflow, running entirely on your own infrastructure.
 
 1. **Ingest** raw logs (JSON, CEF, XML, or plaintext), or pull events directly
    from Elasticsearch, and normalise them into a common event model.
+   Persistent raw evidence storage retains the original upload, encrypted, with the case.
 2. **Detect** technique activity using Sigma-style rules and, when enabled, a
    hybrid retrieval (RAG) step over MITRE ATT&CK and APT reference material.
 3. **Graph** the attack: hosts, users, processes, and techniques are persisted
    into Neo4j (with an in-memory fallback when Neo4j is unavailable).
 4. **Attribute** activity to known APT groups using Jaccard TTP overlap with
    explicit confidence gating (HIGH / MEDIUM / LOW / UNKNOWN).
-5. **Simulate** likely next adversary steps from ATT&CK playbook context —
-   blocked automatically at LOW / UNKNOWN confidence.
+5. **Simulate** likely next adversary steps from ATT&CK playbook context, with
+   confidence-aware weighting that de-prioritises LOW / UNKNOWN attribution.
 6. **Report** findings as a structured forensic narrative in the browser, with
    Markdown and printable PDF export.
 
 The analyst console also includes a natural-language graph query interface, an
-APT profile library, a MITRE ATT&CK matrix overlay, and a CISA Known Exploited
-Vulnerabilities feed view.
+APT profile library, and a MITRE ATT&CK matrix overlay. It surfaces the
+CISA Known Exploited Vulnerabilities connector with an in-app feed view.
 
 ---
 
@@ -147,7 +148,7 @@ config
 | `routers/` | `auth`, `investigations`, `analysis`, `intelligence`, `admin`, `health` |
 | `attribution/` | APT profiles, ATT&CK catalog, Jaccard scoring, confidence, STIX validation |
 | `graph/` | Neo4j client, graph builder, provenance, queries |
-| `ingestion/` | Log parser, normaliser, Sigma matcher, mock generator |
+| `ingestion/` | Log parser, normaliser, Sigma matcher |
 | `rag/` | Embeddings, indexer, retriever, reranker, pipeline |
 | `report/` | Forensic report generator |
 | `nlq/` | Natural-language graph query engine |
@@ -169,8 +170,9 @@ Each investigation runs six sequential phases in the worker
 | 5. Attribution | Jaccard TTP scoring across APT profiles with confidence gating |
 | 6. Report | Generate the analyst-facing forensic narrative |
 
-Simulation is a separate analyst action and is blocked at LOW / UNKNOWN
-attribution confidence.
+Simulation is a separate analyst action. Predictions are confidence-aware:
+candidate next techniques are down-weighted when attribution confidence is
+LOW / UNKNOWN.
 
 ---
 
@@ -242,7 +244,8 @@ explicitly exempt.
 
 ### Audit Trail
 
-Every security-relevant action appends to an append-only `audit_log` table:
+Append-only SQLite audit logging records every security-relevant action in the
+`audit_log` table:
 
 - A database trigger blocks `UPDATE` and `DELETE` on the table.
 - Each entry carries a SHA-256 hash of prior content (hash chain), making
