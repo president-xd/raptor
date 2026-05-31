@@ -250,11 +250,28 @@ def _graph_summary_from_record(record: dict, findings: list[Finding]) -> dict:
         metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
         if metadata.get("compromised") or node.get("compromised"):
             compromised += 1
+
+    def _labels(kind: str) -> list[str]:
+        out: list[str] = []
+        for node in nodes:
+            node_type = str(node.get("node_type") or node.get("kind") or "").lower()
+            if node_type != kind:
+                continue
+            label = str(node.get("label") or node.get("id") or "").split("\n")[0].strip()
+            if label and label not in out:
+                out.append(label)
+        return out[:12]
+
     return {
         "total_events": int(record.get("event_count") or 0),
         "unique_hosts": len(host_nodes) or _host_count_from_findings(findings),
         "hosts_compromised": compromised,
         "campaign_duration_hours": 0.0,
+        # Scope derived from persisted graph nodes so legacy report upgrades keep
+        # populating these fields after evidence summaries stopped carrying JSON.
+        "affected_hosts": _labels("host"),
+        "observed_users": _labels("user"),
+        "observed_processes": _labels("process"),
     }
 
 
