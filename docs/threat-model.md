@@ -26,7 +26,8 @@
 | Evidence disclosure | AES-256-GCM evidence encryption, retention metadata, runtime artifact ignores, production backup controls |
 | Prompt or telemetry leakage | External LLM disabled by default, telemetry redaction before prompts |
 | Generated graph-query abuse | Allowlisted deterministic graph queries, regex sanitizer retained only as defense-in-depth utility |
-| Audit tampering | Append-only triggers plus hash chaining |
+| Audit tampering | Append-only triggers plus hash chaining; chain appends are serialised across processes (SQLite write lock / PostgreSQL advisory lock) so concurrent API and worker writers cannot fork the chain |
+| Cross-tenant administration | User create/read/update/delete is tenant-scoped for ordinary admins; only the `service` principal manages users across tenants. Password resets and disables revoke the target's active sessions |
 | Worker loss | Durable `job_queue`, retry state, stale-lock recovery |
 | Infrastructure exposure | Localhost-bound compose defaults, production overlay removes infrastructure ports |
 | Vulnerable dependencies or images | CI dependency audit (pip-audit + npm audit), Trivy filesystem and container image scans, plus `make security-scan` locally |
