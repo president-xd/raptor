@@ -11,8 +11,19 @@
 - CI now runs `pip check` to verify installed dependency consistency.
 - Documentation now describes simulation as confidence-aware (predictions de-prioritised at LOW/UNKNOWN attribution) instead of hard-blocked, matching actual behaviour.
 
+### Security
+- Tenant-scoped user management: ordinary `admin` accounts can now only create, read, update, or delete users within their own tenant; only the `service` principal manages users across all tenants. Closes a cross-tenant account-takeover gap.
+- Password resets and account disables now revoke the target user's active sessions.
+- Audit-chain appends are serialised across processes (SQLite `BEGIN IMMEDIATE` / PostgreSQL transaction-scoped advisory lock), preventing a forked hash chain when separate API and worker processes write concurrently.
+- `/api/v1/metrics` now requires the `admin` role (was `viewer`), matching the documented contract.
+- Constant-time authentication: the unknown/disabled-user path now performs a dummy PBKDF2 to remove a username-enumeration timing oracle.
+- Production startup now rejects a `CORS_ALLOW_ORIGINS=*` + credentials combination and a weak `EVIDENCE_ENCRYPTION_KEY`.
+- `LocalStorage.write` now rejects keys that escape the evidence base directory (defense in depth).
+- Redis rate-limit keys always assert a TTL with `EXPIRE ... NX`, so a lost `EXPIRE` after a crash can no longer wedge a client indefinitely.
+
 ### Fixed
 - Fixed a failing report test that still asserted the pre-redesign report header, which left the offline suite red.
+- The report-view upgrade path again populates affected hosts/users/processes (derived from persisted graph nodes) after evidence summaries stopped carrying raw JSON.
 - Stopped embedding raw log content in deterministic evidence summaries, which previously leaked raw JSON into on-screen reports and Markdown/PDF exports.
 - Report scope (affected hosts, observed users, observed processes) is now derived from structured event data instead of fragile regex scraping of evidence text, so those fields populate reliably.
 - Wired the previously inert temporal-sequence signal into attribution confidence scoring (the `+0.10` bonus now applies when the observed technique order progresses through the ATT&CK kill chain).
