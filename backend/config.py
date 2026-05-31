@@ -286,6 +286,25 @@ def _is_placeholder(value: str) -> bool:
     return not lowered or lowered.startswith("change_me") or "placeholder" in lowered
 
 
+def _evidence_key_is_strong(value: str) -> bool:
+    """Accept a base64 32-byte KEK (base64:... or raw urlsafe-b64) or >=32 chars."""
+    import base64 as _b64
+
+    v = str(value or "").strip()
+    if v.startswith("base64:"):
+        try:
+            return len(_b64.b64decode(v.split(":", 1)[1])) >= 32
+        except Exception:
+            return False
+    try:
+        padded = v + ("=" * (-len(v) % 4))
+        if len(_b64.urlsafe_b64decode(padded.encode("ascii"))) >= 32:
+            return True
+    except Exception:
+        pass
+    return len(v) >= 32
+
+
 def validate_startup_config() -> None:
     """Fail fast when production mode is requested with unsafe lab defaults."""
     if RAPTOR_PROCESS_ROLE not in {"api", "worker", "all"}:
@@ -318,10 +337,20 @@ def validate_startup_config() -> None:
         failures.append("RAPTOR_BOOTSTRAP_ADMIN_PASSWORD must be set to a non-placeholder secret")
     if _is_placeholder(EVIDENCE_ENCRYPTION_KEY):
         failures.append("EVIDENCE_ENCRYPTION_KEY must be set to a non-placeholder 32-byte/base64 key")
+    elif not _evidence_key_is_strong(EVIDENCE_ENCRYPTION_KEY):
+        failures.append(
+            "EVIDENCE_ENCRYPTION_KEY is too weak: use a 'base64:'-prefixed 32-byte key "
+            "or at least 32 characters of entropy"
+        )
     if _is_placeholder(NEO4J_PASSWORD):
         failures.append("NEO4J_PASSWORD must be set to a non-placeholder secret")
     if "localhost" in ",".join(CORS_ALLOW_ORIGINS) or "127.0.0.1" in ",".join(CORS_ALLOW_ORIGINS):
         failures.append("CORS_ALLOW_ORIGINS must be set to production frontend origins")
+    if CORS_ALLOW_CREDENTIALS and "*" in {o.strip() for o in CORS_ALLOW_ORIGINS}:
+        failures.append(
+            "CORS_ALLOW_ORIGINS must not be '*' when CORS_ALLOW_CREDENTIALS is true "
+            "(it reflects the caller's origin with credentials)"
+        )
     if RAPTOR_PROCESS_ROLE == "all":
         failures.append("RAPTOR_PROCESS_ROLE=all is for local development; use separate api and worker processes")
     if RAPTOR_RATE_LIMIT_BACKEND != "redis":
