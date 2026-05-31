@@ -500,7 +500,9 @@ All endpoints are under `/api/v1` and require authentication unless noted.
 | `service` | Full access (API-key principal) |
 
 RBAC is enforced at every endpoint. Investigations are scoped by `tenant_id`;
-analysts see only their own tenant's cases.
+analysts see only their own tenant's cases. User management is tenant-scoped for
+ordinary `admin` accounts — only the `service` principal administers users across
+all tenants.
 
 ---
 
