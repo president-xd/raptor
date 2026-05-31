@@ -113,6 +113,12 @@ def _make_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+# A fixed valid hash used to equalise timing on the unknown-user path so that a
+# missing/disabled account does not respond faster than a real one (which would
+# leak which usernames exist). Computed once at import.
+_DUMMY_PASSWORD_HASH = _password_hash("raptor-constant-time-equaliser")
+
+
 # ── Principal helpers ─────────────────────────────────────────────────────────
 
 def _principal(
@@ -239,6 +245,21 @@ def revoke_session(token: str) -> None:
         conn.close()
 
 
+def revoke_sessions_for_user(user_id: str) -> None:
+    """Revoke all active browser sessions for a user (e.g. after a password reset)."""
+    if not user_id:
+        return
+    conn = db_connect()
+    try:
+        conn.execute(
+            "UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND (revoked_at IS NULL OR revoked_at = '')",
+            (_utcnow(), user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # ── User authentication ───────────────────────────────────────────────────────
 
 def authenticate_user(username: str, password: str) -> dict:
@@ -252,6 +273,9 @@ def authenticate_user(username: str, password: str) -> dict:
         now = time.time()
 
         if not row or row["disabled"]:
+            # Run a dummy verification so the unknown/disabled-user path costs the
+            # same as a real PBKDF2 check (prevents username enumeration by timing).
+            _verify_password(password, _DUMMY_PASSWORD_HASH)
             metrics_store.inc_auth_failures()
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
@@ -521,8 +545,10 @@ def _redis_rate_limit_redis(
         current = 0
         if response.startswith(b":"):
             current = int(response[1:].split(b"\r\n", 1)[0])
-        if current == 1:
-            _redis_send_command("EXPIRE", redis_key, str(max(int(window), 1)))
+        # Assert the TTL with NX on every hit: it is set when absent (first hit, or
+        # a prior INCR whose EXPIRE was lost to a crash) and left untouched
+        # otherwise, preserving fixed-window semantics without a leak-forever key.
+        _redis_send_command("EXPIRE", redis_key, str(max(int(window), 1)), "NX")
         if current > limit:
             raise HTTPException(
                 status_code=429, detail="Rate limit exceeded; retry later"
