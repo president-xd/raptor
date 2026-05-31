@@ -217,6 +217,18 @@ def _name_for_technique(technique_id: str, fallback: str = "") -> str:
     return fallback or technique_id
 
 
+def _evidence_host(event: RaptorEvent) -> str:
+    """Best-effort host label for an event, preferring the structured fields."""
+    return (getattr(event, "source_host", "") or getattr(event, "dest_host", "") or "").strip()
+
+
+def _clean_evidence_summary(event: RaptorEvent) -> str:
+    """A clean, analyst-readable evidence sentence — never raw log text."""
+    host = _evidence_host(event)
+    location = f" on host {host}" if host else ""
+    return f"Matched local detection signatures in {event.event_type} telemetry{location}."
+
+
 def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -> AnalysisResult:
     """Create a deterministic analysis from normalized events and Sigma matches."""
     try:
@@ -236,6 +248,9 @@ def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -
             tactics = _tactics_for_technique(technique_id)
             finding = findings_by_tid.get(technique_id)
             if not finding:
+                # Evidence text is a clean sentence built from structured event
+                # fields. Raw log content is never concatenated here — it caused
+                # raw JSON to leak into downstream reports and exports.
                 findings_by_tid[technique_id] = Finding(
                     event_ids=[],
                     technique_id=technique_id,
@@ -243,14 +258,12 @@ def build_sigma_fallback_analysis(events: List[RaptorEvent], reason: str = "") -
                     tactics=tactics,
                     kill_chain_phase=tactics[0] if tactics else _phase_for_technique(technique_id),
                     confidence="high" if event.ioc_score >= 0.5 else "medium",
-                    evidence_summary=f"Matched local detection signatures in {event.event_type} telemetry.",
+                    evidence_summary=_clean_evidence_summary(event),
                     apt_indicators=[],
                 )
                 finding = findings_by_tid[technique_id]
 
             finding.event_ids.append(event.event_id)
-            if event.raw and len(finding.evidence_summary) < 220:
-                finding.evidence_summary = f"{finding.evidence_summary} Example: {event.raw[:140]}"
 
     anomalies = []
     if reason:
