@@ -131,9 +131,9 @@ def format_attribution_summary(results: List[AttributionResult]) -> str:
         )
         if r.penalties_applied:
             for p in r.penalties_applied:
-                lines.append(f"    ⚠️ {p}")
+                lines.append(f"    [penalty] {p}")
         if r.bonuses_applied:
             for b in r.bonuses_applied:
-                lines.append(f"    ✅ {b}")
+                lines.append(f"    [bonus] {b}")
 
     return "\n".join(lines)
