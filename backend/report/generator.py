@@ -110,9 +110,11 @@ def build_enterprise_report(
     top = attribution[0] if attribution else None
     findings = analysis.findings or []
     risk = _risk_label(findings)
-    hosts = _unique_extracted("host", findings)
-    users = _unique_extracted("user", findings)
-    processes = _unique_extracted("process", findings)
+    # Prefer structured scope derived from event data (graph_summary); fall back
+    # to legacy evidence-text extraction only when those lists are absent.
+    hosts = graph_summary.get("affected_hosts") or _unique_extracted("host", findings)
+    users = graph_summary.get("observed_users") or _unique_extracted("user", findings)
+    processes = graph_summary.get("observed_processes") or _unique_extracted("process", findings)
     attack_sequence = analysis.attack_sequence or [f.technique_id for f in findings if f.technique_id]
     attack_sequence = _dedupe(attack_sequence)
 
