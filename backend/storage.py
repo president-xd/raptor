@@ -34,7 +34,12 @@ class LocalStorage(StorageBackend):
         self._base = Path(base_dir)
 
     def write(self, relative_key: str, content: bytes) -> str:
-        full = self._base / relative_key
+        base = self._base.resolve()
+        full = (self._base / relative_key).resolve()
+        # Defense in depth: never let a key escape the evidence base directory,
+        # even if a future caller forgets to sanitise it.
+        if full != base and base not in full.parents:
+            raise ValueError("evidence key escapes the storage base directory")
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_bytes(content)
         return str(full)
