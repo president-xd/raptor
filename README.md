@@ -73,7 +73,7 @@ the document can be read at face value.
 | External LLM calls | Optional, **disabled by default** |
 | Local quality gates (`make validate`, `make security-scan`) | Implemented via `Makefile` |
 | GitHub Actions CI/CD (tests, e2e, audits, Gitleaks, Trivy, Cosign signing) | Implemented (`.github/workflows/ci.yml`, `release.yml`) |
-| License file | **Not included** — see [License](#license) |
+| License file | Implemented |
 | Database migration tooling | Not included — schema is managed at startup |
 
 By default RAPTOR runs on SQLite and keeps evidence on the local filesystem,
