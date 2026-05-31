@@ -55,6 +55,77 @@ WORKER_ID: str = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
 
+_EVENT_USER_KEYS = ("user", "username", "User", "account", "SubjectUserName", "TargetUserName")
+_EVENT_PROCESS_KEYS = ("process", "process_name", "ProcessName", "Image", "NewProcessName", "image")
+
+
+def _extract_case_scope(events) -> tuple[list[str], list[str], list[str]]:
+    """Derive affected hosts, users, and processes from structured event data.
+
+    Hosts come from the structured source/dest fields; users and processes are a
+    best-effort parse of JSON event bodies. This replaces fragile regex scraping
+    of free-text evidence summaries in the report generator.
+    """
+    hosts: list[str] = []
+    users: list[str] = []
+    processes: list[str] = []
+
+    def _add(bucket: list[str], value) -> None:
+        text = str(value or "").strip()
+        if text and text not in bucket:
+            bucket.append(text)
+
+    for event in events:
+        _add(hosts, getattr(event, "source_host", ""))
+        _add(hosts, getattr(event, "dest_host", ""))
+        raw = getattr(event, "raw", "") or ""
+        if not raw.strip().startswith("{"):
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for key in _EVENT_USER_KEYS:
+            if data.get(key):
+                _add(users, data[key])
+                break
+        for key in _EVENT_PROCESS_KEYS:
+            if data.get(key):
+                _add(processes, data[key])
+                break
+
+    return hosts, users, processes
+
+
+def _temporal_sequence_match(attack_sequence) -> bool:
+    """True when the observed technique order largely progresses through the
+    ATT&CK kill chain (a conservative signal for the attribution temporal bonus)."""
+    try:
+        from attribution.attack_catalog import (
+            TACTIC_ORDER,
+            get_technique_metadata,
+            normalize_tactic,
+        )
+    except Exception:
+        return False
+
+    indices: list[int] = []
+    for tid in attack_sequence or []:
+        metadata = get_technique_metadata(tid) or {}
+        phase = normalize_tactic(
+            metadata.get("kill_chain_phase") or (metadata.get("tactics") or [""])[0]
+        )
+        if phase in TACTIC_ORDER:
+            indices.append(TACTIC_ORDER.index(phase))
+
+    if len(indices) < 3:
+        return False
+    increases = sum(1 for a, b in zip(indices, indices[1:]) if b > a)
+    decreases = sum(1 for a, b in zip(indices, indices[1:]) if b < a)
+    return increases >= 2 and increases > decreases
+
 
 # ── Investigation creation helpers ────────────────────────────────────────────
 
@@ -411,6 +482,7 @@ def run_investigation(
             observed_ttps=observed_ttps,
             apt_profiles=apt_profiles,
             campaign_duration_hours=campaign_hours,
+            temporal_sequence_match=_temporal_sequence_match(analysis.attack_sequence),
         )
         attribution_json = json.dumps([a.model_dump() for a in attribution_results])
         logger.info(
@@ -425,6 +497,7 @@ def run_investigation(
         )
         from report.generator import generate_report
 
+        affected_hosts, observed_users, observed_processes = _extract_case_scope(events)
         graph_summary = {
             "hosts_compromised": sum(
                 1
@@ -436,6 +509,9 @@ def run_investigation(
             "total_events": len(events),
             "unique_hosts": len(set(e.source_host for e in events if e.source_host)),
             "campaign_duration_hours": campaign_hours,
+            "affected_hosts": affected_hosts[:12],
+            "observed_users": observed_users[:12],
+            "observed_processes": observed_processes[:12],
         }
         narrative = generate_report(
             analysis,
