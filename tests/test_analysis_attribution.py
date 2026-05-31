@@ -157,10 +157,10 @@ class AttributionAndAnalysisTests(unittest.TestCase):
         finally:
             generator.call_llm = original_call_llm
 
-        self.assertIn("# RAPTOR Investigation Report", report)
+        self.assertIn("# Enterprise Forensic Investigation Report", report)
         self.assertIn("APT Alpha", report)
         self.assertIn("T1059.001", report)
-        self.assertIn("deterministic fallback", report)
+        self.assertIn("Deterministic report engine", report)
 
 
 if __name__ == "__main__":
