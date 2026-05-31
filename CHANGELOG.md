@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-31
+
 ### Added
 - Added a GitHub Actions CI pipeline (`.github/workflows/ci.yml`): backend tests, a PostgreSQL integration job against a live `postgres:16` service, frontend build, Playwright e2e, production compose validation, dependency audit (pip-audit + npm audit), Gitleaks secret scanning, and Trivy filesystem and container image scans.
 - Added a release pipeline (`.github/workflows/release.yml`) that builds and publishes backend and frontend images to GHCR, scans the published digests with Trivy, and signs them with Cosign keyless (Sigstore / OIDC).
