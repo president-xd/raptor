@@ -23,6 +23,7 @@ from auth_core import (
     audit_log,
     ensure_investigation_access,
     require_role,
+    revoke_sessions_for_user,
 )
 from database import (
     _utcnow,
@@ -77,8 +78,8 @@ async def get_audit_log(
 
 @router.get("/api/v1/metrics")
 async def metrics(request: Request) -> Response:
-    """Expose Prometheus-format operational counters."""
-    require_role(request, "viewer")
+    """Expose Prometheus-format operational counters (admin-only)."""
+    require_role(request, "admin")
     text, content_type = get_metrics_text()
     return Response(text, media_type=content_type)
 
@@ -102,6 +103,19 @@ async def get_schema_status(request: Request) -> SchemaStatusResponse:
 
 # ── User management ───────────────────────────────────────────────────────────
 
+def _is_global_admin(principal: dict) -> bool:
+    """Service-role principals administer all tenants; plain admins are tenant-scoped."""
+    return "service" in principal.get("roles", [])
+
+
+def _assert_user_in_scope(principal: dict, row: dict) -> None:
+    """Hide users outside the caller's tenant (unless the caller is a global admin)."""
+    if _is_global_admin(principal):
+        return
+    if str(row.get("tenant_id") or "default") != principal.get("tenant_id", "default"):
+        raise HTTPException(status_code=404, detail="User not found")
+
+
 @router.get("/api/v1/users", response_model=UserListResponse)
 async def list_all_users(request: Request) -> UserListResponse:
     """List all users in the caller's tenant (or all tenants for global admins)."""
@@ -122,7 +136,12 @@ async def list_all_users(request: Request) -> UserListResponse:
 @router.post("/api/v1/users", response_model=UserResponse, status_code=201)
 async def create_user(request: Request, payload: UserCreateRequest) -> UserResponse:
     """Create a new local user account."""
-    require_role(request, "admin")
+    principal = require_role(request, "admin")
+    # A tenant-scoped admin can only create users inside their own tenant.
+    target_tenant = (
+        payload.tenant_id if _is_global_admin(principal)
+        else principal.get("tenant_id", "default")
+    )
     user_id = str(uuid.uuid4())
     conn = db_connect()
     try:
@@ -146,7 +165,7 @@ async def create_user(request: Request, payload: UserCreateRequest) -> UserRespo
                 payload.username,
                 _password_hash(payload.password),
                 json.dumps(roles),
-                payload.tenant_id,
+                target_tenant,
                 _utcnow(),
             ),
         )
@@ -158,7 +177,7 @@ async def create_user(request: Request, payload: UserCreateRequest) -> UserRespo
         request,
         "user.created",
         None,
-        {"username": payload.username, "roles": roles, "tenant_id": payload.tenant_id},
+        {"username": payload.username, "roles": roles, "tenant_id": target_tenant},
     )
     row = get_user_by_id(user_id)
     return _user_row_to_response(row)  # type: ignore[arg-type]
@@ -167,10 +186,11 @@ async def create_user(request: Request, payload: UserCreateRequest) -> UserRespo
 @router.get("/api/v1/users/{user_id}", response_model=UserResponse)
 async def get_user(request: Request, user_id: str) -> UserResponse:
     """Fetch a single user by ID."""
-    require_role(request, "admin")
+    principal = require_role(request, "admin")
     row = get_user_by_id(user_id)
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    _assert_user_in_scope(principal, row)
     return _user_row_to_response(row)
 
 
@@ -179,10 +199,11 @@ async def update_user(
     request: Request, user_id: str, payload: UserUpdateRequest
 ) -> UserResponse:
     """Update password, roles, or disabled state for a user."""
-    require_role(request, "admin")
+    principal = require_role(request, "admin")
     row = get_user_by_id(user_id)
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    _assert_user_in_scope(principal, row)
 
     updates: dict = {}
     if payload.password is not None:
@@ -194,7 +215,8 @@ async def update_user(
         )
     if payload.disabled is not None:
         updates["disabled"] = 1 if payload.disabled else 0
-    if payload.tenant_id is not None:
+    # Only a global (service) admin may move a user between tenants.
+    if payload.tenant_id is not None and _is_global_admin(principal):
         updates["tenant_id"] = payload.tenant_id
 
     if updates:
@@ -208,6 +230,9 @@ async def update_user(
             conn.commit()
         finally:
             conn.close()
+        # A password reset must invalidate any sessions an attacker may hold.
+        if "password_hash" in updates:
+            revoke_sessions_for_user(user_id)
 
     audit_log(
         request,
@@ -221,16 +246,18 @@ async def update_user(
 @router.delete("/api/v1/users/{user_id}", status_code=204)
 async def delete_user(request: Request, user_id: str) -> None:
     """Disable a user account (soft delete — accounts are never hard-deleted)."""
-    require_role(request, "admin")
+    principal = require_role(request, "admin")
     row = get_user_by_id(user_id)
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    _assert_user_in_scope(principal, row)
     conn = db_connect()
     try:
         conn.execute("UPDATE users SET disabled = 1 WHERE id = ?", (user_id,))
         conn.commit()
     finally:
         conn.close()
+    revoke_sessions_for_user(user_id)
     audit_log(request, "user.disabled", None, {"user_id": user_id})
 
 
