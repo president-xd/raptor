@@ -2883,6 +2883,44 @@ function ActorModal({ actor, onClose, loading, investigations }) {
       }));
   }, [actor, investigations]);
 
+  const openInMitre = useCallback(() => {
+    const rawId =
+      actor.attack_id || actor.mitre_id || actor.external_id ||
+      (typeof actor.id === 'string' ? actor.id : '');
+    const attackId = /^G\d{4}$/.test(rawId || '') ? rawId : '';
+    const url = attackId
+      ? `https://attack.mitre.org/groups/${attackId}/`
+      : 'https://attack.mitre.org/groups/';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, [actor]);
+
+  const exportProfile = useCallback(() => {
+    const profile = {
+      name: actor.name,
+      aliases: actor.aliases || [],
+      nation_state: actor.nation_state || null,
+      origin,
+      first_seen: firstSeen || null,
+      target_sectors: actor.target_sectors || [],
+      technique_count: actor.technique_count || (actor.techniques || []).length,
+      techniques: actor.techniques || [],
+      description: actor.description || '',
+      recent_cases: recentCases,
+      exported_at: new Date().toISOString(),
+      source: 'RAPTOR — local STIX corpus',
+    };
+    const slug = (actor.name || 'profile').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'profile';
+    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `raptor-actor-${slug}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, [actor, origin, firstSeen, recentCases]);
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <div className="actor-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
@@ -2929,12 +2967,12 @@ function ActorModal({ actor, onClose, loading, investigations }) {
           </div>
 
           <div className="modal-section">
-            <span>Sample TTPs in Corpus</span>
+            <span>Known TTPs in Corpus{(actor.techniques || []).length ? ` (${(actor.techniques || []).length})` : ''}</span>
             {loading ? (
               <p>Loading techniques...</p>
             ) : (actor.techniques || []).length ? (
               <div className="ttp-chip-row">
-                {(actor.techniques || []).slice(0, 8).map((ttp) => <code key={ttp} className="ttp-chip">{ttp}</code>)}
+                {(actor.techniques || []).map((ttp) => <code key={ttp} className="ttp-chip">{ttp}</code>)}
               </div>
             ) : (
               <p>No techniques returned for this actor.</p>
@@ -2965,11 +3003,11 @@ function ActorModal({ actor, onClose, loading, investigations }) {
           </div>
 
           <div className="modal-actions">
-            <button type="button" className="secondary-button">
+            <button type="button" className="secondary-button" onClick={openInMitre}>
               <ExternalLink size={13} />
               Open in MITRE ATT&CK
             </button>
-            <button type="button" className="primary-button">
+            <button type="button" className="primary-button" onClick={exportProfile}>
               <Download size={13} />
               Export Profile
             </button>

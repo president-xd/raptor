@@ -90,12 +90,21 @@ def load_apt_profiles(force_reload: bool = False, ttl_seconds: int = _DEFAULT_PR
                 nation_state_source = "description_keyword"
                 break
 
+        # MITRE ATT&CK group id (e.g. "G0007"), used for deep links to the
+        # canonical group page on attack.mitre.org.
+        attack_id = ""
+        for ref in group.get("external_references", []):
+            if ref.get("source_name") == "mitre-attack":
+                attack_id = ref.get("external_id", "") or ""
+                break
+
         group_id_to_name[group["id"]] = name
         group_techniques[name] = set()
         group_info[name] = {
             "aliases": aliases,
             "nation_state": nation_state,
             "nation_state_source": nation_state_source,
+            "attack_id": attack_id,
             "description": group.get("description", "")[:500],
         }
 
@@ -118,6 +127,7 @@ def load_apt_profiles(force_reload: bool = False, ttl_seconds: int = _DEFAULT_PR
                 "aliases": group_info[name]["aliases"],
                 "nation_state": group_info[name]["nation_state"],
                 "nation_state_source": group_info[name]["nation_state_source"],
+                "attack_id": group_info[name]["attack_id"],
                 "techniques": techs,
                 "technique_count": len(techs),
                 "description": group_info[name]["description"],
@@ -176,6 +186,7 @@ def get_profile_summary(
         "aliases": profile["aliases"],
         "nation_state": profile["nation_state"],
         "nation_state_source": profile.get("nation_state_source", "unknown"),
+        "attack_id": profile.get("attack_id", ""),
         "technique_count": len(profile["techniques"]),
         "techniques": techniques,
     }
