@@ -8,9 +8,19 @@
 
 ### Changed
 - Rewrote `README.md` for accuracy, including an explicit project-status table, and aligned the operational docs with what the repository actually ships.
+- CI now runs `pip check` to verify installed dependency consistency.
+- Documentation now describes simulation as confidence-aware (predictions de-prioritised at LOW/UNKNOWN attribution) instead of hard-blocked, matching actual behaviour.
+
+### Fixed
+- Fixed a failing report test that still asserted the pre-redesign report header, which left the offline suite red.
+- Stopped embedding raw log content in deterministic evidence summaries, which previously leaked raw JSON into on-screen reports and Markdown/PDF exports.
+- Report scope (affected hosts, observed users, observed processes) is now derived from structured event data instead of fragile regex scraping of evidence text, so those fields populate reliably.
+- Wired the previously inert temporal-sequence signal into attribution confidence scoring (the `+0.10` bonus now applies when the observed technique order progresses through the ATT&CK kill chain).
+- Removed emoji from the attribution summary helper output.
 
 ### Removed
 - Removed stale build artifacts: a leftover test database, an empty `backend/tests` directory, and stray `__pycache__` directories.
+- Removed the unused `backend/ingestion/mock_generator.py` module (no importers).
 
 ## [1.4.0] - 2026-04-29
 
